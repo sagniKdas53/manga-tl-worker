@@ -1,0 +1,164 @@
+import os
+import re
+import logging
+
+logger = logging.getLogger("translation")
+
+
+def merge_ocr_regions(regions: list, reading_direction: str = "rtl") -> list:
+    """Merge OCR line-level detections into logical speech balloon groups.
+
+    Args:
+        regions: List of OCR region dicts with x, y, width, height, text keys
+        reading_direction: 'rtl' or 'ltr'
+
+    Returns:
+        Merged region list with concatenated text and union bounding boxes.
+    """
+    if not regions:
+        return []
+
+    # Get configuration threshold
+    try:
+        threshold_ratio = float(os.environ.get("OCR_MERGE_THRESHOLD", "0.50"))
+    except ValueError:
+        threshold_ratio = 0.50
+
+    # Compute average height and width to establish relative proximity guidelines
+    avg_height = sum(r["height"] for r in regions) / len(regions)
+    avg_width = sum(r["width"] for r in regions) / len(regions)
+
+    # For vertical Japanese text (typically reading_direction == "rtl"),
+    # the character/font size is represented by the line's width, so the vertical gap
+    # threshold should be scaled relative to avg_width rather than avg_height.
+    # For horizontal text (LTR), the character size is represented by the line's height.
+    if reading_direction == "rtl":
+        char_size_vertical = avg_width
+    else:
+        char_size_vertical = avg_height
+
+    max_vertical_gap = char_size_vertical * threshold_ratio
+    max_horizontal_gap = avg_width * threshold_ratio
+
+    n = len(regions)
+    adj = {i: [] for i in range(n)}
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            r1 = regions[i]
+            r2 = regions[j]
+
+            # Calculate horizontal gap
+            r1_x2 = r1["x"] + r1["width"]
+            r2_x2 = r2["x"] + r2["width"]
+            x_overlap = max(0, min(r1_x2, r2_x2) - max(r1["x"], r2["x"]))
+            x_dist = 0 if x_overlap > 0 else max(0, r2["x"] - r1_x2, r1["x"] - r2_x2)
+
+            # Calculate vertical gap
+            r1_y2 = r1["y"] + r1["height"]
+            r2_y2 = r2["y"] + r2["height"]
+            y_overlap = max(0, min(r1_y2, r2_y2) - max(r1["y"], r2["y"]))
+            y_dist = 0 if y_overlap > 0 else max(0, r2["y"] - r1_y2, r1["y"] - r2_y2)
+
+            # Conditions to merge:
+            # 1. Overlap both horizontally and vertically
+            # 2. Horizontal overlap and vertical proximity
+            # 3. Vertical overlap and horizontal proximity
+            # 4. Close diagonally
+            should_merge = False
+            if x_overlap > 0 and y_overlap > 0:
+                should_merge = True
+            elif x_overlap > 0 and y_dist <= max_vertical_gap:
+                should_merge = True
+            elif y_overlap > 0 and x_dist <= max_horizontal_gap:
+                should_merge = True
+            elif x_dist <= max_horizontal_gap and y_dist <= max_vertical_gap:
+                should_merge = True
+
+            if should_merge:
+                adj[i].append(j)
+                adj[j].append(i)
+
+    # Find connected components (clusters) using BFS
+    visited = [False] * n
+    components = []
+
+    for i in range(n):
+        if not visited[i]:
+            comp = []
+            queue = [i]
+            visited[i] = True
+            while queue:
+                curr = queue.pop(0)
+                comp.append(curr)
+                for neighbor in adj[curr]:
+                    if not visited[neighbor]:
+                        visited[neighbor] = True
+                        queue.append(neighbor)
+            components.append(comp)
+
+    # Merge each component into a single region
+    merged_regions = []
+    cjk_pattern = re.compile(r"[\u3040-\u9FFF\uF900-\uFAFF]")
+
+    for comp in components:
+        if len(comp) == 1:
+            merged_regions.append(regions[comp[0]])
+            continue
+
+        # Sort indices in reading order inside the component
+        if reading_direction == "rtl":
+            # Right-to-left: larger X first, then top-to-bottom (smaller Y)
+            comp.sort(key=lambda idx: (-regions[idx]["x"], regions[idx]["y"]))
+        else:
+            # Left-to-right: smaller X first, then top-to-bottom (smaller Y)
+            comp.sort(key=lambda idx: (regions[idx]["x"], regions[idx]["y"]))
+
+        texts_to_join = []
+        for idx in comp:
+            t = regions[idx]["text"].strip()
+            if t:
+                texts_to_join.append(t)
+
+        if not texts_to_join:
+            joined_text = ""
+        else:
+            # Check if any part contains CJK characters to decide on spacer-less join
+            has_cjk = any(cjk_pattern.search(t) for t in texts_to_join)
+            if has_cjk:
+                joined_text = "".join(texts_to_join)
+            else:
+                joined_text = " ".join(texts_to_join)
+
+        # Calculate union bounding box
+        x_min = min(regions[idx]["x"] for idx in comp)
+        y_min = min(regions[idx]["y"] for idx in comp)
+        x_max = max(regions[idx]["x"] + regions[idx]["width"] for idx in comp)
+        y_max = max(regions[idx]["y"] + regions[idx]["height"] for idx in comp)
+
+        # Average confidence
+        avg_conf = sum(regions[idx]["confidence"] for idx in comp) / len(comp)
+
+        # Most common detected language
+        langs = [regions[idx]["detectedLanguage"] for idx in comp]
+        most_common_lang = max(set(langs), key=langs.count)
+
+        merged_regions.append(
+            {
+                "text": joined_text,
+                "detectedLanguage": most_common_lang,
+                "confidence": float(avg_conf),
+                "rotation": 0.0,
+                "x": x_min,
+                "y": y_min,
+                "width": x_max - x_min,
+                "height": y_max - y_min,
+                "panelId": None,
+                "bubbleReadingOrder": 0,
+            }
+        )
+
+    logger.info(
+        f"[OCR] Merged {n} regions into {len(merged_regions)} regions (threshold={threshold_ratio})"
+    )
+    return merged_regions
