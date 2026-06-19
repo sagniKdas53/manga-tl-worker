@@ -4,6 +4,8 @@ import numpy as np
 import requests
 from PIL import Image
 import logging
+import re
+import json
 from functools import cmp_to_key
 
 from worker.config import CALLBACK_URL, BACKEND_HEADERS, logger
@@ -13,6 +15,51 @@ from worker.utils.text import detect_language
 from worker.services.ocr import parse_paddle_ocr_results
 from worker.services.layout import bubble_compare
 from worker.utils.lock import acquire_lock
+from worker.services.bubble_detector import detect_bubbles_yolo
+
+
+def sort_fragments_vertical(fragments, reading_direction="rtl"):
+    if not fragments:
+        return []
+    if len(fragments) == 1:
+        return fragments
+
+    # Calculate average width
+    avg_w = sum(f["width"] for f in fragments) / len(fragments)
+    col_threshold = max(20, avg_w * 0.7)
+
+    # Calculate center coordinates
+    for f in fragments:
+        f["cx"] = f["x"] + f["width"] / 2
+        f["cy"] = f["y"] + f["height"] / 2
+
+    # Sort by horizontal center
+    if reading_direction == "ltr":
+        sorted_by_x = sorted(fragments, key=lambda f: f["cx"])
+    else:  # default RTL: right to left
+        sorted_by_x = sorted(fragments, key=lambda f: -f["cx"])
+
+    # Group into columns
+    columns = []
+    for f in sorted_by_x:
+        placed = False
+        for col in columns:
+            col_avg_cx = sum(c["cx"] for c in col) / len(col)
+            if abs(f["cx"] - col_avg_cx) <= col_threshold:
+                col.append(f)
+                placed = True
+                break
+        if not placed:
+            columns.append([f])
+
+    # Sort within each column top-to-bottom (ascending cy)
+    sorted_fragments = []
+    for col in columns:
+        col.sort(key=lambda f: f["cy"])
+        sorted_fragments.extend(col)
+
+    return sorted_fragments
+
 
 
 def detect_background_color(img, x, y, w, h):
@@ -238,87 +285,266 @@ def process_ocr(job_data):
                 except Exception as e:
                     print(f"[OCR] Error decoding image for MangaOCR: {e}", flush=True)
 
+            img_h, img_w = img.shape[:2] if img is not None else (0, 0)
+            detected_bubbles = None
+            if img is not None:
+                try:
+                    detected_bubbles = detect_bubbles_yolo(img)
+                except Exception as e:
+                    print(f"[OCR] Failed to run YOLO bubble detection: {e}", flush=True)
+
             regions = []
-            for bbox, text, confidence in results:
-                # Scale bounding box coords back to original image dimensions
-                xs = [pt[0] * ocr_upscale for pt in bbox]
-                ys = [pt[1] * ocr_upscale for pt in bbox]
-                x, y = int(min(xs)), int(min(ys))
-                width, height = int(max(xs) - x), int(max(ys) - y)
+            is_yolo_active = (detected_bubbles is not None)
 
-                lang = detect_language(text)
-
-                # Run MangaOCR on bubbles with CJK (Japanese/Chinese) characters
-                is_manga_ocr = False
-                if (
-                    lang in ("ja", "zh-TW")
-                    and manga_ocr_reader is not None
-                    and img is not None
-                ):
-                    try:
-                        img_h, img_w = img.shape[:2]
-                        x1, y1 = max(0, x), max(0, y)
-                        x2, y2 = min(img_w, x + width), min(img_h, y + height)
-
-                        if (x2 - x1) > 0 and (y2 - y1) > 0:
-                            crop = img[y1:y2, x1:x2]
-                            crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-                            pil_img = Image.fromarray(crop_rgb)
-                            manga_text = manga_ocr_reader(pil_img)
-                            if manga_text and len(manga_text.strip()) > 0:
-                                print(
-                                    f"[OCR] Overwriting EasyOCR/PaddleOCR text '{text}' with MangaOCR '{manga_text}'",
-                                    flush=True,
-                                )
-                                text = manga_text
-                                is_manga_ocr = True
-                    except Exception as e:
-                        print(
-                            f"[OCR] MangaOCR failed on region ({x},{y},{width},{height}): {e}",
-                            flush=True,
-                        )
-
-                bg_color = detect_background_color(img, x, y, width, height)
-                bubble_box = detect_bubble_contour(img, x, y, width, height)
-
-                # Check for gutter leak (safety factor 2.5x)
-                if (
-                    bubble_box
-                    and bubble_box["width"] <= width * 2.5
-                    and bubble_box["height"] <= height * 2.5
-                ):
-                    bx, by, bw, bh = (
-                        bubble_box["x"],
-                        bubble_box["y"],
-                        bubble_box["width"],
-                        bubble_box["height"],
-                    )
-                else:
-                    bx, by, bw, bh = x, y, width, height
-
-                regions.append(
-                    {
+            if is_yolo_active:
+                # 1. Map raw PaddleOCR fragments to original image dimensions
+                raw_fragments = []
+                for bbox, text, confidence in results:
+                    xs = [pt[0] * ocr_upscale for pt in bbox]
+                    ys = [pt[1] * ocr_upscale for pt in bbox]
+                    x, y = int(min(xs)), int(min(ys))
+                    width, height = int(max(xs) - x), int(max(ys) - y)
+                    raw_fragments.append({
                         "text": text,
-                        "detectedLanguage": lang,
-                        "confidence": 1.0 if is_manga_ocr else float(confidence),
-                        "rotation": 0.0,
+                        "detectedLanguage": detect_language(text),
+                        "confidence": float(confidence),
                         "x": x,
                         "y": y,
                         "width": width,
-                        "height": height,
+                        "height": height
+                    })
+
+                # 2. Pre-generate binary masks for bubbles to compute exact pixel overlap
+                bubble_masks = []
+                for bubble in detected_bubbles:
+                    poly = np.array(bubble["mask_polygon"], dtype=np.int32)
+                    mask = np.zeros((img_h, img_w), dtype=np.uint8)
+                    cv2.fillPoly(mask, [poly], 255)
+                    bubble_masks.append(mask)
+
+                # 3. Assign each raw fragment to exactly one bubble by mask overlap
+                for frag in raw_fragments:
+                    best_b_idx = -1
+                    max_overlap = 0
+                    fx1 = max(0, min(img_w - 1, frag["x"]))
+                    fy1 = max(0, min(img_h - 1, frag["y"]))
+                    fx2 = max(0, min(img_w, frag["x"] + frag["width"]))
+                    fy2 = max(0, min(img_h, frag["y"] + frag["height"]))
+
+                    if fx2 > fx1 and fy2 > fy1:
+                        for b_idx, mask in enumerate(bubble_masks):
+                            overlap = np.sum(mask[fy1:fy2, fx1:fx2] > 0)
+                            if overlap > max_overlap:
+                                max_overlap = overlap
+                                best_b_idx = b_idx
+                    frag["bubble_idx"] = best_b_idx
+
+                # 4. Group fragments for each bubble and merge them
+                for b_idx, bubble in enumerate(detected_bubbles):
+                    bx, by, bw, bh = bubble["bbox"]
+                    assigned_frags = [f for f in raw_fragments if f.get("bubble_idx", -1) == b_idx]
+
+                    if not assigned_frags:
+                        # Attempt to run MangaOCR on the empty bubble crop to see if Paddle missed it!
+                        manga_text = None
+                        if manga_ocr_reader is not None:
+                            bx1 = max(0, bx)
+                            by1 = max(0, by)
+                            bx2 = min(img_w, bx + bw)
+                            by2 = min(img_h, by + bh)
+                            if (bx2 - bx1) > 0 and (by2 - by1) > 0:
+                                try:
+                                    crop = img[by1:by2, bx1:bx2]
+                                    crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                                    pil_img = Image.fromarray(crop_rgb)
+                                    manga_text = manga_ocr_reader(pil_img)
+                                except Exception:
+                                    pass
+                        if manga_text and len(manga_text.strip()) > 0:
+                            print(f"[OCR] Found text '{manga_text}' in YOLO bubble {b_idx} that PaddleOCR missed!", flush=True)
+                            regions.append({
+                                "text": manga_text,
+                                "detectedLanguage": detect_language(manga_text),
+                                "confidence": 0.8,
+                                "rotation": 0.0,
+                                "x": bx,
+                                "y": by,
+                                "width": bw,
+                                "height": bh,
+                                "panelId": None,
+                                "bubbleReadingOrder": 0,
+                                "backgroundColor": detect_background_color(img, bx, by, bw, bh),
+                                "bubbleX": bx,
+                                "bubbleY": by,
+                                "bubbleWidth": bw,
+                                "bubbleHeight": bh,
+                                "bubbleId": f"bubble_{b_idx}",
+                                "detectionConfidence": bubble["confidence"],
+                                "maskPolygon": json.dumps(bubble["mask_polygon"]),
+                                "safeTextX": bubble["safe_rect"][0],
+                                "safeTextY": bubble["safe_rect"][1],
+                                "safeTextW": bubble["safe_rect"][2],
+                                "safeTextH": bubble["safe_rect"][3],
+                            })
+                        continue
+
+                    # Sort vertical Japanese fragments right-to-left by column, and top-to-bottom within column
+                    sorted_frags = sort_fragments_vertical(assigned_frags, reading_direction)
+
+                    # Build concatenated text fallback
+                    cjk_pattern = re.compile(r"[\u3040-\u9FFF\uF900-\uFAFF]")
+                    texts_to_join = [f["text"].strip() for f in sorted_frags if f["text"].strip()]
+                    has_cjk = any(cjk_pattern.search(t) for t in texts_to_join)
+                    fallback_text = "".join(texts_to_join) if has_cjk else " ".join(texts_to_join)
+
+                    # Crop full bubble and run MangaOCR
+                    manga_text = None
+                    is_manga_ocr = False
+                    if manga_ocr_reader is not None:
+                        bx1 = max(0, bx)
+                        by1 = max(0, by)
+                        bx2 = min(img_w, bx + bw)
+                        by2 = min(img_h, by + bh)
+                        if (bx2 - bx1) > 0 and (by2 - by1) > 0:
+                            try:
+                                crop = img[by1:by2, bx1:bx2]
+                                crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                                pil_img = Image.fromarray(crop_rgb)
+                                manga_text = manga_ocr_reader(pil_img)
+                                if manga_text and len(manga_text.strip()) > 0:
+                                    is_manga_ocr = True
+                            except Exception as e:
+                                print(f"[OCR] MangaOCR failed on bubble {b_idx} crop: {e}", flush=True)
+
+                    final_text = manga_text if is_manga_ocr else fallback_text
+                    regions.append({
+                        "text": final_text,
+                        "detectedLanguage": detect_language(final_text) if final_text else "ja",
+                        "confidence": 1.0 if is_manga_ocr else float(np.mean([f["confidence"] for f in sorted_frags])),
+                        "rotation": 0.0,
+                        "x": bx,
+                        "y": by,
+                        "width": bw,
+                        "height": bh,
                         "panelId": None,
                         "bubbleReadingOrder": 0,
-                        "backgroundColor": bg_color,
+                        "backgroundColor": detect_background_color(img, bx, by, bw, bh),
                         "bubbleX": bx,
                         "bubbleY": by,
                         "bubbleWidth": bw,
                         "bubbleHeight": bh,
-                    }
-                )
+                        "bubbleId": f"bubble_{b_idx}",
+                        "detectionConfidence": bubble["confidence"],
+                        "maskPolygon": json.dumps(bubble["mask_polygon"]),
+                        "safeTextX": bubble["safe_rect"][0],
+                        "safeTextY": bubble["safe_rect"][1],
+                        "safeTextW": bubble["safe_rect"][2],
+                        "safeTextH": bubble["safe_rect"][3],
+                    })
 
-            from worker.services.merge_regions import merge_ocr_regions
+                # 5. Add unmatched fragments as separate standalone regions (SFX/sign)
+                for f in raw_fragments:
+                    if f.get("bubble_idx", -1) == -1:
+                        regions.append({
+                            "text": f["text"],
+                            "detectedLanguage": f["detectedLanguage"],
+                            "confidence": f["confidence"],
+                            "rotation": 0.0,
+                            "x": f["x"],
+                            "y": f["y"],
+                            "width": f["width"],
+                            "height": f["height"],
+                            "panelId": None,
+                            "bubbleReadingOrder": 0,
+                            "backgroundColor": detect_background_color(img, f["x"], f["y"], f["width"], f["height"]),
+                            "bubbleX": f["x"],
+                            "bubbleY": f["y"],
+                            "bubbleWidth": f["width"],
+                            "bubbleHeight": f["height"],
+                            "bubbleId": None,
+                            "detectionConfidence": 0.0,
+                            "maskPolygon": None,
+                            "safeTextX": f["x"],
+                            "safeTextY": f["y"],
+                            "safeTextW": f["width"],
+                            "safeTextH": f["height"],
+                        })
 
-            regions = merge_ocr_regions(regions, reading_direction)
+            else:
+                # Fallback mode (legacy OpenCV bubble search)
+                for bbox, text, confidence in results:
+                    xs = [pt[0] * ocr_upscale for pt in bbox]
+                    ys = [pt[1] * ocr_upscale for pt in bbox]
+                    x, y = int(min(xs)), int(min(ys))
+                    width, height = int(max(xs) - x), int(max(ys) - y)
+
+                    lang = detect_language(text)
+                    is_manga_ocr = False
+                    if (
+                        lang in ("ja", "zh-TW")
+                        and manga_ocr_reader is not None
+                        and img is not None
+                    ):
+                        try:
+                            x1, y1 = max(0, x), max(0, y)
+                            x2, y2 = min(img_w, x + width), min(img_h, y + height)
+                            if (x2 - x1) > 0 and (y2 - y1) > 0:
+                                crop = img[y1:y2, x1:x2]
+                                crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                                pil_img = Image.fromarray(crop_rgb)
+                                manga_text = manga_ocr_reader(pil_img)
+                                if manga_text and len(manga_text.strip()) > 0:
+                                    text = manga_text
+                                    is_manga_ocr = True
+                        except Exception:
+                            pass
+
+                    bg_color = detect_background_color(img, x, y, width, height)
+                    bubble_box = detect_bubble_contour(img, x, y, width, height)
+
+                    if (
+                        bubble_box
+                        and bubble_box["width"] <= width * 2.5
+                        and bubble_box["height"] <= height * 2.5
+                    ):
+                        bx, by, bw, bh = (
+                            bubble_box["x"],
+                            bubble_box["y"],
+                            bubble_box["width"],
+                            bubble_box["height"],
+                        )
+                    else:
+                        bx, by, bw, bh = x, y, width, height
+
+                    regions.append(
+                        {
+                            "text": text,
+                            "detectedLanguage": lang,
+                            "confidence": 1.0 if is_manga_ocr else float(confidence),
+                            "rotation": 0.0,
+                            "x": x,
+                            "y": y,
+                            "width": width,
+                            "height": height,
+                            "panelId": None,
+                            "bubbleReadingOrder": 0,
+                            "backgroundColor": bg_color,
+                            "bubbleX": bx,
+                            "bubbleY": by,
+                            "bubbleWidth": bw,
+                            "bubbleHeight": bh,
+                            "bubbleId": None,
+                            "detectionConfidence": 0.0,
+                            "maskPolygon": None,
+                            "safeTextX": bx,
+                            "safeTextY": by,
+                            "safeTextW": bw,
+                            "safeTextH": bh,
+                        }
+                    )
+
+                from worker.services.merge_regions import merge_ocr_regions
+                regions = merge_ocr_regions(regions, reading_direction)
 
             panel_regions_map = {}
             unmapped_regions = []

@@ -89,7 +89,22 @@ def process_translation(job_data):
         )
 
         # Build context string
+        import json
         context_str = build_context_string(image_info)
+
+        # Compile all page regions/bubbles into a single page manifest to pass as translation context
+        page_manifest_entries = []
+        for r in ocr_regions:
+            page_manifest_entries.append({
+                "id": r["id"],
+                "regionType": r.get("regionType") or r.get("region_type") or "speech",
+                "readingOrder": r.get("bubbleReadingOrder") or 0,
+                "conversationGroup": r.get("conversationId") or None,
+                "text": r["text"],
+            })
+        page_manifest_str = json.dumps(page_manifest_entries, ensure_ascii=False, indent=2)
+        manifest_context = f"Full Page Region Manifest (for conversational flow and context):\n{page_manifest_str}\n---\n"
+        context_str = manifest_context + context_str
 
         # Chunk regions respecting conversation grouping
         unmatched_chunks = chunk_regions_by_conversation(

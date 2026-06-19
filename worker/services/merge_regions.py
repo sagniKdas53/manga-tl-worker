@@ -143,6 +143,21 @@ def merge_ocr_regions(regions: list, reading_direction: str = "rtl") -> list:
         langs = [regions[idx]["detectedLanguage"] for idx in comp]
         most_common_lang = max(set(langs), key=langs.count)
 
+        # Get background color of the first region in the component
+        bg_color = regions[comp[0]].get("backgroundColor", "#ffffff")
+
+        # Bubble coordinates (union of bubble coordinates of elements in component)
+        bx_min = min(regions[idx].get("bubbleX", regions[idx]["x"]) for idx in comp)
+        by_min = min(regions[idx].get("bubbleY", regions[idx]["y"]) for idx in comp)
+        bx_max = max(regions[idx].get("bubbleX", regions[idx]["x"]) + regions[idx].get("bubbleWidth", regions[idx]["width"]) for idx in comp)
+        by_max = max(regions[idx].get("bubbleY", regions[idx]["y"]) + regions[idx].get("bubbleHeight", regions[idx]["height"]) for idx in comp)
+
+        # Safe area coordinates
+        sx_min = min(regions[idx].get("safeTextX", regions[idx]["x"]) for idx in comp)
+        sy_min = min(regions[idx].get("safeTextY", regions[idx]["y"]) for idx in comp)
+        sx_max = max(regions[idx].get("safeTextX", regions[idx]["x"]) + regions[idx].get("safeTextW", regions[idx]["width"]) for idx in comp)
+        sy_max = max(regions[idx].get("safeTextY", regions[idx]["y"]) + regions[idx].get("safeTextH", regions[idx]["height"]) for idx in comp)
+
         merged_regions.append(
             {
                 "text": joined_text,
@@ -155,6 +170,18 @@ def merge_ocr_regions(regions: list, reading_direction: str = "rtl") -> list:
                 "height": y_max - y_min,
                 "panelId": None,
                 "bubbleReadingOrder": 0,
+                "backgroundColor": bg_color,
+                "bubbleX": bx_min,
+                "bubbleY": by_min,
+                "bubbleWidth": bx_max - bx_min,
+                "bubbleHeight": by_max - by_min,
+                "bubbleId": None,
+                "detectionConfidence": 0.0,
+                "maskPolygon": None,
+                "safeTextX": sx_min,
+                "safeTextY": sy_min,
+                "safeTextW": sx_max - sx_min,
+                "safeTextH": sy_max - sy_min,
             }
         )
 

@@ -125,6 +125,334 @@ def draw_wrapped_text(
         draw.text((line_x, current_y), line, fill=text_color, font=font)
         current_y += line_heights[i]
 
+def fit_text_in_box_py(
+    text,
+    max_width,
+    max_height,
+    font_name,
+    default_font_size=16,
+    shape="rectangular",
+    box_x=0,
+    box_y=0,
+    mask_polygon=None,
+    bold=False,
+    italic=False
+):
+    clean_text = (text or "").replace("\r\n", "\n")
+    paragraphs = clean_text.split("\n")
+
+    polygon_points = None
+    if mask_polygon:
+        try:
+            import json
+            parsed = json.loads(mask_polygon) if isinstance(mask_polygon, str) else mask_polygon
+            if isinstance(parsed, list) and all(isinstance(p, list) and len(p) == 2 for p in parsed):
+                polygon_points = parsed
+        except Exception:
+            pass
+
+    def wrap_text_py(txt, f_size):
+        font = load_font(f_size, bold=bold, italic=italic)
+        if not font:
+            return {"lines": [txt], "line_centers": [box_x + max_width / 2]}
+
+        def get_text_width(t):
+            try:
+                return font.getlength(t)
+            except Exception:
+                try:
+                    bbox = font.getbbox(t)
+                    return bbox[2] - bbox[0]
+                except Exception:
+                    try:
+                        return font.getsize(t)[0]
+                    except Exception:
+                        return len(t) * (f_size * 0.5)
+
+        # 1. Polygon-aware wrapping
+        if polygon_points and len(polygon_points) > 0:
+            line_height = f_size * 1.2
+            
+            def try_wrap_for_n_lines(N):
+                tentative_lines = []
+                tentative_centers = []
+                line_index = 0
+                current_line = ""
+
+                def get_line_span(idx):
+                    total_text_height = N * line_height
+                    y_start = box_y + (max_height - total_text_height) / 2
+                    line_center_y = y_start + (idx + 0.5) * line_height
+
+                    intersects = []
+                    n_pts = len(polygon_points)
+                    for i in range(n_pts):
+                        p1 = polygon_points[i]
+                        p2 = polygon_points[(i + 1) % n_pts]
+                        x1, y1 = p1[0], p1[1]
+                        x2, y2 = p2[0], p2[1]
+                        if (y1 <= line_center_y < y2) or (y2 <= line_center_y < y1):
+                            ix = x1 + (line_center_y - y1) * (x2 - x1) / (y2 - y1)
+                            intersects.append(ix)
+
+                    if len(intersects) >= 2:
+                        intersects.sort()
+                        best_span = {"left": box_x, "right": box_x + max_width}
+                        max_overlap_len = 0
+                        for i in range(0, len(intersects) - 1, 2):
+                            segment_left = intersects[i]
+                            segment_right = intersects[i + 1]
+                            overlap_left = max(segment_left, box_x)
+                            overlap_right = min(segment_right, box_x + max_width)
+                            overlap_len = overlap_right - overlap_left
+                            if overlap_len > max_overlap_len:
+                                max_overlap_len = overlap_len
+                                best_span = {"left": overlap_left, "right": overlap_right}
+                        if max_overlap_len > 0:
+                            return best_span
+                    return {"left": box_x, "right": box_x + max_width}
+
+                for para in paragraphs:
+                    if not para:
+                        tentative_lines.append("")
+                        span = get_line_span(line_index)
+                        tentative_centers.append((span["left"] + span["right"]) / 2)
+                        line_index += 1
+                        if line_index >= N:
+                            return None
+                        continue
+
+                    words = para.split(" ")
+                    for word in words:
+                        span = get_line_span(line_index)
+                        allowed_w = (span["right"] - span["left"]) * 0.92
+                        word_width = get_text_width(word)
+
+                        if word_width > allowed_w:
+                            if current_line:
+                                tentative_lines.append(current_line)
+                                tentative_centers.append((span["left"] + span["right"]) / 2)
+                                line_index += 1
+                                if line_index >= N:
+                                    return None
+                            
+                            current_word_part = ""
+                            for char in word:
+                                test_part = current_word_part + char
+                                next_span = get_line_span(line_index)
+                                next_allowed_w = (next_span["right"] - next_span["left"]) * 0.92
+                                if get_text_width(test_part) > next_allowed_w and current_word_part:
+                                    tentative_lines.append(current_word_part)
+                                    tentative_centers.append((next_span["left"] + next_span["right"]) / 2)
+                                    current_word_part = char
+                                    line_index += 1
+                                    if line_index >= N:
+                                        return None
+                                else:
+                                    current_word_part = test_part
+                            current_line = current_word_part
+                        else:
+                            test_line = (current_line + " " + word) if current_line else word
+                            if get_text_width(test_line) > allowed_w and current_line:
+                                tentative_lines.append(current_line)
+                                tentative_centers.append((span["left"] + span["right"]) / 2)
+                                current_line = word
+                                line_index += 1
+                                if line_index >= N:
+                                    return None
+                            else:
+                                current_line = test_line
+
+                    if current_line:
+                        span = get_line_span(line_index)
+                        tentative_lines.append(current_line)
+                        tentative_centers.append((span["left"] + span["right"]) / 2)
+                        current_line = ""
+                        line_index += 1
+                        if line_index >= N and paragraphs.index(para) < len(paragraphs) - 1:
+                            return None
+
+                return {"lines": tentative_lines, "line_centers": tentative_centers} if len(tentative_lines) <= N else None
+
+            max_possible_lines = int(max_height // line_height)
+            if max_possible_lines > 0:
+                for N in range(1, max_possible_lines + 1):
+                    wrapped = try_wrap_for_n_lines(N)
+                    if wrapped is not None:
+                        return wrapped
+
+            # Fallback if fits failed
+            fallback_lines = []
+            fallback_centers = []
+            for para in paragraphs:
+                if not para:
+                    fallback_lines.append("")
+                    fallback_centers.append(box_x + max_width / 2)
+                    continue
+                words = para.split(" ")
+                current_line = ""
+                for word in words:
+                    test_line = (current_line + " " + word) if current_line else word
+                    if get_text_width(test_line) > max_width and current_line:
+                        fallback_lines.append(current_line)
+                        fallback_centers.append(box_x + max_width / 2)
+                        current_line = word
+                    else:
+                        current_line = test_line
+                if current_line:
+                    fallback_lines.append(current_line)
+                    fallback_centers.append(box_x + max_width / 2)
+            return {"lines": fallback_lines, "line_centers": fallback_centers}
+
+        # 2. Rectangular wrapping
+        if shape != "elliptical":
+            result_lines = []
+            for para in paragraphs:
+                if not para:
+                    result_lines.append("")
+                    continue
+                words = para.split(" ")
+                current_line = ""
+                for word in words:
+                    word_width = get_text_width(word)
+                    if word_width > max_width:
+                        if current_line:
+                            result_lines.append(current_line)
+                        current_word_part = ""
+                        for char in word:
+                            test_part = current_word_part + char
+                            if get_text_width(test_part) > max_width and current_word_part:
+                                result_lines.append(current_word_part)
+                                current_word_part = char
+                            else:
+                                current_word_part = test_part
+                        current_line = current_word_part
+                    else:
+                        test_line = (current_line + " " + word) if current_line else word
+                        if get_text_width(test_line) > max_width and current_line:
+                            result_lines.append(current_line)
+                            current_line = word
+                        else:
+                            current_line = test_line
+                if current_line:
+                    result_lines.append(current_line)
+            line_centers = [box_x + max_width / 2] * len(result_lines)
+            return {"lines": result_lines, "line_centers": line_centers}
+
+        # 3. Elliptical wrapping
+        line_height = f_size * 1.2
+        half_h = max_height / 2
+        half_w = max_width / 2
+
+        def try_wrap_for_n_lines_ellipse(N):
+            tentative_lines = []
+            current_line = ""
+            line_index = 0
+
+            def get_line_allowed_width(idx):
+                dy = (idx + 0.5 - N / 2) * line_height
+                ratio = dy / half_h
+                if abs(ratio) >= 1.0:
+                    return 0
+                import math
+                return 2.0 * half_w * math.sqrt(1.0 - ratio * ratio) * 0.92
+
+            for para in paragraphs:
+                if not para:
+                    tentative_lines.append("")
+                    line_index += 1
+                    if line_index >= N:
+                        return None
+                    continue
+
+                words = para.split(" ")
+                for word in words:
+                    allowed_w = get_line_allowed_width(line_index)
+                    if allowed_w <= 0:
+                        return None
+                    word_width = get_text_width(word)
+                    if word_width > allowed_w:
+                        if current_line:
+                            tentative_lines.append(current_line)
+                            line_index += 1
+                            if line_index >= N:
+                                return None
+                        current_word_part = ""
+                        for char in word:
+                            test_part = current_word_part + char
+                            current_allowed_w = get_line_allowed_width(line_index)
+                            if get_text_width(test_part) > current_allowed_w and current_word_part:
+                                tentative_lines.append(current_word_part)
+                                current_word_part = char
+                                line_index += 1
+                                if line_index >= N:
+                                    return None
+                            else:
+                                current_word_part = test_part
+                        current_line = current_word_part
+                    else:
+                        test_line = (current_line + " " + word) if current_line else word
+                        if get_text_width(test_line) > allowed_w and current_line:
+                            tentative_lines.append(current_line)
+                            current_line = word
+                            line_index += 1
+                            if line_index >= N:
+                                return None
+                        else:
+                            current_line = test_line
+
+                if current_line:
+                    tentative_lines.append(current_line)
+                    current_line = ""
+                    line_index += 1
+                    if line_index >= N and paragraphs.index(para) < len(paragraphs) - 1:
+                        return None
+            return tentative_lines if len(tentative_lines) <= N else None
+
+        max_possible_lines = int(max_height // line_height)
+        if max_possible_lines > 0:
+            for N in range(1, max_possible_lines + 1):
+                wrapped = try_wrap_for_n_lines_ellipse(N)
+                if wrapped is not None:
+                    return {"lines": wrapped, "line_centers": [box_x + max_width / 2] * len(wrapped)}
+
+        fallback_lines = []
+        for para in paragraphs:
+            if not para:
+                fallback_lines.append("")
+                continue
+            words = para.split(" ")
+            current_line = ""
+            for word in words:
+                test_line = (current_line + " " + word) if current_line else word
+                if get_text_width(test_line) > max_width and current_line:
+                    fallback_lines.append(current_line)
+                    current_line = word
+                else:
+                    current_line = test_line
+            if current_line:
+                fallback_lines.append(current_line)
+        return {"lines": fallback_lines, "line_centers": [box_x + max_width / 2] * len(fallback_lines)}
+
+    font_size = default_font_size
+    res = wrap_text_py(clean_text, font_size)
+    line_height_multiplier = 1.2
+
+    while font_size > 6:
+        total_height = len(res["lines"]) * font_size * line_height_multiplier
+        if total_height <= max_height:
+            return {"fontSize": font_size, "lines": res["lines"], "overflow": False, "lineCenters": res["line_centers"]}
+        font_size -= 1
+        res = wrap_text_py(clean_text, font_size)
+
+    total_height = len(res["lines"]) * font_size * line_height_multiplier
+    return {
+        "fontSize": 6,
+        "lines": res["lines"],
+        "overflow": total_height > max_height,
+        "lineCenters": res["line_centers"]
+    }
+
 
 def process_render(job_data):
     image_id = job_data["imageId"]
@@ -175,21 +503,65 @@ def process_render(job_data):
 
             bold = "bold" in font_weight.lower()
             italic = "italic" in font_style.lower()
+            mask_polygon = el.get("maskPolygon")
 
             # Masking
             if bg_color_hex and bg_color_hex.startswith("#"):
                 # Draw mask
-                if box_shape == "elliptical":
+                if mask_polygon:
+                    try:
+                        import json
+                        pts = json.loads(mask_polygon) if isinstance(mask_polygon, str) else mask_polygon
+                        if isinstance(pts, list) and len(pts) > 0:
+                            poly_tuples = [(float(p[0]), float(p[1])) for p in pts]
+                            draw.polygon(poly_tuples, fill=bg_color_hex)
+                    except Exception as e:
+                        print(f"[Render] Failed to draw polygon mask: {e}", flush=True)
+                elif box_shape == "elliptical":
                     draw.ellipse([ex, ey, ex + ew, ey + eh], fill=bg_color_hex)
                 else:
                     draw.rectangle([ex, ey, ex + ew, ey + eh], fill=bg_color_hex)
 
             # Draw Text
-            font = load_font(font_size, bold=bold, italic=italic)
+            fit = fit_text_in_box_py(
+                text,
+                ew - 8,
+                eh - 8,
+                font_name=el.get("font") or "Comic Neue",
+                default_font_size=int(font_size),
+                shape=("elliptical" if box_shape == "elliptical" else "rectangular"),
+                box_x=ex + 4,
+                box_y=ey + 4,
+                mask_polygon=mask_polygon,
+                bold=bold,
+                italic=italic
+            )
+
+            f_size = fit["fontSize"]
+            font = load_font(f_size, bold=bold, italic=italic)
             if font:
-                draw_wrapped_text(
-                    draw, text, font, text_color_hex, ex, ey, ew, eh, alignment="center"
-                )
+                line_height = f_size * 1.2
+                total_height = len(fit["lines"]) * line_height
+                start_y = ey + (eh - total_height) / 2
+                
+                for i, line in enumerate(fit["lines"]):
+                    line_center_x = fit["lineCenters"][i] if (fit.get("lineCenters") and i < len(fit["lineCenters"])) else (ex + ew / 2)
+                    
+                    try:
+                        line_width = font.getlength(line)
+                    except Exception:
+                        try:
+                            bbox = font.getbbox(line)
+                            line_width = bbox[2] - bbox[0]
+                        except Exception:
+                            try:
+                                line_width = font.getsize(line)[0]
+                            except Exception:
+                                line_width = len(line) * (f_size * 0.5)
+
+                    line_x = line_center_x - line_width / 2
+                    line_y = start_y + i * line_height
+                    draw.text((line_x, line_y), line, fill=text_color_hex, font=font)
 
         # Save flattened image
         out_buf = io.BytesIO()

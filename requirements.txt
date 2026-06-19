@@ -10,3 +10,4 @@ opencv-python-headless
 manga-ocr
 psutil
 easyocr
+onnxruntime
