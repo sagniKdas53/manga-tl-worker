@@ -1,6 +1,7 @@
 import json
 from worker.handlers.render import fit_text_in_box_py
 
+
 def test_fit_text_rectangular():
     text = "Hello world this is a test"
     # Try fitting in a 200x100 rectangular box
@@ -12,7 +13,7 @@ def test_fit_text_rectangular():
         default_font_size=16,
         shape="rectangular",
         box_x=10,
-        box_y=10
+        box_y=10,
     )
     assert "fontSize" in res
     assert len(res["lines"]) > 0
@@ -21,6 +22,7 @@ def test_fit_text_rectangular():
     # All centers should be box_x + max_width / 2 = 10 + 200/2 = 110
     for c in res["lineCenters"]:
         assert abs(c - 110.0) < 1e-3
+
 
 def test_fit_text_polygon():
     text = "Longer text inside a diamond speech bubble"
@@ -38,7 +40,7 @@ def test_fit_text_polygon():
         shape="rectangular",
         box_x=0,
         box_y=0,
-        mask_polygon=mask_polygon_str
+        mask_polygon=mask_polygon_str,
     )
     assert "fontSize" in res
     assert len(res["lines"]) > 0

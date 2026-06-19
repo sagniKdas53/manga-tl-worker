@@ -17,7 +17,7 @@ LANG_MAP = {
     "zh-tw": "Traditional Chinese",
     "zh-cn": "Simplified Chinese",
     "zh": "Chinese",
-    "auto": "Auto-Detect"
+    "auto": "Auto-Detect",
 }
 
 TRANSLATION_JSON_SCHEMA = {
@@ -590,8 +590,12 @@ def try_cloud_ai_vision(
             f"{req_prefix}Provider={provider} " f"Model={model} " f"Time={elapsed:.2f}s"
         )
         if logger.isEnabledFor(logging.TRACE):
-            logger.trace(f"{req_prefix}[TRACE] Vision Response Status: {res.status_code}")
-            logger.trace(f"{req_prefix}[TRACE] Vision Response Headers: {dict(res.headers)}")
+            logger.trace(
+                f"{req_prefix}[TRACE] Vision Response Status: {res.status_code}"
+            )
+            logger.trace(
+                f"{req_prefix}[TRACE] Vision Response Headers: {dict(res.headers)}"
+            )
 
         response_text = res.text
         logger.debug(f"{req_prefix}Raw Model Output:\n{response_text}")
@@ -715,7 +719,9 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
             with acquire_lock("local-llm"):
                 if logger.isEnabledFor(logging.TRACE):
                     logger.trace(f"{req_prefix}[TRACE] Local Request URL: {endpoint}")
-                    logger.trace(f"{req_prefix}[TRACE] Local Request Headers: {payload}")
+                    logger.trace(
+                        f"{req_prefix}[TRACE] Local Request Headers: {payload}"
+                    )
                 start = time.perf_counter()
                 res = requests.post(
                     endpoint,
@@ -730,8 +736,12 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
                 f"Time={elapsed:.2f}s"
             )
             if logger.isEnabledFor(logging.TRACE):
-                logger.trace(f"{req_prefix}[TRACE] Local Response Status: {res.status_code}")
-                logger.trace(f"{req_prefix}[TRACE] Local Response Headers: {dict(res.headers)}")
+                logger.trace(
+                    f"{req_prefix}[TRACE] Local Response Status: {res.status_code}"
+                )
+                logger.trace(
+                    f"{req_prefix}[TRACE] Local Response Headers: {dict(res.headers)}"
+                )
 
             response_text = res.text
             logger.debug(f"{req_prefix}Raw Model Output:\n{response_text}")
@@ -795,8 +805,12 @@ def try_deepl(text, target_lang="en", request_id=None):
             f"{req_prefix}Provider=deepl " f"Model=deepl " f"Time={elapsed:.2f}s"
         )
         if logger.isEnabledFor(logging.TRACE):
-            logger.trace(f"{req_prefix}[TRACE] DeepL Response Status: {res.status_code}")
-            logger.trace(f"{req_prefix}[TRACE] DeepL Response Headers: {dict(res.headers)}")
+            logger.trace(
+                f"{req_prefix}[TRACE] DeepL Response Status: {res.status_code}"
+            )
+            logger.trace(
+                f"{req_prefix}[TRACE] DeepL Response Headers: {dict(res.headers)}"
+            )
 
         if res.status_code == 200:
             res_json = res.json()
@@ -828,8 +842,12 @@ def try_google_translate(text, source_lang="auto", target_lang="en", request_id=
         elapsed = time.perf_counter() - start
         if logger.isEnabledFor(logging.TRACE):
             logger.trace(f"{req_prefix}[TRACE] Google Translate Request URL: {url}")
-            logger.trace(f"{req_prefix}[TRACE] Google Translate Response Status: {res.status_code}")
-            logger.trace(f"{req_prefix}[TRACE] Google Translate Response Headers: {dict(res.headers)}")
+            logger.trace(
+                f"{req_prefix}[TRACE] Google Translate Response Status: {res.status_code}"
+            )
+            logger.trace(
+                f"{req_prefix}[TRACE] Google Translate Response Headers: {dict(res.headers)}"
+            )
         logger.info(
             f"{req_prefix}Provider=google_translate "
             f"Model=free_api "
@@ -1025,7 +1043,12 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
 
 
 def translate_batch_llm(
-    unmatched_regions, context_str="", response_schema=None, request_id=None, source_lang="ja", target_lang="en"
+    unmatched_regions,
+    context_str="",
+    response_schema=None,
+    request_id=None,
+    source_lang="ja",
+    target_lang="en",
 ):
     if not request_id:
         request_id = str(uuid.uuid4())[:8]
@@ -1213,7 +1236,9 @@ Input:
                 if res:
                     return res
             except Exception as e:
-                logger.error(f"{req_prefix}Anthropic Direct batch translation failed: {e}")
+                logger.error(
+                    f"{req_prefix}Anthropic Direct batch translation failed: {e}"
+                )
 
         # Try Nvidia NIM
         if provider == "nvidia":
@@ -1316,7 +1341,13 @@ def try_local_vlm_vision(
 
 
 def translate_vlm_vision(
-    img_bytes, unmatched_regions, context_str="", response_schema=None, request_id=None, source_lang="ja", target_lang="en"
+    img_bytes,
+    unmatched_regions,
+    context_str="",
+    response_schema=None,
+    request_id=None,
+    source_lang="ja",
+    target_lang="en",
 ):
     if not img_bytes:
         return None

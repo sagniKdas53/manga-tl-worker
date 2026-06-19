@@ -28,7 +28,9 @@ def process_translation(job_data):
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(f"{req_prefix}Translation Inputs: job_data={job_data}")
 
-    logger.info(f"{req_prefix}Processing translation for image: {image_id} ({source_lang} -> {target_lang})")
+    logger.info(
+        f"{req_prefix}Processing translation for image: {image_id} ({source_lang} -> {target_lang})"
+    )
 
     try:
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
@@ -90,19 +92,26 @@ def process_translation(job_data):
 
         # Build context string
         import json
+
         context_str = build_context_string(image_info)
 
         # Compile all page regions/bubbles into a single page manifest to pass as translation context
         page_manifest_entries = []
         for r in ocr_regions:
-            page_manifest_entries.append({
-                "id": r["id"],
-                "regionType": r.get("regionType") or r.get("region_type") or "speech",
-                "readingOrder": r.get("bubbleReadingOrder") or 0,
-                "conversationGroup": r.get("conversationId") or None,
-                "text": r["text"],
-            })
-        page_manifest_str = json.dumps(page_manifest_entries, ensure_ascii=False, indent=2)
+            page_manifest_entries.append(
+                {
+                    "id": r["id"],
+                    "regionType": r.get("regionType")
+                    or r.get("region_type")
+                    or "speech",
+                    "readingOrder": r.get("bubbleReadingOrder") or 0,
+                    "conversationGroup": r.get("conversationId") or None,
+                    "text": r["text"],
+                }
+            )
+        page_manifest_str = json.dumps(
+            page_manifest_entries, ensure_ascii=False, indent=2
+        )
         manifest_context = f"Full Page Region Manifest (for conversational flow and context):\n{page_manifest_str}\n---\n"
         context_str = manifest_context + context_str
 
@@ -255,7 +264,10 @@ def process_translation(job_data):
                     lang = r["detectedLanguage"]
 
                     translated = translate_text(
-                        text, source_lang=source_lang, target_lang=target_lang, request_id=request_id
+                        text,
+                        source_lang=source_lang,
+                        target_lang=target_lang,
+                        request_id=request_id,
                     )
                     if translated and is_valid_translation(
                         text, translated, request_id=request_id
@@ -312,7 +324,9 @@ def process_translation(job_data):
 
     callback_payload = {"imageId": image_id, "translations": translations}
     if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"{req_prefix}Translation Outputs: callback_payload={callback_payload}")
+        logger.debug(
+            f"{req_prefix}Translation Outputs: callback_payload={callback_payload}"
+        )
     try:
         res = requests.post(
             f"{CALLBACK_URL}/translation",

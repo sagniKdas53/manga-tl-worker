@@ -61,7 +61,6 @@ def sort_fragments_vertical(fragments, reading_direction="rtl"):
     return sorted_fragments
 
 
-
 def detect_background_color(img, x, y, w, h):
     """Auto-detect the background color of a region using border pixels of the crop."""
     if img is None:
@@ -174,10 +173,10 @@ def process_ocr(job_data):
     # Defaults preserve the original behaviour (Japanese RTL) when not supplied.
     source_language = (job_data.get("sourceLanguage") or "ja").strip().lower()
     reading_direction = (job_data.get("readingDirection") or "rtl").strip().lower()
-    
+
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(f"[OCR] Inputs: job_data={job_data}")
-        
+
     print(
         f"[OCR] Processing image: {image_id} (lang={source_language}, direction={reading_direction})",
         flush=True,
@@ -294,7 +293,7 @@ def process_ocr(job_data):
                     print(f"[OCR] Failed to run YOLO bubble detection: {e}", flush=True)
 
             regions = []
-            is_yolo_active = (detected_bubbles is not None)
+            is_yolo_active = detected_bubbles is not None
 
             if is_yolo_active:
                 # 1. Map raw PaddleOCR fragments to original image dimensions
@@ -304,15 +303,17 @@ def process_ocr(job_data):
                     ys = [pt[1] * ocr_upscale for pt in bbox]
                     x, y = int(min(xs)), int(min(ys))
                     width, height = int(max(xs) - x), int(max(ys) - y)
-                    raw_fragments.append({
-                        "text": text,
-                        "detectedLanguage": detect_language(text),
-                        "confidence": float(confidence),
-                        "x": x,
-                        "y": y,
-                        "width": width,
-                        "height": height
-                    })
+                    raw_fragments.append(
+                        {
+                            "text": text,
+                            "detectedLanguage": detect_language(text),
+                            "confidence": float(confidence),
+                            "x": x,
+                            "y": y,
+                            "width": width,
+                            "height": height,
+                        }
+                    )
 
                 # 2. Pre-generate binary masks for bubbles to compute exact pixel overlap
                 bubble_masks = []
@@ -342,7 +343,9 @@ def process_ocr(job_data):
                 # 4. Group fragments for each bubble and merge them
                 for b_idx, bubble in enumerate(detected_bubbles):
                     bx, by, bw, bh = bubble["bbox"]
-                    assigned_frags = [f for f in raw_fragments if f.get("bubble_idx", -1) == b_idx]
+                    assigned_frags = [
+                        f for f in raw_fragments if f.get("bubble_idx", -1) == b_idx
+                    ]
 
                     if not assigned_frags:
                         # Attempt to run MangaOCR on the empty bubble crop to see if Paddle missed it!
@@ -361,41 +364,54 @@ def process_ocr(job_data):
                                 except Exception:
                                     pass
                         if manga_text and len(manga_text.strip()) > 0:
-                            print(f"[OCR] Found text '{manga_text}' in YOLO bubble {b_idx} that PaddleOCR missed!", flush=True)
-                            regions.append({
-                                "text": manga_text,
-                                "detectedLanguage": detect_language(manga_text),
-                                "confidence": 0.8,
-                                "rotation": 0.0,
-                                "x": bx,
-                                "y": by,
-                                "width": bw,
-                                "height": bh,
-                                "panelId": None,
-                                "bubbleReadingOrder": 0,
-                                "backgroundColor": detect_background_color(img, bx, by, bw, bh),
-                                "bubbleX": bx,
-                                "bubbleY": by,
-                                "bubbleWidth": bw,
-                                "bubbleHeight": bh,
-                                "bubbleId": f"bubble_{b_idx}",
-                                "detectionConfidence": bubble["confidence"],
-                                "maskPolygon": json.dumps(bubble["mask_polygon"]),
-                                "safeTextX": bubble["safe_rect"][0],
-                                "safeTextY": bubble["safe_rect"][1],
-                                "safeTextW": bubble["safe_rect"][2],
-                                "safeTextH": bubble["safe_rect"][3],
-                            })
+                            print(
+                                f"[OCR] Found text '{manga_text}' in YOLO bubble {b_idx} that PaddleOCR missed!",
+                                flush=True,
+                            )
+                            regions.append(
+                                {
+                                    "text": manga_text,
+                                    "detectedLanguage": detect_language(manga_text),
+                                    "confidence": 0.8,
+                                    "rotation": 0.0,
+                                    "x": bx,
+                                    "y": by,
+                                    "width": bw,
+                                    "height": bh,
+                                    "panelId": None,
+                                    "bubbleReadingOrder": 0,
+                                    "backgroundColor": detect_background_color(
+                                        img, bx, by, bw, bh
+                                    ),
+                                    "bubbleX": bx,
+                                    "bubbleY": by,
+                                    "bubbleWidth": bw,
+                                    "bubbleHeight": bh,
+                                    "bubbleId": f"bubble_{b_idx}",
+                                    "detectionConfidence": bubble["confidence"],
+                                    "maskPolygon": json.dumps(bubble["mask_polygon"]),
+                                    "safeTextX": bubble["safe_rect"][0],
+                                    "safeTextY": bubble["safe_rect"][1],
+                                    "safeTextW": bubble["safe_rect"][2],
+                                    "safeTextH": bubble["safe_rect"][3],
+                                }
+                            )
                         continue
 
                     # Sort vertical Japanese fragments right-to-left by column, and top-to-bottom within column
-                    sorted_frags = sort_fragments_vertical(assigned_frags, reading_direction)
+                    sorted_frags = sort_fragments_vertical(
+                        assigned_frags, reading_direction
+                    )
 
                     # Build concatenated text fallback
                     cjk_pattern = re.compile(r"[\u3040-\u9FFF\uF900-\uFAFF]")
-                    texts_to_join = [f["text"].strip() for f in sorted_frags if f["text"].strip()]
+                    texts_to_join = [
+                        f["text"].strip() for f in sorted_frags if f["text"].strip()
+                    ]
                     has_cjk = any(cjk_pattern.search(t) for t in texts_to_join)
-                    fallback_text = "".join(texts_to_join) if has_cjk else " ".join(texts_to_join)
+                    fallback_text = (
+                        "".join(texts_to_join) if has_cjk else " ".join(texts_to_join)
+                    )
 
                     # Crop full bubble and run MangaOCR
                     manga_text = None
@@ -414,61 +430,80 @@ def process_ocr(job_data):
                                 if manga_text and len(manga_text.strip()) > 0:
                                     is_manga_ocr = True
                             except Exception as e:
-                                print(f"[OCR] MangaOCR failed on bubble {b_idx} crop: {e}", flush=True)
+                                print(
+                                    f"[OCR] MangaOCR failed on bubble {b_idx} crop: {e}",
+                                    flush=True,
+                                )
 
                     final_text = manga_text if is_manga_ocr else fallback_text
-                    regions.append({
-                        "text": final_text,
-                        "detectedLanguage": detect_language(final_text) if final_text else "ja",
-                        "confidence": 1.0 if is_manga_ocr else float(np.mean([f["confidence"] for f in sorted_frags])),
-                        "rotation": 0.0,
-                        "x": bx,
-                        "y": by,
-                        "width": bw,
-                        "height": bh,
-                        "panelId": None,
-                        "bubbleReadingOrder": 0,
-                        "backgroundColor": detect_background_color(img, bx, by, bw, bh),
-                        "bubbleX": bx,
-                        "bubbleY": by,
-                        "bubbleWidth": bw,
-                        "bubbleHeight": bh,
-                        "bubbleId": f"bubble_{b_idx}",
-                        "detectionConfidence": bubble["confidence"],
-                        "maskPolygon": json.dumps(bubble["mask_polygon"]),
-                        "safeTextX": bubble["safe_rect"][0],
-                        "safeTextY": bubble["safe_rect"][1],
-                        "safeTextW": bubble["safe_rect"][2],
-                        "safeTextH": bubble["safe_rect"][3],
-                    })
+                    regions.append(
+                        {
+                            "text": final_text,
+                            "detectedLanguage": (
+                                detect_language(final_text) if final_text else "ja"
+                            ),
+                            "confidence": (
+                                1.0
+                                if is_manga_ocr
+                                else float(
+                                    np.mean([f["confidence"] for f in sorted_frags])
+                                )
+                            ),
+                            "rotation": 0.0,
+                            "x": bx,
+                            "y": by,
+                            "width": bw,
+                            "height": bh,
+                            "panelId": None,
+                            "bubbleReadingOrder": 0,
+                            "backgroundColor": detect_background_color(
+                                img, bx, by, bw, bh
+                            ),
+                            "bubbleX": bx,
+                            "bubbleY": by,
+                            "bubbleWidth": bw,
+                            "bubbleHeight": bh,
+                            "bubbleId": f"bubble_{b_idx}",
+                            "detectionConfidence": bubble["confidence"],
+                            "maskPolygon": json.dumps(bubble["mask_polygon"]),
+                            "safeTextX": bubble["safe_rect"][0],
+                            "safeTextY": bubble["safe_rect"][1],
+                            "safeTextW": bubble["safe_rect"][2],
+                            "safeTextH": bubble["safe_rect"][3],
+                        }
+                    )
 
                 # 5. Add unmatched fragments as separate standalone regions (SFX/sign)
                 for f in raw_fragments:
                     if f.get("bubble_idx", -1) == -1:
-                        regions.append({
-                            "text": f["text"],
-                            "detectedLanguage": f["detectedLanguage"],
-                            "confidence": f["confidence"],
-                            "rotation": 0.0,
-                            "x": f["x"],
-                            "y": f["y"],
-                            "width": f["width"],
-                            "height": f["height"],
-                            "panelId": None,
-                            "bubbleReadingOrder": 0,
-                            "backgroundColor": detect_background_color(img, f["x"], f["y"], f["width"], f["height"]),
-                            "bubbleX": f["x"],
-                            "bubbleY": f["y"],
-                            "bubbleWidth": f["width"],
-                            "bubbleHeight": f["height"],
-                            "bubbleId": None,
-                            "detectionConfidence": 0.0,
-                            "maskPolygon": None,
-                            "safeTextX": f["x"],
-                            "safeTextY": f["y"],
-                            "safeTextW": f["width"],
-                            "safeTextH": f["height"],
-                        })
+                        regions.append(
+                            {
+                                "text": f["text"],
+                                "detectedLanguage": f["detectedLanguage"],
+                                "confidence": f["confidence"],
+                                "rotation": 0.0,
+                                "x": f["x"],
+                                "y": f["y"],
+                                "width": f["width"],
+                                "height": f["height"],
+                                "panelId": None,
+                                "bubbleReadingOrder": 0,
+                                "backgroundColor": detect_background_color(
+                                    img, f["x"], f["y"], f["width"], f["height"]
+                                ),
+                                "bubbleX": f["x"],
+                                "bubbleY": f["y"],
+                                "bubbleWidth": f["width"],
+                                "bubbleHeight": f["height"],
+                                "bubbleId": None,
+                                "detectionConfidence": 0.0,
+                                "maskPolygon": None,
+                                "safeTextX": f["x"],
+                                "safeTextY": f["y"],
+                                "safeTextW": f["width"],
+                                "safeTextH": f["height"],
+                            }
+                        )
 
             else:
                 # Fallback mode (legacy OpenCV bubble search)
@@ -544,6 +579,7 @@ def process_ocr(job_data):
                     )
 
                 from worker.services.merge_regions import merge_ocr_regions
+
                 regions = merge_ocr_regions(regions, reading_direction)
 
             panel_regions_map = {}

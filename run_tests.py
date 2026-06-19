@@ -1,8 +1,9 @@
 import sys
 import os
+
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-if 'tests' in sys.modules:
-    del sys.modules['tests']
+if "tests" in sys.modules:
+    del sys.modules["tests"]
 from tests.test_ocr_shaping_color import (
     test_detect_background_color,
     test_detect_bubble_contour,

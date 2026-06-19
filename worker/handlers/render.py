@@ -125,6 +125,7 @@ def draw_wrapped_text(
         draw.text((line_x, current_y), line, fill=text_color, font=font)
         current_y += line_heights[i]
 
+
 def fit_text_in_box_py(
     text,
     max_width,
@@ -136,7 +137,7 @@ def fit_text_in_box_py(
     box_y=0,
     mask_polygon=None,
     bold=False,
-    italic=False
+    italic=False,
 ):
     clean_text = (text or "").replace("\r\n", "\n")
     paragraphs = clean_text.split("\n")
@@ -145,8 +146,15 @@ def fit_text_in_box_py(
     if mask_polygon:
         try:
             import json
-            parsed = json.loads(mask_polygon) if isinstance(mask_polygon, str) else mask_polygon
-            if isinstance(parsed, list) and all(isinstance(p, list) and len(p) == 2 for p in parsed):
+
+            parsed = (
+                json.loads(mask_polygon)
+                if isinstance(mask_polygon, str)
+                else mask_polygon
+            )
+            if isinstance(parsed, list) and all(
+                isinstance(p, list) and len(p) == 2 for p in parsed
+            ):
                 polygon_points = parsed
         except Exception:
             pass
@@ -172,7 +180,7 @@ def fit_text_in_box_py(
         # 1. Polygon-aware wrapping
         if polygon_points and len(polygon_points) > 0:
             line_height = f_size * 1.2
-            
+
             def try_wrap_for_n_lines(N):
                 tentative_lines = []
                 tentative_centers = []
@@ -207,7 +215,10 @@ def fit_text_in_box_py(
                             overlap_len = overlap_right - overlap_left
                             if overlap_len > max_overlap_len:
                                 max_overlap_len = overlap_len
-                                best_span = {"left": overlap_left, "right": overlap_right}
+                                best_span = {
+                                    "left": overlap_left,
+                                    "right": overlap_right,
+                                }
                         if max_overlap_len > 0:
                             return best_span
                     return {"left": box_x, "right": box_x + max_width}
@@ -231,19 +242,28 @@ def fit_text_in_box_py(
                         if word_width > allowed_w:
                             if current_line:
                                 tentative_lines.append(current_line)
-                                tentative_centers.append((span["left"] + span["right"]) / 2)
+                                tentative_centers.append(
+                                    (span["left"] + span["right"]) / 2
+                                )
                                 line_index += 1
                                 if line_index >= N:
                                     return None
-                            
+
                             current_word_part = ""
                             for char in word:
                                 test_part = current_word_part + char
                                 next_span = get_line_span(line_index)
-                                next_allowed_w = (next_span["right"] - next_span["left"]) * 0.92
-                                if get_text_width(test_part) > next_allowed_w and current_word_part:
+                                next_allowed_w = (
+                                    next_span["right"] - next_span["left"]
+                                ) * 0.92
+                                if (
+                                    get_text_width(test_part) > next_allowed_w
+                                    and current_word_part
+                                ):
                                     tentative_lines.append(current_word_part)
-                                    tentative_centers.append((next_span["left"] + next_span["right"]) / 2)
+                                    tentative_centers.append(
+                                        (next_span["left"] + next_span["right"]) / 2
+                                    )
                                     current_word_part = char
                                     line_index += 1
                                     if line_index >= N:
@@ -252,10 +272,14 @@ def fit_text_in_box_py(
                                     current_word_part = test_part
                             current_line = current_word_part
                         else:
-                            test_line = (current_line + " " + word) if current_line else word
+                            test_line = (
+                                (current_line + " " + word) if current_line else word
+                            )
                             if get_text_width(test_line) > allowed_w and current_line:
                                 tentative_lines.append(current_line)
-                                tentative_centers.append((span["left"] + span["right"]) / 2)
+                                tentative_centers.append(
+                                    (span["left"] + span["right"]) / 2
+                                )
                                 current_line = word
                                 line_index += 1
                                 if line_index >= N:
@@ -269,10 +293,17 @@ def fit_text_in_box_py(
                         tentative_centers.append((span["left"] + span["right"]) / 2)
                         current_line = ""
                         line_index += 1
-                        if line_index >= N and paragraphs.index(para) < len(paragraphs) - 1:
+                        if (
+                            line_index >= N
+                            and paragraphs.index(para) < len(paragraphs) - 1
+                        ):
                             return None
 
-                return {"lines": tentative_lines, "line_centers": tentative_centers} if len(tentative_lines) <= N else None
+                return (
+                    {"lines": tentative_lines, "line_centers": tentative_centers}
+                    if len(tentative_lines) <= N
+                    else None
+                )
 
             max_possible_lines = int(max_height // line_height)
             if max_possible_lines > 0:
@@ -321,14 +352,19 @@ def fit_text_in_box_py(
                         current_word_part = ""
                         for char in word:
                             test_part = current_word_part + char
-                            if get_text_width(test_part) > max_width and current_word_part:
+                            if (
+                                get_text_width(test_part) > max_width
+                                and current_word_part
+                            ):
                                 result_lines.append(current_word_part)
                                 current_word_part = char
                             else:
                                 current_word_part = test_part
                         current_line = current_word_part
                     else:
-                        test_line = (current_line + " " + word) if current_line else word
+                        test_line = (
+                            (current_line + " " + word) if current_line else word
+                        )
                         if get_text_width(test_line) > max_width and current_line:
                             result_lines.append(current_line)
                             current_line = word
@@ -355,6 +391,7 @@ def fit_text_in_box_py(
                 if abs(ratio) >= 1.0:
                     return 0
                 import math
+
                 return 2.0 * half_w * math.sqrt(1.0 - ratio * ratio) * 0.92
 
             for para in paragraphs:
@@ -381,7 +418,10 @@ def fit_text_in_box_py(
                         for char in word:
                             test_part = current_word_part + char
                             current_allowed_w = get_line_allowed_width(line_index)
-                            if get_text_width(test_part) > current_allowed_w and current_word_part:
+                            if (
+                                get_text_width(test_part) > current_allowed_w
+                                and current_word_part
+                            ):
                                 tentative_lines.append(current_word_part)
                                 current_word_part = char
                                 line_index += 1
@@ -391,7 +431,9 @@ def fit_text_in_box_py(
                                 current_word_part = test_part
                         current_line = current_word_part
                     else:
-                        test_line = (current_line + " " + word) if current_line else word
+                        test_line = (
+                            (current_line + " " + word) if current_line else word
+                        )
                         if get_text_width(test_line) > allowed_w and current_line:
                             tentative_lines.append(current_line)
                             current_line = word
@@ -414,7 +456,10 @@ def fit_text_in_box_py(
             for N in range(1, max_possible_lines + 1):
                 wrapped = try_wrap_for_n_lines_ellipse(N)
                 if wrapped is not None:
-                    return {"lines": wrapped, "line_centers": [box_x + max_width / 2] * len(wrapped)}
+                    return {
+                        "lines": wrapped,
+                        "line_centers": [box_x + max_width / 2] * len(wrapped),
+                    }
 
         fallback_lines = []
         for para in paragraphs:
@@ -432,7 +477,10 @@ def fit_text_in_box_py(
                     current_line = test_line
             if current_line:
                 fallback_lines.append(current_line)
-        return {"lines": fallback_lines, "line_centers": [box_x + max_width / 2] * len(fallback_lines)}
+        return {
+            "lines": fallback_lines,
+            "line_centers": [box_x + max_width / 2] * len(fallback_lines),
+        }
 
     font_size = default_font_size
     res = wrap_text_py(clean_text, font_size)
@@ -441,7 +489,12 @@ def fit_text_in_box_py(
     while font_size > 6:
         total_height = len(res["lines"]) * font_size * line_height_multiplier
         if total_height <= max_height:
-            return {"fontSize": font_size, "lines": res["lines"], "overflow": False, "lineCenters": res["line_centers"]}
+            return {
+                "fontSize": font_size,
+                "lines": res["lines"],
+                "overflow": False,
+                "lineCenters": res["line_centers"],
+            }
         font_size -= 1
         res = wrap_text_py(clean_text, font_size)
 
@@ -450,7 +503,7 @@ def fit_text_in_box_py(
         "fontSize": 6,
         "lines": res["lines"],
         "overflow": total_height > max_height,
-        "lineCenters": res["line_centers"]
+        "lineCenters": res["line_centers"],
     }
 
 
@@ -511,7 +564,12 @@ def process_render(job_data):
                 if mask_polygon:
                     try:
                         import json
-                        pts = json.loads(mask_polygon) if isinstance(mask_polygon, str) else mask_polygon
+
+                        pts = (
+                            json.loads(mask_polygon)
+                            if isinstance(mask_polygon, str)
+                            else mask_polygon
+                        )
                         if isinstance(pts, list) and len(pts) > 0:
                             poly_tuples = [(float(p[0]), float(p[1])) for p in pts]
                             draw.polygon(poly_tuples, fill=bg_color_hex)
@@ -534,7 +592,7 @@ def process_render(job_data):
                 box_y=ey + 4,
                 mask_polygon=mask_polygon,
                 bold=bold,
-                italic=italic
+                italic=italic,
             )
 
             f_size = fit["fontSize"]
@@ -543,10 +601,14 @@ def process_render(job_data):
                 line_height = f_size * 1.2
                 total_height = len(fit["lines"]) * line_height
                 start_y = ey + (eh - total_height) / 2
-                
+
                 for i, line in enumerate(fit["lines"]):
-                    line_center_x = fit["lineCenters"][i] if (fit.get("lineCenters") and i < len(fit["lineCenters"])) else (ex + ew / 2)
-                    
+                    line_center_x = (
+                        fit["lineCenters"][i]
+                        if (fit.get("lineCenters") and i < len(fit["lineCenters"]))
+                        else (ex + ew / 2)
+                    )
+
                     try:
                         line_width = font.getlength(line)
                     except Exception:

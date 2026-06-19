@@ -6,16 +6,18 @@ from minio import Minio
 # Configure structured logging
 logging.TRACE = 5
 logging.addLevelName(logging.TRACE, "TRACE")
+
+
 def trace(self, message, *args, **kws):
     if self.isEnabledFor(logging.TRACE):
         self._log(logging.TRACE, message, args, **kws)
+
+
 logging.Logger.trace = trace
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 level = logging.TRACE if LOG_LEVEL == "TRACE" else getattr(logging, LOG_LEVEL)
-logging.basicConfig(
-    level=level, format="%(asctime)s [%(levelname)s] %(message)s"
-)
+logging.basicConfig(level=level, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("translation")
 
 # Connection Configs
@@ -67,6 +69,7 @@ if not YOLO_MODEL_PATH:
 YOLO_CONF_THRESHOLD = float(os.environ.get("YOLO_CONF_THRESHOLD", "0.25"))
 YOLO_INPUT_SIZE = int(os.environ.get("YOLO_INPUT_SIZE", "1280"))
 YOLO_MASK_EROSION = int(os.environ.get("YOLO_MASK_EROSION", "5"))
-YOLO_PINNED_CHECKSUM = "f081f02a40601e3a1d4f5bf4e1a5a1a84340a0e52212d170e3bc5b679df97dcf"
+YOLO_PINNED_CHECKSUM = (
+    "f081f02a40601e3a1d4f5bf4e1a5a1a84340a0e52212d170e3bc5b679df97dcf"
+)
 YOLO_FALLBACK_MODE = os.environ.get("YOLO_FALLBACK_MODE", "opencv").lower()
-

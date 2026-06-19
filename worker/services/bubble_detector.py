@@ -15,6 +15,7 @@ from worker.config import (
 
 _ort_session = None
 
+
 def get_sha256(file_path):
     if not os.path.exists(file_path):
         return None
@@ -23,6 +24,7 @@ def get_sha256(file_path):
         while chunk := f.read(8192):
             h.update(chunk)
     return h.hexdigest()
+
 
 def get_ort_session():
     global _ort_session
@@ -44,7 +46,10 @@ def get_ort_session():
 
     try:
         import onnxruntime as ort
-        logger.info(f"[YOLO] Loading ONNX model from {YOLO_MODEL_PATH} via ONNX Runtime...")
+
+        logger.info(
+            f"[YOLO] Loading ONNX model from {YOLO_MODEL_PATH} via ONNX Runtime..."
+        )
         # Load ONNX session (CPU by default)
         _ort_session = ort.InferenceSession(
             YOLO_MODEL_PATH, providers=["CPUExecutionProvider"]
@@ -54,6 +59,7 @@ def get_ort_session():
     except Exception as e:
         logger.error(f"[YOLO] Failed to load ONNX model via ONNX Runtime: {e}")
         return None
+
 
 def letterbox(img, new_shape=(1280, 1280), color=(114, 114, 114)):
     shape = img.shape[:2]  # [height, width]
@@ -79,6 +85,7 @@ def letterbox(img, new_shape=(1280, 1280), color=(114, 114, 114)):
     )
     return img, r, (dw, dh), new_unpad
 
+
 def detect_bubbles_yolo(img):
     """
     Detect speech bubbles once per page using YOLO11n-seg via ONNX Runtime.
@@ -91,13 +98,16 @@ def detect_bubbles_yolo(img):
     """
     session = get_ort_session()
     if session is None:
-        logger.warning("[YOLO] Falling back to OpenCV bubble contour detection because ONNX model loading failed.")
+        logger.warning(
+            "[YOLO] Falling back to OpenCV bubble contour detection because ONNX model loading failed."
+        )
         return None
 
     if img is None:
         return []
 
     import time
+
     start_time = time.perf_counter()
 
     orig_h, orig_w = img.shape[:2]
@@ -142,12 +152,16 @@ def detect_bubbles_yolo(img):
             coefficients.append(preds[5:, i].tolist())
 
     if not boxes:
-        logger.info(f"[YOLO] No bubbles detected. Inference took {time.perf_counter() - start_time:.3f}s")
+        logger.info(
+            f"[YOLO] No bubbles detected. Inference took {time.perf_counter() - start_time:.3f}s"
+        )
         return []
 
     indices = cv2.dnn.NMSBoxes(boxes, scores, YOLO_CONF_THRESHOLD, 0.45)
     if len(indices) == 0:
-        logger.info(f"[YOLO] 0 bubbles survived NMS. Inference took {time.perf_counter() - start_time:.3f}s")
+        logger.info(
+            f"[YOLO] 0 bubbles survived NMS. Inference took {time.perf_counter() - start_time:.3f}s"
+        )
         return []
 
     indices = np.array(indices).flatten().tolist()
