@@ -8,7 +8,7 @@ import re
 import json
 from functools import cmp_to_key
 
-from worker.config import CALLBACK_URL, BACKEND_HEADERS, logger
+from worker.config import CALLBACK_URL, BACKEND_HEADERS, logger, YOLO_MASK_EROSION
 from worker.model_manager import model_manager
 from worker.utils.image import downscale_for_ocr, calculate_overlap_area, download_image
 from worker.utils.text import detect_language
