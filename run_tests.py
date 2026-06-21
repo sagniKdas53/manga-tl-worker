@@ -7,6 +7,8 @@ if "tests" in sys.modules:
 from tests.test_ocr_shaping_color import (
     test_detect_background_color,
     test_detect_bubble_contour,
+    test_detect_background_color_poly,
+    test_split_polygon_and_safe_area,
 )
 from tests.test_typesetting import (
     test_fit_text_rectangular,
@@ -27,6 +29,22 @@ try:
     print("test_detect_bubble_contour passed!")
 except AssertionError as e:
     print("test_detect_bubble_contour failed!", e)
+    sys.exit(1)
+
+print("Running test_detect_background_color_poly...")
+try:
+    test_detect_background_color_poly()
+    print("test_detect_background_color_poly passed!")
+except AssertionError as e:
+    print("test_detect_background_color_poly failed!", e)
+    sys.exit(1)
+
+print("Running test_split_polygon_and_safe_area...")
+try:
+    test_split_polygon_and_safe_area()
+    print("test_split_polygon_and_safe_area passed!")
+except AssertionError as e:
+    print("test_split_polygon_and_safe_area failed!", e)
     sys.exit(1)
 
 print("Running test_fit_text_rectangular...")

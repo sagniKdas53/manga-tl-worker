@@ -100,6 +100,72 @@ def detect_background_color(img, x, y, w, h):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def detect_background_color_poly(img, mask_polygon):
+    """Detect the background color of a region using its polygon mask.
+    If it fails, defaults to white (#ffffff).
+    """
+    if img is None or not mask_polygon:
+        return "#ffffff"
+    try:
+        if isinstance(mask_polygon, str):
+            pts = json.loads(mask_polygon)
+        else:
+            pts = mask_polygon
+        if not isinstance(pts, list) or len(pts) < 3:
+            return "#ffffff"
+
+        h, w = img.shape[:2]
+        # Create mask
+        mask = np.zeros((h, w), dtype=np.uint8)
+        poly = np.array(pts, dtype=np.int32)
+        cv2.fillPoly(mask, [poly], 255)
+
+        # Erode mask slightly to avoid sampling bubble borders
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        mask_eroded = cv2.erode(mask, kernel, iterations=1)
+        if cv2.countNonZero(mask_eroded) > 0:
+            mask = mask_eroded
+
+        pixels = img[mask == 255]
+        if len(pixels) == 0:
+            return "#ffffff"
+
+        median_bgr = np.median(pixels, axis=0)
+        r, g, b = int(median_bgr[2]), int(median_bgr[1]), int(median_bgr[0])
+        return f"#{r:02x}{g:02x}{b:02x}"
+    except Exception as e:
+        print(f"[OCR] Error detecting color from poly: {e}", flush=True)
+        return "#ffffff"
+
+
+def get_split_polygon(mask, bbox, img_w, img_h, margin=20):
+    """Crop the main mask to bbox with a margin, find and return its simplified contour."""
+    if mask is None or not bbox:
+        return None
+    try:
+        rx, ry, rw, rh = bbox
+        x1 = max(0, rx - margin)
+        y1 = max(0, ry - margin)
+        x2 = min(img_w, rx + rw + margin)
+        y2 = min(img_h, ry + rh + margin)
+
+        crop_mask = np.zeros_like(mask)
+        crop_mask[y1:y2, x1:x2] = mask[y1:y2, x1:x2]
+
+        contours, _ = cv2.findContours(crop_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+
+        contour = max(contours, key=cv2.contourArea)
+        epsilon = 0.002 * cv2.arcLength(contour, True)
+        simplified = cv2.approxPolyDP(contour, epsilon, True)
+        return [[int(pt[0][0]), int(pt[0][1])] for pt in simplified]
+    except Exception as e:
+        print(f"[OCR] Error splitting polygon: {e}", flush=True)
+        return None
+
+
+
 def detect_bubble_contour(img, ocr_x, ocr_y, ocr_w, ocr_h):
     """Find the contour of the speech bubble containing the OCR region and return its bounding box."""
     if img is None:
@@ -343,6 +409,7 @@ def process_ocr(job_data):
                 # 4. Group fragments for each bubble and merge them
                 for b_idx, bubble in enumerate(detected_bubbles):
                     bx, by, bw, bh = bubble["bbox"]
+                    bubble_mask = bubble_masks[b_idx]
                     assigned_frags = [
                         f for f in raw_fragments if f.get("bubble_idx", -1) == b_idx
                     ]
@@ -380,8 +447,8 @@ def process_ocr(job_data):
                                     "height": bh,
                                     "panelId": None,
                                     "bubbleReadingOrder": 0,
-                                    "backgroundColor": detect_background_color(
-                                        img, bx, by, bw, bh
+                                    "backgroundColor": detect_background_color_poly(
+                                        img, bubble["mask_polygon"]
                                     ),
                                     "bubbleX": bx,
                                     "bubbleY": by,
@@ -398,80 +465,85 @@ def process_ocr(job_data):
                             )
                         continue
 
-                    # Sort vertical Japanese fragments right-to-left by column, and top-to-bottom within column
-                    sorted_frags = sort_fragments_vertical(
-                        assigned_frags, reading_direction
-                    )
+                    # Run proximity merging inside the bubble to separate multiple semantic bubbles
+                    from worker.services.merge_regions import merge_ocr_regions
+                    merged_bubble_regions = merge_ocr_regions(assigned_frags, reading_direction)
 
-                    # Build concatenated text fallback
-                    cjk_pattern = re.compile(r"[\u3040-\u9FFF\uF900-\uFAFF]")
-                    texts_to_join = [
-                        f["text"].strip() for f in sorted_frags if f["text"].strip()
-                    ]
-                    has_cjk = any(cjk_pattern.search(t) for t in texts_to_join)
-                    fallback_text = (
-                        "".join(texts_to_join) if has_cjk else " ".join(texts_to_join)
-                    )
+                    for r_sub in merged_bubble_regions:
+                        # 1. Get split polygon for this merged region
+                        r_box = [r_sub["x"], r_sub["y"], r_sub["width"], r_sub["height"]]
+                        poly_pts = get_split_polygon(bubble_mask, r_box, img_w, img_h, margin=20)
+                        if not poly_pts:
+                            poly_pts = bubble["mask_polygon"]
 
-                    # Crop full bubble and run MangaOCR
-                    manga_text = None
-                    is_manga_ocr = False
-                    if manga_ocr_reader is not None:
-                        bx1 = max(0, bx)
-                        by1 = max(0, by)
-                        bx2 = min(img_w, bx + bw)
-                        by2 = min(img_h, by + bh)
-                        if (bx2 - bx1) > 0 and (by2 - by1) > 0:
-                            try:
-                                crop = img[by1:by2, bx1:bx2]
-                                crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-                                pil_img = Image.fromarray(crop_rgb)
-                                manga_text = manga_ocr_reader(pil_img)
-                                if manga_text and len(manga_text.strip()) > 0:
-                                    is_manga_ocr = True
-                            except Exception as e:
-                                print(
-                                    f"[OCR] MangaOCR failed on bubble {b_idx} crop: {e}",
-                                    flush=True,
-                                )
+                        # 2. Bounding box of the split polygon
+                        sp_x, sp_y, sp_w, sp_h = cv2.boundingRect(np.array(poly_pts, dtype=np.int32))
 
-                    final_text = manga_text if is_manga_ocr else fallback_text
-                    regions.append(
-                        {
-                            "text": final_text,
-                            "detectedLanguage": (
-                                detect_language(final_text) if final_text else "ja"
-                            ),
-                            "confidence": (
-                                1.0
-                                if is_manga_ocr
-                                else float(
-                                    np.mean([f["confidence"] for f in sorted_frags])
-                                )
-                            ),
-                            "rotation": 0.0,
-                            "x": bx,
-                            "y": by,
-                            "width": bw,
-                            "height": bh,
-                            "panelId": None,
-                            "bubbleReadingOrder": 0,
-                            "backgroundColor": detect_background_color(
-                                img, bx, by, bw, bh
-                            ),
-                            "bubbleX": bx,
-                            "bubbleY": by,
-                            "bubbleWidth": bw,
-                            "bubbleHeight": bh,
-                            "bubbleId": f"bubble_{b_idx}",
-                            "detectionConfidence": bubble["confidence"],
-                            "maskPolygon": json.dumps(bubble["mask_polygon"]),
-                            "safeTextX": bubble["safe_rect"][0],
-                            "safeTextY": bubble["safe_rect"][1],
-                            "safeTextW": bubble["safe_rect"][2],
-                            "safeTextH": bubble["safe_rect"][3],
-                        }
-                    )
+                        # 3. Bounding box of the eroded mask (safe area)
+                        split_mask = np.zeros((img_h, img_w), dtype=np.uint8)
+                        cv2.fillPoly(split_mask, [np.array(poly_pts, dtype=np.int32)], 255)
+                        erosion_px = YOLO_MASK_EROSION
+                        kernel_erode = cv2.getStructuringElement(
+                            cv2.MORPH_ELLIPSE, (2 * erosion_px + 1, 2 * erosion_px + 1)
+                        )
+                        eroded_split_mask = cv2.erode(split_mask, kernel_erode, iterations=1)
+                        if cv2.countNonZero(eroded_split_mask) == 0:
+                            eroded_split_mask = split_mask
+                        sx, sy, sw, sh = cv2.boundingRect(eroded_split_mask)
+
+                        # 4. Crop split bubble region and run MangaOCR
+                        manga_text = None
+                        is_manga_ocr = False
+                        if manga_ocr_reader is not None:
+                            bx1 = max(0, sp_x)
+                            by1 = max(0, sp_y)
+                            bx2 = min(img_w, sp_x + sp_w)
+                            by2 = min(img_h, sp_y + sp_h)
+                            if (bx2 - bx1) > 0 and (by2 - by1) > 0:
+                                try:
+                                    crop = img[by1:by2, bx1:bx2]
+                                    crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                                    pil_img = Image.fromarray(crop_rgb)
+                                    manga_text = manga_ocr_reader(pil_img)
+                                    if manga_text and len(manga_text.strip()) > 0:
+                                        is_manga_ocr = True
+                                except Exception as e:
+                                    print(
+                                        f"[OCR] MangaOCR failed on split bubble {b_idx} crop: {e}",
+                                        flush=True,
+                                    )
+
+                        final_text = manga_text if is_manga_ocr else r_sub["text"]
+
+                        # 5. Background color detection using split polygon
+                        bg_color = detect_background_color_poly(img, poly_pts)
+
+                        regions.append(
+                            {
+                                "text": final_text,
+                                "detectedLanguage": detect_language(final_text) if final_text else "ja",
+                                "confidence": 1.0 if is_manga_ocr else r_sub["confidence"],
+                                "rotation": 0.0,
+                                "x": r_sub["x"],
+                                "y": r_sub["y"],
+                                "width": r_sub["width"],
+                                "height": r_sub["height"],
+                                "panelId": None,
+                                "bubbleReadingOrder": 0,
+                                "backgroundColor": bg_color,
+                                "bubbleX": sp_x,
+                                "bubbleY": sp_y,
+                                "bubbleWidth": sp_w,
+                                "bubbleHeight": sp_h,
+                                "bubbleId": f"bubble_{b_idx}",
+                                "detectionConfidence": bubble["confidence"],
+                                "maskPolygon": json.dumps(poly_pts),
+                                "safeTextX": sx,
+                                "safeTextY": sy,
+                                "safeTextW": sw,
+                                "safeTextH": sh,
+                            }
+                        )
 
                 # 5. Add unmatched fragments as separate standalone regions (SFX/sign)
                 for f in raw_fragments:

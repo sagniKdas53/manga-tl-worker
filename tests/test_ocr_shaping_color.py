@@ -1,6 +1,11 @@
 import numpy as np
 import cv2
-from worker.handlers.ocr import detect_background_color, detect_bubble_contour
+from worker.handlers.ocr import (
+    detect_background_color,
+    detect_bubble_contour,
+    detect_background_color_poly,
+    get_split_polygon,
+)
 
 
 def test_detect_background_color():
@@ -32,3 +37,36 @@ def test_detect_bubble_contour():
     assert abs(bubble_box["y"] - 60) <= 5
     assert abs(bubble_box["width"] - 80) <= 5
     assert abs(bubble_box["height"] - 80) <= 5
+
+
+def test_detect_background_color_poly():
+    # Create a 100x100 BGR image with light gray background (#e0e0e0)
+    img = np.full((100, 100, 3), 224, dtype=np.uint8)  # 224 BGR -> #e0e0e0
+    # Draw some black text strokes in the center (foreground)
+    cv2.circle(img, (50, 50), 10, (10, 10, 10), -1)
+
+    # Polygon mask for the whole region
+    poly = [[10, 10], [90, 10], [90, 90], [10, 90]]
+    color = detect_background_color_poly(img, poly)
+    assert color.lower() == "#e0e0e0"
+
+
+def test_split_polygon_and_safe_area():
+    # Create a 200x200 binary mask with two white circles (representing two speech bubbles)
+    # Circle 1: center (50, 50), radius 30
+    # Circle 2: center (150, 150), radius 30
+    mask = np.zeros((200, 200), dtype=np.uint8)
+    cv2.circle(mask, (50, 50), 30, 255, -1)
+    cv2.circle(mask, (150, 150), 30, 255, -1)
+
+    # We want to split out Circle 1 using a bounding box around it
+    bbox = [30, 30, 40, 40]
+    poly = get_split_polygon(mask, bbox, 200, 200, margin=10)
+    assert poly is not None
+    assert len(poly) >= 3
+
+    # Check that all points in the split polygon are around Circle 1 (X < 100, Y < 100)
+    for p in poly:
+        assert p[0] < 100
+        assert p[1] < 100
+
