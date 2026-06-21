@@ -2,7 +2,7 @@ name: CI - Python
 
 on:
   push:
-    branches: ["master"]
+    branches: ["main"]
     paths:
       - "app.py"
       - "requirements.txt"
