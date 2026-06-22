@@ -73,3 +73,31 @@ YOLO_PINNED_CHECKSUM = (
     "f081f02a40601e3a1d4f5bf4e1a5a1a84340a0e52212d170e3bc5b679df97dcf"
 )
 YOLO_FALLBACK_MODE = os.environ.get("YOLO_FALLBACK_MODE", "opencv").lower()
+
+# Model Configuration
+MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "").lower().strip()
+API_KEY = os.environ.get("API_KEY", "").strip()
+PREFERRED_MODEL = os.environ.get("PREFERRED_MODEL", "").strip()
+PREFERRED_VLM_MODEL = os.environ.get("PREFERRED_VLM_MODEL", "").strip()
+LOCAL_LLM_PROVIDER = os.environ.get("LOCAL_LLM_PROVIDER", "").strip()
+LOCAL_LLM_ENDPOINT = os.environ.get("LOCAL_LLM_ENDPOINT", "").strip()
+LOCAL_LLM_MODEL = os.environ.get("LOCAL_LLM_MODEL", "").strip()
+LOCAL_VLM_MODEL = os.environ.get("LOCAL_VLM_MODEL", "").strip()
+
+# QA Configuration
+# Modes: "none" = skip QA, "llm" = text-only LLM review, "vlm" = full vision review
+QA_MODE = os.environ.get("QA_MODE", "auto").lower().strip()
+
+# Auto-detect QA mode if set to "auto"
+if QA_MODE == "auto":
+    has_vlm = bool(PREFERRED_VLM_MODEL or LOCAL_VLM_MODEL)
+    if has_vlm:
+        QA_MODE = "vlm"
+    elif MODEL_PROVIDER or LOCAL_LLM_MODEL:
+        QA_MODE = "llm"
+    else:
+        QA_MODE = "none"
+
+# Render cache
+RENDER_CACHE_DIR = os.environ.get("RENDER_CACHE_DIR", "/app/rendered_cache")
+

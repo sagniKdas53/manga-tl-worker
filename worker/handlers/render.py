@@ -650,8 +650,8 @@ def process_render(job_data):
             font_name = el.get("font") or "Comic Neue"
             fit = fit_text_in_box_py(
                 text,
-                ew - 8,
-                eh - 8,
+                int((ew - 8) * 0.95),  # 5% safety margin
+                int((eh - 8) * 0.95),  # 5% safety margin
                 font_name=font_name,
                 default_font_size=int(font_size),
                 shape=("elliptical" if box_shape == "elliptical" else "rectangular"),
@@ -707,6 +707,14 @@ def process_render(job_data):
             content_type="image/png",
         )
         print(f"[Render] Flattened image uploaded to MinIO: {storage_path}", flush=True)
+
+        # Save local copy in render cache
+        from worker.config import RENDER_CACHE_DIR
+        os.makedirs(RENDER_CACHE_DIR, exist_ok=True)
+        cache_path = os.path.join(RENDER_CACHE_DIR, f"{image_id}.png")
+        with open(cache_path, "wb") as f:
+            f.write(out_bytes)
+        logger.info(f"[Render] Cached rendered image to {cache_path}")
 
     except Exception as e:
         print(f"[Render] Error rendering typeset: {e}", flush=True)
