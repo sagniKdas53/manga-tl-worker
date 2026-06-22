@@ -316,10 +316,21 @@ def parse_and_validate_batch(response_text, unmatched_regions):
     return None
 
 
+PROVIDER_COOLDOWNS = {}
+
+
 def try_cloud_ai(
     provider, api_key, model, prompt, response_schema=None, request_id=None
 ):
     req_prefix = f"[{request_id}] " if request_id else ""
+    global PROVIDER_COOLDOWNS
+    cooldown_until = PROVIDER_COOLDOWNS.get(provider, 0.0)
+    if time.time() < cooldown_until:
+        logger.warning(
+            f"{req_prefix}Skipping provider '{provider}' because it is in cooldown for another {int(cooldown_until - time.time())} seconds."
+        )
+        return None
+
     enforce_rate_limit()
     url = ""
     headers = {}
@@ -471,6 +482,11 @@ def try_cloud_ai(
             else:
                 return res_json["choices"][0]["message"]["content"]
         else:
+            if res.status_code == 429:
+                logger.warning(
+                    f"{req_prefix}Cloud LLM provider '{provider}' returned 429 (Too Many Requests). Initiating a 60-second cooldown."
+                )
+                PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
             logger.error(
                 f"{req_prefix}Cloud LLM provider '{provider}' returned error: {res.status_code} - {res.text}"
             )
@@ -489,6 +505,14 @@ def try_cloud_ai_vision(
     request_id=None,
 ):
     req_prefix = f"[{request_id}] " if request_id else ""
+    global PROVIDER_COOLDOWNS
+    cooldown_until = PROVIDER_COOLDOWNS.get(provider, 0.0)
+    if time.time() < cooldown_until:
+        logger.warning(
+            f"{req_prefix}Skipping vision provider '{provider}' because it is in cooldown for another {int(cooldown_until - time.time())} seconds."
+        )
+        return None
+
     enforce_rate_limit()
     url = ""
     headers = {}
@@ -639,6 +663,11 @@ def try_cloud_ai_vision(
             else:
                 return res_json["choices"][0]["message"]["content"]
         else:
+            if res.status_code == 429:
+                logger.warning(
+                    f"{req_prefix}Vision provider '{provider}' returned 429 (Too Many Requests). Initiating a 60-second cooldown."
+                )
+                PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
             logger.error(
                 f"{req_prefix}Provider '{provider}' returned error: {res.status_code} - {res.text}"
             )
@@ -918,13 +947,19 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
             logger.info(f"{req_prefix}{strategy_idx}. Claude 3.5 Sonnet (Direct)")
             strategy_idx += 1
 
-    logger.info(f"{req_prefix}{strategy_idx}. Local LLM")
-    strategy_idx += 1
+    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in ("true", "1", "yes")
+    disable_deepl = os.environ.get("DISABLE_DEEPL_TRANSLATE", "").strip().lower() in ("true", "1", "yes")
+    disable_gt = os.environ.get("DISABLE_GOOGLE_TRANSLATE", "").strip().lower() in ("true", "1", "yes")
+
+    if not disable_local:
+        logger.info(f"{req_prefix}{strategy_idx}. Local LLM")
+        strategy_idx += 1
     if not local_only:
-        if deepl_key:
+        if deepl_key and not disable_deepl:
             logger.info(f"{req_prefix}{strategy_idx}. DeepL")
             strategy_idx += 1
-        logger.info(f"{req_prefix}{strategy_idx}. Google Translate")
+        if not disable_gt:
+            logger.info(f"{req_prefix}{strategy_idx}. Google Translate")
 
     if local_only:
         logger.info(
@@ -1009,11 +1044,15 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
                     return cleaned
 
     # 2. Local Ollama/LMStudio Layer
-    translated = try_local_ai(prompt, text, request_id=request_id)
-    if translated:
-        cleaned = clean_translated_text(translated)
-        if is_valid_translation(text, cleaned, request_id=request_id):
-            return cleaned
+    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in ("true", "1", "yes")
+    if not disable_local:
+        translated = try_local_ai(prompt, text, request_id=request_id)
+        if translated:
+            cleaned = clean_translated_text(translated)
+            if is_valid_translation(text, cleaned, request_id=request_id):
+                return cleaned
+    else:
+        logger.info(f"{req_prefix}Local LLM layer skipped (disabled via environment).")
 
     if local_only:
         logger.info(
@@ -1023,20 +1062,28 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
         return None
 
     # 3. DeepL Layer
-    translated = try_deepl(text, target_lang, request_id=request_id)
-    if translated:
-        cleaned = clean_translated_text(translated)
-        if is_valid_translation(text, cleaned, request_id=request_id):
-            return cleaned
+    disable_deepl = os.environ.get("DISABLE_DEEPL_TRANSLATE", "").strip().lower() in ("true", "1", "yes")
+    if not disable_deepl:
+        translated = try_deepl(text, target_lang, request_id=request_id)
+        if translated:
+            cleaned = clean_translated_text(translated)
+            if is_valid_translation(text, cleaned, request_id=request_id):
+                return cleaned
+    else:
+        logger.info(f"{req_prefix}DeepL fallback skipped (disabled via environment).")
 
     # 4. Google Translate Layer
-    translated = try_google_translate(
-        text, source_lang, target_lang, request_id=request_id
-    )
-    if translated:
-        cleaned = clean_translated_text(translated)
-        if is_valid_translation(text, cleaned, request_id=request_id):
-            return cleaned
+    disable_gt = os.environ.get("DISABLE_GOOGLE_TRANSLATE", "").strip().lower() in ("true", "1", "yes")
+    if not disable_gt:
+        translated = try_google_translate(
+            text, source_lang, target_lang, request_id=request_id
+        )
+        if translated:
+            cleaned = clean_translated_text(translated)
+            if is_valid_translation(text, cleaned, request_id=request_id):
+                return cleaned
+    else:
+        logger.info(f"{req_prefix}Google Translate fallback skipped (disabled via environment).")
 
     logger.error(f"{req_prefix}All translation tiers failed for text: '{text}'")
     return None
@@ -1259,18 +1306,22 @@ Input:
                 logger.error(f"{req_prefix}Nvidia batch translation failed: {e}")
 
     # Try Local LLM (Ollama/LMStudio)
-    local_provider = (
-        os.environ.get("LOCAL_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "lmstudio"))
-        .lower()
-        .strip()
-    )
-    logger.info(f"{req_prefix}Batch: Trying Local LLM ({local_provider})...")
-    try:
-        res = try_local_ai(prompt, bubbles_json, response_schema, request_id=request_id)
-        if res:
-            return res
-    except Exception as e:
-        logger.error(f"{req_prefix}Local LLM batch translation failed: {e}")
+    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in ("true", "1", "yes")
+    if not disable_local:
+        local_provider = (
+            os.environ.get("LOCAL_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "lmstudio"))
+            .lower()
+            .strip()
+        )
+        logger.info(f"{req_prefix}Batch: Trying Local LLM ({local_provider})...")
+        try:
+            res = try_local_ai(prompt, bubbles_json, response_schema, request_id=request_id)
+            if res:
+                return res
+        except Exception as e:
+            logger.error(f"{req_prefix}Local LLM batch translation failed: {e}")
+    else:
+        logger.info(f"{req_prefix}Batch: Local LLM layer skipped (disabled via environment).")
 
 
 def try_local_vlm_vision(
@@ -1509,7 +1560,8 @@ Input:
 
     # Fallback to local VLM if cloud failed or skipped, and LOCAL_VLM_MODEL is configured
     local_vlm_model = os.environ.get("LOCAL_VLM_MODEL", "").strip()
-    if local_vlm_model:
+    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in ("true", "1", "yes")
+    if local_vlm_model and not disable_local:
         logger.info(f"{req_prefix}VLM: Trying local VLM model '{local_vlm_model}'...")
         try:
             res = try_local_vlm_vision(
@@ -1523,6 +1575,8 @@ Input:
                 return res
         except Exception as e:
             logger.error(f"{req_prefix}Local VLM vision translation failed: {e}")
+    elif local_vlm_model and disable_local:
+        logger.info(f"{req_prefix}VLM: Local VLM model '{local_vlm_model}' skipped (disabled via environment).")
 
     return None
 
