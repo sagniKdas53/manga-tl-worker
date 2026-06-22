@@ -6,20 +6,66 @@ from worker.utils.image import download_image
 import os
 
 
-def load_font(size, bold=False, italic=False):
-    # Try common font paths on Debian/Ubuntu/Alpine systems
-    # Bold and Italic fonts
+# Font registry: map display names to filesystem paths
+FONT_REGISTRY = {
+    "Comic Neue": {
+        "normal": "/usr/share/fonts/truetype/comic-neue/ComicNeue-Regular.ttf",
+        "bold": "/usr/share/fonts/truetype/comic-neue/ComicNeue-Bold.ttf",
+        "italic": "/usr/share/fonts/truetype/comic-neue/ComicNeue-Italic.ttf",
+        "bolditalic": "/usr/share/fonts/truetype/comic-neue/ComicNeue-BoldItalic.ttf",
+    },
+    "Bangers": {
+        "normal": "/usr/share/fonts/truetype/google/Bangers-Regular.ttf",
+        "bold": "/usr/share/fonts/truetype/google/Bangers-Regular.ttf",  # Bangers has one weight
+        "italic": "/usr/share/fonts/truetype/google/Bangers-Regular.ttf",
+        "bolditalic": "/usr/share/fonts/truetype/google/Bangers-Regular.ttf",
+    },
+    "Luckiest Guy": {
+        "normal": "/usr/share/fonts/truetype/google/LuckiestGuy-Regular.ttf",
+        "bold": "/usr/share/fonts/truetype/google/LuckiestGuy-Regular.ttf",
+        "italic": "/usr/share/fonts/truetype/google/LuckiestGuy-Regular.ttf",
+        "bolditalic": "/usr/share/fonts/truetype/google/LuckiestGuy-Regular.ttf",
+    },
+}
+DEFAULT_FONT_FALLBACK_ORDER = ["Comic Neue", "Luckiest Guy", "Bangers"]
+
+
+def load_font(size, font_name="Comic Neue", bold=False, italic=False):
+    # Determine the style key
     if bold and italic:
-        suffixes = ["BoldItalic.ttf", "-BoldItalic.ttf", "BI.ttf"]
+        style_key = "bolditalic"
     elif bold:
-        suffixes = ["Bold.ttf", "-Bold.ttf", "B.ttf"]
+        style_key = "bold"
     elif italic:
-        suffixes = ["Italic.ttf", "-Italic.ttf", "I.ttf"]
+        style_key = "italic"
     else:
-        suffixes = ["Regular.ttf", ".ttf", "R.ttf"]
+        style_key = "normal"
 
-    font_names = ["DejaVuSans", "LiberationSans", "FreeSans", "Arial"]
+    # Helper function to load a font from a path
+    def try_load(path):
+        if path and os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, int(size))
+            except Exception:
+                pass
+        return None
 
+    # 1. Try requested font from registry
+    if font_name in FONT_REGISTRY:
+        path = FONT_REGISTRY[font_name].get(style_key) or FONT_REGISTRY[font_name].get("normal")
+        font = try_load(path)
+        if font:
+            return font
+
+    # 2. Try fallbacks from registry in order
+    for fallback in DEFAULT_FONT_FALLBACK_ORDER:
+        if fallback in FONT_REGISTRY:
+            path = FONT_REGISTRY[fallback].get(style_key) or FONT_REGISTRY[fallback].get("normal")
+            font = try_load(path)
+            if font:
+                return font
+
+    # 3. Fallback to the original system fonts
     font_paths = [
         (
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -32,15 +78,21 @@ def load_font(size, bold=False, italic=False):
             else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
         ),
     ]
-
     for path in font_paths:
-        if os.path.exists(path):
-            try:
-                return ImageFont.truetype(path, int(size))
-            except Exception:
-                pass
+        font = try_load(path)
+        if font:
+            return font
 
-    # Fallback system names
+    # Try general system names via suffixes
+    if bold and italic:
+        suffixes = ["BoldItalic.ttf", "-BoldItalic.ttf", "BI.ttf"]
+    elif bold:
+        suffixes = ["Bold.ttf", "-Bold.ttf", "B.ttf"]
+    elif italic:
+        suffixes = ["Italic.ttf", "-Italic.ttf", "I.ttf"]
+    else:
+        suffixes = ["Regular.ttf", ".ttf", "R.ttf"]
+    font_names = ["DejaVuSans", "LiberationSans", "FreeSans", "Arial"]
     for name in font_names:
         for suffix in suffixes:
             try:
@@ -160,7 +212,7 @@ def fit_text_in_box_py(
             pass
 
     def wrap_text_py(txt, f_size):
-        font = load_font(f_size, bold=bold, italic=italic)
+        font = load_font(f_size, font_name=font_name, bold=bold, italic=italic)
         if not font:
             return {"lines": [txt], "line_centers": [box_x + max_width / 2]}
 
@@ -236,7 +288,7 @@ def fit_text_in_box_py(
                     words = para.split(" ")
                     for word in words:
                         span = get_line_span(line_index)
-                        allowed_w = (span["right"] - span["left"]) * 0.92
+                        allowed_w = (span["right"] - span["left"]) * 0.95
                         word_width = get_text_width(word)
 
                         if word_width > allowed_w:
@@ -255,7 +307,7 @@ def fit_text_in_box_py(
                                 next_span = get_line_span(line_index)
                                 next_allowed_w = (
                                     next_span["right"] - next_span["left"]
-                                ) * 0.92
+                                ) * 0.95
                                 if (
                                     get_text_width(test_part) > next_allowed_w
                                     and current_word_part
@@ -392,7 +444,7 @@ def fit_text_in_box_py(
                     return 0
                 import math
 
-                return 2.0 * half_w * math.sqrt(1.0 - ratio * ratio) * 0.92
+                return 2.0 * half_w * math.sqrt(1.0 - ratio * ratio) * 0.95
 
             for para in paragraphs:
                 if not para:
@@ -413,7 +465,7 @@ def fit_text_in_box_py(
                             tentative_lines.append(current_line)
                             line_index += 1
                             if line_index >= N:
-                                return None
+                                    return None
                         current_word_part = ""
                         for char in word:
                             test_part = current_word_part + char
@@ -482,28 +534,36 @@ def fit_text_in_box_py(
             "line_centers": [box_x + max_width / 2] * len(fallback_lines),
         }
 
-    font_size = default_font_size
-    res = wrap_text_py(clean_text, font_size)
+    max_start_size = min(max_height // 2, max_width // 3, 72)
+    start_size = max(max_start_size, default_font_size)
+
+    low = 6
+    high = start_size
+    best_fs = 6
+    best_res = None
     line_height_multiplier = 1.2
 
-    while font_size > 6:
-        total_height = len(res["lines"]) * font_size * line_height_multiplier
+    while low <= high:
+        mid = (low + high) // 2
+        res = wrap_text_py(clean_text, mid)
+        total_height = len(res["lines"]) * mid * line_height_multiplier
         if total_height <= max_height:
-            return {
-                "fontSize": font_size,
-                "lines": res["lines"],
-                "overflow": False,
-                "lineCenters": res["line_centers"],
-            }
-        font_size -= 1
-        res = wrap_text_py(clean_text, font_size)
+            best_fs = mid
+            best_res = res
+            low = mid + 1
+        else:
+            high = mid - 1
 
-    total_height = len(res["lines"]) * font_size * line_height_multiplier
+    if best_res is None:
+        best_res = wrap_text_py(clean_text, 6)
+        best_fs = 6
+
+    total_height = len(best_res["lines"]) * best_fs * line_height_multiplier
     return {
-        "fontSize": 6,
-        "lines": res["lines"],
+        "fontSize": best_fs,
+        "lines": best_res["lines"],
         "overflow": total_height > max_height,
-        "lineCenters": res["line_centers"],
+        "lineCenters": best_res["line_centers"],
     }
 
 
@@ -541,6 +601,13 @@ def process_render(job_data):
             if not text:
                 continue
 
+            box_shape = el.get("boxShape") or "rectangular"
+            # Auto-uppercase for speech bubbles
+            region_type = el.get("regionType")
+            if region_type == "speech" or (region_type is None and box_shape == "elliptical"):
+                if os.environ.get("USE_UPPERCASE_SPEECH", "true").lower() in ("true", "1", "t"):
+                    text = text.upper()
+
             ex = float(el.get("x", 0.0))
             ey = float(el.get("y", 0.0))
             ew = int(el.get("maxWidth") or 100)
@@ -549,7 +616,6 @@ def process_render(job_data):
             bg_color_hex = el.get("backgroundColor")
             text_color_hex = el.get("textColor") or "#000000"
 
-            box_shape = el.get("boxShape") or "rectangular"
             font_size = float(el.get("size") or 12.0)
             font_weight = el.get("fontWeight") or "normal"
             font_style = el.get("fontStyle") or "normal"
@@ -581,11 +647,12 @@ def process_render(job_data):
                     draw.rectangle([ex, ey, ex + ew, ey + eh], fill=bg_color_hex)
 
             # Draw Text
+            font_name = el.get("font") or "Comic Neue"
             fit = fit_text_in_box_py(
                 text,
                 ew - 8,
                 eh - 8,
-                font_name=el.get("font") or "Comic Neue",
+                font_name=font_name,
                 default_font_size=int(font_size),
                 shape=("elliptical" if box_shape == "elliptical" else "rectangular"),
                 box_x=ex + 4,
@@ -596,7 +663,7 @@ def process_render(job_data):
             )
 
             f_size = fit["fontSize"]
-            font = load_font(f_size, bold=bold, italic=italic)
+            font = load_font(f_size, font_name=font_name, bold=bold, italic=italic)
             if font:
                 line_height = f_size * 1.2
                 total_height = len(fit["lines"]) * line_height
