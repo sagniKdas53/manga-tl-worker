@@ -85,15 +85,24 @@ LOCAL_LLM_MODEL = os.environ.get("LOCAL_LLM_MODEL", "").strip()
 LOCAL_VLM_MODEL = os.environ.get("LOCAL_VLM_MODEL", "").strip()
 
 # QA Configuration
-# Modes: "none" = skip QA, "llm" = text-only LLM review, "vlm" = full vision review
+# Modes: "none" = skip QA, "llm" = text-only LLM review, "vlm" = full vision review, "auto" = auto-detect based on capabilities.
 QA_MODE = os.environ.get("QA_MODE", "auto").lower().strip()
 
-# Auto-detect QA mode if set to "auto"
+# QA Mode Auto-Detection Logic:
+# Decides between "vlm", "llm", or "none" dynamically at startup based on configured models and key states.
+# Respects the DISABLE_LOCAL_LLM configuration (ignoring local LLM/VLM models if disabled).
 if QA_MODE == "auto":
-    has_vlm = bool(PREFERRED_VLM_MODEL or LOCAL_VLM_MODEL)
+    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in ("true", "1", "yes")
+    effective_local_vlm = "" if disable_local else LOCAL_VLM_MODEL
+    effective_local_llm = "" if disable_local else LOCAL_LLM_MODEL
+
+    # Detect VLM capability (Cloud VLM or effective local VLM)
+    has_vlm = bool(PREFERRED_VLM_MODEL or effective_local_vlm)
+    
+    # Detect LLM capability (Cloud provider or effective local LLM)
     if has_vlm:
         QA_MODE = "vlm"
-    elif MODEL_PROVIDER or LOCAL_LLM_MODEL:
+    elif MODEL_PROVIDER or effective_local_llm:
         QA_MODE = "llm"
     else:
         QA_MODE = "none"

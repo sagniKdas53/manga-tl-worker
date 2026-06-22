@@ -203,11 +203,14 @@ You MUST return a JSON object containing a "results" key with an array of object
             print(f"[QA] LLM QA via Nvidia failed: {e}", flush=True)
 
     local_llm_model = os.environ.get("LOCAL_LLM_MODEL", "").strip()
-    if not qa_response and local_llm_model:
+    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in ("true", "1", "yes")
+    if not qa_response and local_llm_model and not disable_local:
         try:
             qa_response = try_local_ai(prompt, json.dumps(regions_metadata), QA_JSON_SCHEMA)
         except Exception as e:
             print(f"[QA] LLM QA via Local LLM failed: {e}", flush=True)
+    elif not qa_response and local_llm_model and disable_local:
+        print("[QA] Local LLM QA skipped (disabled via environment).", flush=True)
 
     results = []
     if qa_response:
@@ -408,16 +411,25 @@ You MUST return a JSON object containing a "results" key with an array of object
         except Exception as e:
             print(f"[QA] VLM QA via Nvidia failed: {e}", flush=True)
 
+    # Fallback to Local VLM:
+    # Attempted only if cloud VLM calls failed (e.g. key missing, or provider is cooled down on 429).
+    # Explicitly respects the DISABLE_LOCAL_LLM environment variable bypass.
     local_vlm_model = os.environ.get("LOCAL_VLM_MODEL", "").strip()
-    if not qa_response and local_vlm_model:
+    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in ("true", "1", "yes")
+    if not qa_response and local_vlm_model and not disable_local:
         try:
             qa_response = try_local_vlm_vision(
                 local_vlm_model, prompt, combined_base64, QA_JSON_SCHEMA
             )
         except Exception as e:
             print(f"[QA] VLM QA via Local VLM failed: {e}", flush=True)
+    elif not qa_response and local_vlm_model and disable_local:
+        print("[QA] Local VLM QA skipped (disabled via environment).", flush=True)
 
-    # If all VLM options failed or we are in stub fallback, construct a pass result for all regions
+    # VLM Evaluation Fail-Safe Fallback:
+    # If all configured/active VLM options fail to return a parseable response,
+    # rather than crashing the worker, we construct a default "passed" result
+    # for all regions so the typesetting/translation pipeline can successfully complete.
     results = []
     if qa_response:
         try:
