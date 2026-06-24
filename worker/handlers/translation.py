@@ -61,7 +61,7 @@ def process_translation(job_data):
 
         provider = MODEL_PROVIDER
         local_only = provider in ("ollama", "lmstudio")
-        max_batch_size = 5 if local_only else 15
+        max_batch_size = 5 if local_only else 8
 
         logger.info(
             f"{req_prefix}Batch size set to {max_batch_size} (local_only={local_only})"
@@ -157,6 +157,8 @@ def process_translation(job_data):
         # 3. Retry failed items
         LOCAL_AI_MAX_BATCH_RETRIES = 1
         if failed_batch_regions:
+            from worker.services.translation import wait_for_cooldown
+            wait_for_cooldown(provider)
             logger.info(f"{req_prefix}Retry pass 1")
             logger.info(
                 f"{req_prefix}Retrying {len(failed_batch_regions)} failed items in batch (max {LOCAL_AI_MAX_BATCH_RETRIES} retry pass)..."
@@ -216,6 +218,8 @@ def process_translation(job_data):
 
             # 4. Individual fallback for still-failed regions
             if still_failed_regions:
+                from worker.services.translation import wait_for_cooldown
+                wait_for_cooldown(provider)
                 logger.info(f"{req_prefix}Individual fallback")
                 logger.info(
                     f"{req_prefix}Falling back to individual translation for {len(still_failed_regions)} regions (attempt 3/3)..."

@@ -319,6 +319,18 @@ def parse_and_validate_batch(response_text, unmatched_regions):
 PROVIDER_COOLDOWNS = {}
 
 
+def wait_for_cooldown(provider, max_wait=60):
+    global PROVIDER_COOLDOWNS
+    cooldown_until = PROVIDER_COOLDOWNS.get(provider, 0.0)
+    remaining = cooldown_until - time.time()
+    if remaining > 0:
+        sleep_time = min(remaining, max_wait)
+        logger.info(
+            f"Provider '{provider}' is on cooldown. Sleeping for {sleep_time:.1f} seconds to let it clear..."
+        )
+        time.sleep(sleep_time)
+
+
 import litellm
 
 def try_cloud_ai(
@@ -375,7 +387,7 @@ def try_cloud_ai(
         response = litellm.completion(
             model=litellm_model,
             messages=messages,
-            timeout=45 if provider == "nvidia" else 30,
+            timeout=90 if provider == "nvidia" else 60,
             **kwargs
         )
         
@@ -466,7 +478,7 @@ def try_cloud_ai_vision(
         response = litellm.completion(
             model=litellm_model,
             messages=messages,
-            timeout=45,
+            timeout=90,
             **kwargs
         )
         
