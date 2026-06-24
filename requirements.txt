@@ -11,3 +11,5 @@ manga-ocr
 psutil
 easyocr
 onnxruntime
+litellm
+rq

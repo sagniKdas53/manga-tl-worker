@@ -319,6 +319,8 @@ def parse_and_validate_batch(response_text, unmatched_regions):
 PROVIDER_COOLDOWNS = {}
 
 
+import litellm
+
 def try_cloud_ai(
     provider, api_key, model, prompt, response_schema=None, request_id=None
 ):
@@ -332,167 +334,74 @@ def try_cloud_ai(
         return None
 
     enforce_rate_limit()
-    url = ""
-    headers = {}
-    payload = {}
+
+    litellm_model = model
+    kwargs = {}
 
     if provider == "openrouter":
-        url = "https://openrouter.ai/api/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": model or "meta-llama/llama-3-8b-instruct:free",
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        if response_schema:
-            payload["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {"name": "manga_translation", "schema": response_schema},
-            }
+        litellm_model = f"openrouter/{model}" if model else "openrouter/meta-llama/llama-3-8b-instruct:free"
+        kwargs["api_key"] = api_key
     elif provider == "openai":
-        url = "https://api.openai.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": model or "gpt-4o-mini",
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        if response_schema:
-            payload["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {"name": "manga_translation", "schema": response_schema},
-            }
-    elif provider == "nvidia":
-        url = "https://integrate.api.nvidia.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        system_pr = (
-            MANGA_TRANSLATION_JSON_SYSTEM_PROMPT
-            if response_schema
-            else MANGA_TRANSLATION_SYSTEM_PROMPT
-        )
-        payload = {
-            "model": model or "nvidia/riva-translate-4b-instruct-v1.1",
-            "messages": [
-                {"role": "system", "content": system_pr},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.6,
-            "top_p": 0.95,
-            "max_tokens": 4096,
-        }
-        if response_schema:
-            payload["response_format"] = {"type": "json_object"}
+        litellm_model = model or "gpt-4o-mini"
+        kwargs["api_key"] = api_key
     elif provider == "anthropic":
-        url = "https://api.anthropic.com/v1/messages"
-        headers = {
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": model or "claude-3-5-sonnet-20241022",
-            "max_tokens": 1000,
-            "messages": [{"role": "user", "content": prompt}],
-        }
+        litellm_model = f"anthropic/{model}" if model else "anthropic/claude-3-5-sonnet-20241022"
+        kwargs["api_key"] = api_key
     elif provider == "gemini":
-        gemini_model = model or "gemini-1.5-flash"
-        if "/" not in gemini_model:
-            gemini_model = f"models/{gemini_model}"
-        url = f"https://generativelanguage.googleapis.com/v1beta/{gemini_model}:generateContent?key={api_key}"
-        headers = {"Content-Type": "application/json"}
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
-        if response_schema:
-            payload["generationConfig"] = {
-                "responseMimeType": "application/json",
-                "responseSchema": response_schema,
-            }
+        litellm_model = f"gemini/{model}" if model else "gemini/gemini-1.5-flash"
+        kwargs["api_key"] = api_key
+    elif provider == "nvidia":
+        litellm_model = f"openai/{model}" if model else "openai/nvidia/riva-translate-4b-instruct-v1.1"
+        kwargs["api_key"] = api_key
+        kwargs["api_base"] = "https://integrate.api.nvidia.com/v1"
     else:
         return None
 
-    try:
-        logger.info(
-            f"{req_prefix}Sending request to Cloud LLM provider '{provider}' using model '{model}'..."
-        )
-        if logger.isEnabledFor(logging.TRACE):
-            logger.trace(f"{req_prefix}[TRACE] Request URL: {url}")
-            logger.trace(f"{req_prefix}[TRACE] Request Headers: {headers}")
-        start = time.perf_counter()
-        res = requests.post(
-            url,
-            json=payload,
-            headers=headers,
-            timeout=45 if provider == "nvidia" else 30,
-        )
-        elapsed = time.perf_counter() - start
-        logger.info(
-            f"{req_prefix}Provider={provider} " f"Model={model} " f"Time={elapsed:.2f}s"
-        )
-        if logger.isEnabledFor(logging.TRACE):
-            logger.trace(f"{req_prefix}[TRACE] Response Status: {res.status_code}")
-            logger.trace(f"{req_prefix}[TRACE] Response Headers: {dict(res.headers)}")
-
-        response_text = res.text
-        logger.debug(f"{req_prefix}Raw Model Output:\n{response_text}")
-
-        if res.status_code == 200:
-            res_json = res.json()
-
-            # Extract and log token usage
-            usage = res_json.get("usage")
-            usage_meta = res_json.get("usageMetadata")
-            prompt_tokens = None
-            completion_tokens = None
-            total_tokens = None
-            if usage:
-                prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens")
-                completion_tokens = usage.get("completion_tokens") or usage.get(
-                    "output_tokens"
-                )
-                total_tokens = usage.get("total_tokens") or (
-                    (prompt_tokens + completion_tokens)
-                    if prompt_tokens and completion_tokens
-                    else None
-                )
-            elif usage_meta:
-                prompt_tokens = usage_meta.get("promptTokenCount")
-                completion_tokens = usage_meta.get("candidatesTokenCount")
-                total_tokens = usage_meta.get("totalTokenCount")
-
-            if prompt_tokens is not None:
-                logger.info(
-                    f"{req_prefix}Tokens "
-                    f"in={prompt_tokens} "
-                    f"out={completion_tokens} "
-                    f"total={total_tokens}"
-                )
-                cost = estimate_cost(model, prompt_tokens, completion_tokens, provider)
-                logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
-
-            if provider == "gemini":
-                return res_json["candidates"][0]["content"]["parts"][0]["text"]
-            elif provider == "anthropic":
-                return res_json["content"][0]["text"]
-            else:
-                return res_json["choices"][0]["message"]["content"]
+    messages = [{"role": "user", "content": prompt}]
+    if response_schema:
+        if provider == "nvidia":
+            kwargs["response_format"] = {"type": "json_object"}
+            messages.insert(0, {"role": "system", "content": MANGA_TRANSLATION_JSON_SYSTEM_PROMPT})
         else:
-            if res.status_code == 429:
-                logger.warning(
-                    f"{req_prefix}Cloud LLM provider '{provider}' returned 429 (Too Many Requests). Initiating a 60-second cooldown."
-                )
-                PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
-            logger.error(
-                f"{req_prefix}Cloud LLM provider '{provider}' returned error: {res.status_code} - {res.text}"
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "manga_translation", "schema": response_schema},
+            }
+
+    try:
+        logger.info(f"{req_prefix}Sending request to '{provider}' using model '{litellm_model}'...")
+        start = time.perf_counter()
+        
+        response = litellm.completion(
+            model=litellm_model,
+            messages=messages,
+            timeout=45 if provider == "nvidia" else 30,
+            **kwargs
+        )
+        
+        elapsed = time.perf_counter() - start
+        logger.info(f"{req_prefix}Provider={provider} Model={litellm_model} Time={elapsed:.2f}s")
+        
+        if response.usage:
+            prompt_tokens = response.usage.prompt_tokens
+            completion_tokens = response.usage.completion_tokens
+            total_tokens = response.usage.total_tokens
+            logger.info(
+                f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}"
             )
+            cost = estimate_cost(model, prompt_tokens, completion_tokens, provider)
+            logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
+
+        return response.choices[0].message.content
+    except litellm.RateLimitError as e:
+        logger.warning(
+            f"{req_prefix}Provider '{provider}' returned 429 (Too Many Requests). Initiating a 60-second cooldown."
+        )
+        PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
+        return None
     except Exception as e:
         logger.error(f"{req_prefix}Cloud LLM Translation failed: {e}")
-    return None
+        return None
 
 
 def try_cloud_ai_vision(
@@ -514,293 +423,131 @@ def try_cloud_ai_vision(
         return None
 
     enforce_rate_limit()
-    url = ""
-    headers = {}
-    payload = {}
+
+    litellm_model = model
+    kwargs = {}
 
     if provider == "openrouter":
-        url = "https://openrouter.ai/api/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
-                            },
-                        },
-                    ],
-                }
-            ],
-        }
-        if response_schema:
-            payload["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {"name": "manga_translation", "schema": response_schema},
-            }
+        litellm_model = f"openrouter/{model}" if model else "openrouter/meta-llama/llama-3-8b-instruct:free"
+        kwargs["api_key"] = api_key
     elif provider == "gemini":
-        gemini_model = model or "gemini-1.5-flash"
-        if "/" not in gemini_model:
-            gemini_model = f"models/{gemini_model}"
-        url = f"https://generativelanguage.googleapis.com/v1beta/{gemini_model}:generateContent?key={api_key}"
-        headers = {"Content-Type": "application/json"}
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt},
-                        {
-                            "inlineData": {
-                                "mimeType": "image/jpeg",
-                                "data": base64_image,
-                            }
-                        },
-                    ]
-                }
-            ]
-        }
-        if response_schema:
-            payload["generationConfig"] = {
-                "responseMimeType": "application/json",
-                "responseSchema": response_schema,
-            }
+        litellm_model = f"gemini/{model}" if model else "gemini/gemini-1.5-flash"
+        kwargs["api_key"] = api_key
     elif provider == "nvidia":
-        url = "https://integrate.api.nvidia.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": model or "nvidia/nemotron-nano-12b-v2-vl",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
-                            },
-                        },
-                    ],
-                }
-            ],
-        }
-        if response_schema:
-            payload["response_format"] = {"type": "json_object"}
+        litellm_model = f"openai/{model}" if model else "openai/nvidia/nemotron-nano-12b-v2-vl"
+        kwargs["api_key"] = api_key
+        kwargs["api_base"] = "https://integrate.api.nvidia.com/v1"
     else:
         return None
 
-    try:
-        logger.info(
-            f"{req_prefix}Sending vision request to provider '{provider}' using model '{model}'..."
-        )
-        if logger.isEnabledFor(logging.TRACE):
-            logger.trace(f"{req_prefix}[TRACE] Vision Request URL: {url}")
-            logger.trace(f"{req_prefix}[TRACE] Vision Request Headers: {headers}")
-        start = time.perf_counter()
-        res = requests.post(url, json=payload, headers=headers, timeout=45)
-        elapsed = time.perf_counter() - start
-        logger.info(
-            f"{req_prefix}Provider={provider} " f"Model={model} " f"Time={elapsed:.2f}s"
-        )
-        if logger.isEnabledFor(logging.TRACE):
-            logger.trace(
-                f"{req_prefix}[TRACE] Vision Response Status: {res.status_code}"
-            )
-            logger.trace(
-                f"{req_prefix}[TRACE] Vision Response Headers: {dict(res.headers)}"
-            )
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
+            ],
+        }
+    ]
 
-        response_text = res.text
-        logger.debug(f"{req_prefix}Raw Model Output:\n{response_text}")
-
-        if res.status_code == 200:
-            res_json = res.json()
-
-            # Extract and log token usage
-            usage = res_json.get("usage")
-            usage_meta = res_json.get("usageMetadata")
-            prompt_tokens = None
-            completion_tokens = None
-            total_tokens = None
-            if usage:
-                prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens")
-                completion_tokens = usage.get("completion_tokens") or usage.get(
-                    "output_tokens"
-                )
-                total_tokens = usage.get("total_tokens") or (
-                    (prompt_tokens + completion_tokens)
-                    if prompt_tokens and completion_tokens
-                    else None
-                )
-            elif usage_meta:
-                prompt_tokens = usage_meta.get("promptTokenCount")
-                completion_tokens = usage_meta.get("candidatesTokenCount")
-                total_tokens = usage_meta.get("totalTokenCount")
-
-            if prompt_tokens is not None:
-                logger.info(
-                    f"{req_prefix}Tokens "
-                    f"in={prompt_tokens} "
-                    f"out={completion_tokens} "
-                    f"total={total_tokens}"
-                )
-                cost = estimate_cost(model, prompt_tokens, completion_tokens, provider)
-                logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
-
-            if provider == "gemini":
-                return res_json["candidates"][0]["content"]["parts"][0]["text"]
-            else:
-                return res_json["choices"][0]["message"]["content"]
+    if response_schema:
+        if provider == "nvidia":
+            kwargs["response_format"] = {"type": "json_object"}
         else:
-            if res.status_code == 429:
-                logger.warning(
-                    f"{req_prefix}Vision provider '{provider}' returned 429 (Too Many Requests). Initiating a 60-second cooldown."
-                )
-                PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
-            logger.error(
-                f"{req_prefix}Provider '{provider}' returned error: {res.status_code} - {res.text}"
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "manga_translation", "schema": response_schema},
+            }
+
+    try:
+        logger.info(f"{req_prefix}Sending vision request to '{provider}' using model '{litellm_model}'...")
+        start = time.perf_counter()
+        
+        response = litellm.completion(
+            model=litellm_model,
+            messages=messages,
+            timeout=45,
+            **kwargs
+        )
+        
+        elapsed = time.perf_counter() - start
+        logger.info(f"{req_prefix}Provider={provider} Model={litellm_model} Time={elapsed:.2f}s")
+
+        if response.usage:
+            prompt_tokens = response.usage.prompt_tokens
+            completion_tokens = response.usage.completion_tokens
+            total_tokens = response.usage.total_tokens
+            logger.info(
+                f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}"
             )
+            cost = estimate_cost(model, prompt_tokens, completion_tokens, provider)
+            logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
+
+        return response.choices[0].message.content
+    except litellm.RateLimitError as e:
+        logger.warning(
+            f"{req_prefix}Vision provider '{provider}' returned 429 (Too Many Requests). Initiating a 60-second cooldown."
+        )
+        PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
+        return None
     except Exception as e:
         logger.error(f"{req_prefix}Vision Translation failed: {e}")
-    return None
+        return None
 
 
 def try_local_ai(prompt, text, response_schema=None, request_id=None):
     req_prefix = f"[{request_id}] " if request_id else ""
     enforce_rate_limit()
-    local_provider = (
-        os.environ.get("LOCAL_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "lmstudio"))
-        .lower()
-        .strip()
-    )
-    local_endpoint = os.environ.get(
-        "LOCAL_LLM_ENDPOINT", os.environ.get("LLM_ENDPOINT", "")
-    ).strip()
-    # Keep gemma3:4b as fallback as requested by user
+    
+    local_provider = os.environ.get("LOCAL_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "lmstudio")).lower().strip()
+    local_endpoint = os.environ.get("LOCAL_LLM_ENDPOINT", os.environ.get("LLM_ENDPOINT", "")).strip()
     model = os.environ.get("LOCAL_LLM_MODEL", "gemma3:4b")
-
-    if local_endpoint:
-        if not local_endpoint.endswith(
-            "/v1/chat/completions"
-        ) and not local_endpoint.endswith("/api/v1/chat"):
-            if local_endpoint.endswith("/"):
-                local_endpoint += "v1/chat/completions"
-            else:
-                local_endpoint += "/v1/chat/completions"
 
     if not local_endpoint:
         if local_provider == "ollama":
-            local_endpoint = "http://ollama:11434/v1/chat/completions"
+            local_endpoint = "http://ollama:11434"
         else:
-            local_endpoint = "http://host.docker.internal:1234/v1/chat/completions"
+            local_endpoint = "http://host.docker.internal:1234/v1"
+    else:
+        local_endpoint = local_endpoint.replace("/chat/completions", "").replace("/api/v1/chat", "")
 
     endpoints_to_try = [local_endpoint]
     if "localhost" in local_endpoint:
-        endpoints_to_try.append(
-            local_endpoint.replace("localhost", "host.docker.internal")
-        )
+        endpoints_to_try.append(local_endpoint.replace("localhost", "host.docker.internal"))
     elif "host.docker.internal" in local_endpoint:
-        endpoints_to_try.append(
-            local_endpoint.replace("host.docker.internal", "localhost")
-        )
+        endpoints_to_try.append(local_endpoint.replace("host.docker.internal", "localhost"))
 
-    system_pr = (
-        MANGA_TRANSLATION_JSON_SYSTEM_PROMPT
-        if response_schema
-        else MANGA_TRANSLATION_SYSTEM_PROMPT
-    )
+    system_pr = MANGA_TRANSLATION_JSON_SYSTEM_PROMPT if response_schema else MANGA_TRANSLATION_SYSTEM_PROMPT
+    
+    kwargs = {}
+    if response_schema:
+        kwargs["response_format"] = {"type": "json_object"}
 
     for endpoint in endpoints_to_try:
         try:
-            logger.info(
-                f"{req_prefix}Trying Local AI endpoint '{endpoint}' using model '{model}'..."
-            )
-
-            if "/api/v1/chat" in endpoint:
-                payload = {"model": model, "system_prompt": system_pr, "input": text}
-            else:
-                payload = {
-                    "model": model,
-                    "messages": [
+            logger.info(f"{req_prefix}Trying Local AI endpoint '{endpoint}' using model '{model}'...")
+            
+            litellm_model = f"ollama/{model}" if local_provider == "ollama" else f"openai/{model}"
+            
+            from worker.utils.lock import acquire_lock
+            with acquire_lock("local-llm"):
+                start = time.perf_counter()
+                response = litellm.completion(
+                    model=litellm_model,
+                    api_base=endpoint,
+                    messages=[
                         {"role": "system", "content": system_pr},
                         {"role": "user", "content": text},
                     ],
-                }
-                if response_schema:
-                    if "ollama" in endpoint or local_provider == "ollama":
-                        payload["format"] = "json"
-                    else:
-                        payload["response_format"] = {"type": "json_object"}
-
-            from worker.utils.lock import acquire_lock
-
-            with acquire_lock("local-llm"):
-                if logger.isEnabledFor(logging.TRACE):
-                    logger.trace(f"{req_prefix}[TRACE] Local Request URL: {endpoint}")
-                    logger.trace(
-                        f"{req_prefix}[TRACE] Local Request Headers: {payload}"
-                    )
-                start = time.perf_counter()
-                res = requests.post(
-                    endpoint,
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
                     timeout=300,
+                    **kwargs
                 )
                 elapsed = time.perf_counter() - start
-            logger.info(
-                f"{req_prefix}Provider={local_provider} "
-                f"Model={model} "
-                f"Time={elapsed:.2f}s"
-            )
-            if logger.isEnabledFor(logging.TRACE):
-                logger.trace(
-                    f"{req_prefix}[TRACE] Local Response Status: {res.status_code}"
-                )
-                logger.trace(
-                    f"{req_prefix}[TRACE] Local Response Headers: {dict(res.headers)}"
-                )
-
-            response_text = res.text
-            logger.debug(f"{req_prefix}Raw Model Output:\n{response_text}")
-
-            if res.status_code == 200:
-                res_json = res.json()
-                translated = None
-                if "/api/v1/chat" in endpoint:
-                    if "choices" in res_json:
-                        choice = res_json["choices"][0]
-                        if "message" in choice:
-                            translated = choice["message"]["content"]
-                        elif "text" in choice:
-                            translated = choice["text"]
-                    elif "output" in res_json:
-                        translated = res_json["output"]
-                    elif "response" in res_json:
-                        translated = res_json["response"]
-                else:
-                    if "choices" in res_json:
-                        translated = res_json["choices"][0]["message"]["content"]
-                    elif "response" in res_json:
-                        translated = res_json["response"]
-
-                if translated:
-                    return translated
+                
+            logger.info(f"{req_prefix}Provider={local_provider} Model={model} Time={elapsed:.2f}s")
+            return response.choices[0].message.content
         except Exception as e:
-            logger.error(
-                f"{req_prefix}Local AI connection failed for '{endpoint}': {e}"
-            )
+            logger.error(f"{req_prefix}Local AI connection failed for '{endpoint}': {e}")
 
     return None
 

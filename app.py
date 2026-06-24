@@ -2,44 +2,13 @@ import os
 import time
 import json
 import traceback
-from concurrent.futures import ThreadPoolExecutor
+import subprocess
+from rq import Queue, Retry
 
 from worker.config import redis_client, MODEL_TTL, HEALTH_PORT
 from worker.health_server import start_health_server
 from worker.model_manager import model_manager
-from worker.handlers import (
-    process_panel_detection,
-    process_ocr,
-    process_layout,
-    process_translation,
-    process_region_redo,
-    process_stub,
-    process_render,
-    process_qa,
-)
-
-
-def process_job(queue_name, job_data):
-    try:
-        if queue_name == "queue:panel-detection":
-            process_panel_detection(job_data)
-        elif queue_name == "queue:ocr":
-            process_ocr(job_data)
-        elif queue_name == "queue:layout":
-            process_layout(job_data)
-        elif queue_name == "queue:translation":
-            process_translation(job_data)
-        elif queue_name == "queue:region-redo":
-            process_region_redo(job_data)
-        elif queue_name == "queue:render":
-            process_render(job_data)
-        elif queue_name == "queue:qa":
-            process_qa(job_data)
-    except Exception as e:
-        print(
-            f"[Unified Worker] Error processing job from {queue_name}: {e}", flush=True
-        )
-        traceback.print_exc()
+from worker.rq_tasks import process_job_rq
 
 
 def main():
@@ -60,11 +29,18 @@ def main():
 
     concurrent_workers = int(os.environ.get("CONCURRENT_WORKERS", "4"))
     print(
-        f"[Unified Worker] Listening to Redis queues: {queues} with {concurrent_workers} concurrent threads...",
+        f"[Unified Worker] Listening to Redis queues: {queues}. Dispatching to RQ with {concurrent_workers} concurrent workers...",
         flush=True,
     )
 
-    pool = ThreadPoolExecutor(max_workers=concurrent_workers)
+    # Start RQ workers in the background
+    redis_url = f"redis://{os.environ.get('REDIS_HOST', 'localhost')}:{os.environ.get('REDIS_PORT', 6379)}/0"
+    worker_procs = []
+    for _ in range(concurrent_workers):
+        proc = subprocess.Popen(["rq", "worker", "manga_tasks", "--url", redis_url])
+        worker_procs.append(proc)
+
+    rq_queue = Queue('manga_tasks', connection=redis_client)
 
     last_status_time = 0.0
     status_interval = 300.0  # 5 minutes in seconds
@@ -97,7 +73,7 @@ def main():
                 print(
                     f"[Unified Worker Status] Uptime: {uptime_str} | "
                     f"Loaded Models: {loaded_str} | "
-                    f"Queues: {states_str}",
+                    f"Raw Queues: {states_str}",
                     flush=True,
                 )
                 last_status_time = now
@@ -109,7 +85,14 @@ def main():
                 queue_name = queue_bytes.decode("utf-8")
                 job_data = json.loads(job_json)
 
-                pool.submit(process_job, queue_name, job_data)
+                # Dispatch to RQ with exponential backoff
+                rq_queue.enqueue(
+                    process_job_rq, 
+                    queue_name, 
+                    job_data, 
+                    retry=Retry(max=3, interval=[10, 30, 60]),
+                    job_timeout=600
+                )
         except Exception as e:
             print(f"[Unified Worker] Error in main loop: {e}", flush=True)
             traceback.print_exc()
