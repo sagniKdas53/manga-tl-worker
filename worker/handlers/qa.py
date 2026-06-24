@@ -213,6 +213,9 @@ You MUST return a JSON object containing a "results" key with an array of object
         print("[QA] Local LLM QA skipped (disabled via environment).", flush=True)
 
     results = []
+    if logger.isEnabledFor(logging.DEBUG) and qa_response:
+        logger.debug(f"[QA] Raw LLM Response: {qa_response}")
+
     if qa_response:
         try:
             cleaned = qa_response.strip()
@@ -431,6 +434,9 @@ You MUST return a JSON object containing a "results" key with an array of object
     # rather than crashing the worker, we construct a default "passed" result
     # for all regions so the typesetting/translation pipeline can successfully complete.
     results = []
+    if logger.isEnabledFor(logging.DEBUG) and qa_response:
+        logger.debug(f"[QA] Raw VLM Response: {qa_response}")
+
     if qa_response:
         try:
             cleaned = qa_response.strip()

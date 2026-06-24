@@ -700,8 +700,12 @@ def process_ocr(job_data):
                 flush=True,
             )
 
+            avg_conf = sum(r["confidence"] for r in ordered_regions) / len(ordered_regions) if ordered_regions else 1.0
+
             callback_payload = {
                 "imageId": image_id,
+                "modelIdentifier": "MangaOCR/PaddleOCR",
+                "confidence": avg_conf,
                 "sourceLanguage": source_language,
                 "readingDirection": reading_direction,
                 "regions": ordered_regions,

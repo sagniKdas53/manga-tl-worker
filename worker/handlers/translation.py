@@ -108,6 +108,10 @@ def process_translation(job_data):
                 f"{req_prefix}Running standard batch translation for chunk {idx+1}..."
             )
             try:
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"{req_prefix}translate_batch_llm input chunk: {chunk}")
+                    logger.debug(f"{req_prefix}translate_batch_llm prompt context: {context_str}")
+
                 batch_res = translate_batch_llm(
                     chunk,
                     context_str,
@@ -116,6 +120,10 @@ def process_translation(job_data):
                     source_lang=source_lang,
                     target_lang=target_lang,
                 )
+
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"{req_prefix}translate_batch_llm output: {batch_res}")
+
                 chunk_mapping = parse_and_validate_batch(batch_res, chunk)
             except Exception as e:
                 logger.error(
@@ -164,6 +172,9 @@ def process_translation(job_data):
                 )
                 r_chunk_mapping = None
                 try:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"{req_prefix}Retry translate_batch_llm input chunk: {r_chunk}")
+
                     retry_res = translate_batch_llm(
                         r_chunk,
                         context_str,
@@ -172,6 +183,10 @@ def process_translation(job_data):
                         source_lang=source_lang,
                         target_lang=target_lang,
                     )
+
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"{req_prefix}Retry translate_batch_llm output: {retry_res}")
+
                     r_chunk_mapping = parse_and_validate_batch(retry_res, r_chunk)
                 except Exception as e:
                     logger.error(
@@ -254,6 +269,8 @@ def process_translation(job_data):
         elif isinstance(translated, str):
             translated_text = translated
 
+        from worker.config import PREFERRED_MODEL
+
         translations.append(
             {
                 "regionId": rid,
@@ -263,6 +280,8 @@ def process_translation(job_data):
                 "emotion": emotion,
                 "tone": tone,
                 "translationScore": translation_score,
+                "modelIdentifier": f"{MODEL_PROVIDER}/{PREFERRED_MODEL}",
+                "confidence": translation_score,
             }
         )
         logger.info(
