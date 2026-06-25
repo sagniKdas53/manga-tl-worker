@@ -50,7 +50,6 @@ redis_client = redis.Redis(
     socket_timeout=15,
     socket_connect_timeout=5,
     socket_keepalive=True,
-    retry_on_timeout=True,
 )
 
 minio_client = Minio(

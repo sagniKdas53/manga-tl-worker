@@ -273,7 +273,7 @@ def process_translation(job_data):
         elif isinstance(translated, str):
             translated_text = translated
 
-        from worker.config import PREFERRED_MODEL
+        from worker.config import PREFERRED_LLM_MODEL
 
         translations.append(
             {
@@ -284,7 +284,7 @@ def process_translation(job_data):
                 "emotion": emotion,
                 "tone": tone,
                 "translationScore": translation_score,
-                "modelIdentifier": f"{MODEL_PROVIDER}/{PREFERRED_MODEL}",
+                "modelIdentifier": f"{MODEL_PROVIDER}/{PREFERRED_LLM_MODEL}",
                 "confidence": translation_score,
             }
         )
