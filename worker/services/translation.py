@@ -694,12 +694,12 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
             logger.info(f"{req_prefix}{strategy_idx}. Gemini 2.5 Flash (Direct)")
             strategy_idx += 1
         elif provider == "openai":
-            openai_model = os.environ.get("PREFERRED_MODEL", "gpt-4o-mini")
+            openai_model = os.environ.get("PREFERRED_LLM_MODEL", "gpt-4o-mini")
             logger.info(f"{req_prefix}{strategy_idx}. {openai_model} (Direct OpenAI)")
             strategy_idx += 1
 
         if provider == "nvidia":
-            nvidia_model = os.environ.get("PREFERRED_MODEL", "google/gemma-3n-e4b-it")
+            nvidia_model = os.environ.get("PREFERRED_LLM_MODEL", "google/gemma-3n-e4b-it")
             logger.info(f"{req_prefix}{strategy_idx}. {nvidia_model} (Nvidia)")
             strategy_idx += 1
         if provider == "anthropic":
@@ -754,7 +754,7 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
 
         elif provider == "gemini":
             # Direct Gemini API fallback
-            preferred = os.environ.get("PREFERRED_MODEL", "gemini-2.5-flash")
+            preferred = os.environ.get("PREFERRED_LLM_MODEL", "gemini-2.5-flash")
             translated = try_cloud_ai(
                 "gemini", gemini_key, preferred, prompt, request_id=request_id
             )
@@ -763,7 +763,7 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
                 if is_valid_translation(text, cleaned, request_id=request_id):
                     return cleaned
         elif provider == "openai":
-            openai_model = os.environ.get("PREFERRED_MODEL", "gpt-4o-mini")
+            openai_model = os.environ.get("PREFERRED_LLM_MODEL", "gpt-4o-mini")
             translated = try_cloud_ai(
                 "openai",
                 api_key,
@@ -776,7 +776,7 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
                 if is_valid_translation(text, cleaned, request_id=request_id):
                     return cleaned
         if provider == "nvidia":
-            nvidia_model = os.environ.get("PREFERRED_MODEL", "google/gemma-3n-e4b-it")
+            nvidia_model = os.environ.get("PREFERRED_LLM_MODEL", "google/gemma-3n-e4b-it")
             translated = try_cloud_ai(
                 "nvidia",
                 nvidia_key,
@@ -994,7 +994,7 @@ Input:
 
         elif provider == "gemini":
             # Try Direct Gemini API
-            preferred = os.environ.get("PREFERRED_MODEL", "gemini-2.5-flash")
+            preferred = os.environ.get("PREFERRED_LLM_MODEL", "gemini-2.5-flash")
             logger.info(f"{req_prefix}Batch: Trying Gemini ({preferred}) Direct...")
             try:
                 res = try_cloud_ai(
@@ -1011,7 +1011,7 @@ Input:
                 logger.error(f"{req_prefix}Gemini Direct batch translation failed: {e}")
 
         elif provider == "openai":
-            preferred = os.environ.get("PREFERRED_MODEL", "gpt-4o-mini")
+            preferred = os.environ.get("PREFERRED_LLM_MODEL", "gpt-4o-mini")
             logger.info(f"{req_prefix}Batch: Trying OpenAI ({preferred}) Direct...")
             try:
                 res = try_cloud_ai(
@@ -1028,7 +1028,7 @@ Input:
                 logger.error(f"{req_prefix}OpenAI Direct batch translation failed: {e}")
 
         elif provider == "anthropic":
-            preferred = os.environ.get("PREFERRED_MODEL", "claude-3-5-sonnet-20241022")
+            preferred = os.environ.get("PREFERRED_LLM_MODEL", "claude-3-5-sonnet-20241022")
             logger.info(f"{req_prefix}Batch: Trying Anthropic ({preferred}) Direct...")
             try:
                 res = try_cloud_ai(
@@ -1048,7 +1048,7 @@ Input:
 
         # Try Nvidia NIM
         if provider == "nvidia":
-            nvidia_model = os.environ.get("PREFERRED_MODEL", "google/gemma-3n-e4b-it")
+            nvidia_model = os.environ.get("PREFERRED_LLM_MODEL", "google/gemma-3n-e4b-it")
             logger.info(f"{req_prefix}Batch: Trying Nvidia model {nvidia_model}...")
             try:
                 res = try_cloud_ai(
@@ -1278,7 +1278,7 @@ Input:
 
     if (provider == "gemini" or gemini_key) and gemini_key:
         logger.info(f"{req_prefix}VLM: Trying vision model via Gemini...")
-        vlm_model = os.environ.get("PREFERRED_MODEL", "gemini-1.5-flash")
+        vlm_model = os.environ.get("PREFERRED_VLM_MODEL", "gemini-1.5-flash")
         try:
             res = try_cloud_ai_vision(
                 "gemini",

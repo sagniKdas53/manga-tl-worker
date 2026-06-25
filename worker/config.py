@@ -81,7 +81,7 @@ YOLO_FALLBACK_MODE = os.environ.get("YOLO_FALLBACK_MODE", "opencv").lower()
 # Model Configuration
 MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "").lower().strip()
 API_KEY = os.environ.get("API_KEY", "").strip()
-PREFERRED_MODEL = os.environ.get("PREFERRED_MODEL", "").strip()
+PREFERRED_LLM_MODEL = os.environ.get("PREFERRED_LLM_MODEL", "").strip()
 PREFERRED_VLM_MODEL = os.environ.get("PREFERRED_VLM_MODEL", "").strip()
 LOCAL_LLM_PROVIDER = os.environ.get("LOCAL_LLM_PROVIDER", "").strip()
 LOCAL_LLM_ENDPOINT = os.environ.get("LOCAL_LLM_ENDPOINT", "").strip()
@@ -101,7 +101,7 @@ if QA_MODE == "auto":
     effective_local_llm = "" if disable_local else LOCAL_LLM_MODEL
 
     # Detect VLM capability (Cloud VLM or effective local VLM)
-    has_vlm = bool(PREFERRED_VLM_MODEL or effective_local_vlm)
+    has_vlm = bool(os.environ.get("QA_VLM_MODEL", "").strip() or PREFERRED_VLM_MODEL or effective_local_vlm)
     
     # Detect LLM capability (Cloud provider or effective local LLM)
     if has_vlm:

@@ -154,7 +154,7 @@ Region Metadata:
 
 You MUST return a JSON object containing a "results" key with an array of objects conforming to the requested schema. No other text."""
 
-    provider = os.environ.get("MODEL_PROVIDER", "").lower().strip()
+    provider = os.environ.get("QA_MODEL_PROVIDER", os.environ.get("MODEL_PROVIDER", "")).lower().strip()
     api_key = os.environ.get("API_KEY", "").strip()
 
     openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip() or (
@@ -168,40 +168,38 @@ You MUST return a JSON object containing a "results" key with an array of object
     )
 
     qa_response = None
-    if openrouter_key:
-        llm_model = os.environ.get("PREFERRED_MODEL", "google/gemini-2.5-flash")
-        try:
-            qa_response = try_cloud_ai(
-                "openrouter",
-                openrouter_key,
-                llm_model,
-                prompt,
-                QA_JSON_SCHEMA,
-            )
-        except Exception as e:
-            print(f"[QA] LLM QA via OpenRouter failed: {e}", flush=True)
 
-    if not qa_response and gemini_key:
-        llm_model = os.environ.get("PREFERRED_MODEL", "gemini-2.5-flash")
-        try:
-            qa_response = try_cloud_ai(
-                "gemini", gemini_key, llm_model, prompt, QA_JSON_SCHEMA
-            )
-        except Exception as e:
-            print(f"[QA] LLM QA via Gemini failed: {e}", flush=True)
+    def attempt_llm(prov):
+        if prov == "openrouter" and openrouter_key:
+            llm_model = os.environ.get("QA_LLM_MODEL", os.environ.get("PREFERRED_LLM_MODEL", "google/gemini-2.5-flash"))
+            try:
+                return try_cloud_ai("openrouter", openrouter_key, llm_model, prompt, QA_JSON_SCHEMA)
+            except Exception as e:
+                print(f"[QA] LLM QA via OpenRouter failed: {e}", flush=True)
+        elif prov == "gemini" and gemini_key:
+            llm_model = os.environ.get("QA_LLM_MODEL", os.environ.get("PREFERRED_LLM_MODEL", "gemini-2.5-flash"))
+            try:
+                return try_cloud_ai("gemini", gemini_key, llm_model, prompt, QA_JSON_SCHEMA)
+            except Exception as e:
+                print(f"[QA] LLM QA via Gemini failed: {e}", flush=True)
+        elif prov == "nvidia" and nvidia_key:
+            llm_model = os.environ.get("QA_LLM_MODEL", os.environ.get("PREFERRED_LLM_MODEL", "google/gemma-3n-e4b-it"))
+            try:
+                return try_cloud_ai("nvidia", nvidia_key, llm_model, prompt, QA_JSON_SCHEMA)
+            except Exception as e:
+                print(f"[QA] LLM QA via Nvidia failed: {e}", flush=True)
+        return None
 
-    if not qa_response and nvidia_key:
-        nvidia_model = os.environ.get("PREFERRED_MODEL", "google/gemma-3n-e4b-it")
-        try:
-            qa_response = try_cloud_ai(
-                "nvidia",
-                nvidia_key,
-                nvidia_model,
-                prompt,
-                QA_JSON_SCHEMA,
-            )
-        except Exception as e:
-            print(f"[QA] LLM QA via Nvidia failed: {e}", flush=True)
+    # Try the preferred provider first
+    qa_response = attempt_llm(provider)
+
+    # Fallback to others if the preferred one is not configured or failed
+    if not qa_response:
+        for p in ["openrouter", "gemini", "nvidia"]:
+            if p != provider:
+                qa_response = attempt_llm(p)
+                if qa_response:
+                    break
 
     local_llm_model = os.environ.get("LOCAL_LLM_MODEL", "").strip()
     disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in ("true", "1", "yes")
@@ -362,7 +360,7 @@ Region Metadata:
 
 You MUST return a JSON object containing a "results" key with an array of objects conforming to the requested schema. No other text."""
 
-    provider = os.environ.get("MODEL_PROVIDER", "").lower().strip()
+    provider = os.environ.get("QA_MODEL_PROVIDER", os.environ.get("MODEL_PROVIDER", "")).lower().strip()
     api_key = os.environ.get("API_KEY", "").strip()
 
     openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip() or (
@@ -376,44 +374,38 @@ You MUST return a JSON object containing a "results" key with an array of object
     )
 
     qa_response = None
-    if openrouter_key:
-        vlm_model = os.environ.get("PREFERRED_VLM_MODEL", "google/gemini-2.5-flash")
-        try:
-            qa_response = try_cloud_ai_vision(
-                "openrouter",
-                openrouter_key,
-                vlm_model,
-                prompt,
-                combined_base64,
-                QA_JSON_SCHEMA,
-            )
-        except Exception as e:
-            print(f"[QA] VLM QA via OpenRouter failed: {e}", flush=True)
 
-    if not qa_response and gemini_key:
-        vlm_model = os.environ.get("PREFERRED_MODEL", "gemini-1.5-flash")
-        try:
-            qa_response = try_cloud_ai_vision(
-                "gemini", gemini_key, vlm_model, prompt, combined_base64, QA_JSON_SCHEMA
-            )
-        except Exception as e:
-            print(f"[QA] VLM QA via Gemini failed: {e}", flush=True)
+    def attempt_vlm(prov):
+        if prov == "openrouter" and openrouter_key:
+            vlm_model = os.environ.get("QA_VLM_MODEL", os.environ.get("PREFERRED_VLM_MODEL", "google/gemini-2.5-flash"))
+            try:
+                return try_cloud_ai_vision("openrouter", openrouter_key, vlm_model, prompt, combined_base64, QA_JSON_SCHEMA)
+            except Exception as e:
+                print(f"[QA] VLM QA via OpenRouter failed: {e}", flush=True)
+        elif prov == "gemini" and gemini_key:
+            vlm_model = os.environ.get("QA_VLM_MODEL", os.environ.get("PREFERRED_VLM_MODEL", "gemini-1.5-flash"))
+            try:
+                return try_cloud_ai_vision("gemini", gemini_key, vlm_model, prompt, combined_base64, QA_JSON_SCHEMA)
+            except Exception as e:
+                print(f"[QA] VLM QA via Gemini failed: {e}", flush=True)
+        elif prov == "nvidia" and nvidia_key:
+            vlm_model = os.environ.get("QA_VLM_MODEL", os.environ.get("NVIDIA_VLM_MODEL", os.environ.get("PREFERRED_VLM_MODEL", "nvidia/nemotron-nano-12b-v2-vl")))
+            try:
+                return try_cloud_ai_vision("nvidia", nvidia_key, vlm_model, prompt, combined_base64, QA_JSON_SCHEMA)
+            except Exception as e:
+                print(f"[QA] VLM QA via Nvidia failed: {e}", flush=True)
+        return None
 
-    if not qa_response and nvidia_key:
-        nvidia_vlm_model = os.environ.get(
-            "NVIDIA_VLM_MODEL", "nvidia/nemotron-nano-12b-v2-vl"
-        )
-        try:
-            qa_response = try_cloud_ai_vision(
-                "nvidia",
-                nvidia_key,
-                nvidia_vlm_model,
-                prompt,
-                combined_base64,
-                QA_JSON_SCHEMA,
-            )
-        except Exception as e:
-            print(f"[QA] VLM QA via Nvidia failed: {e}", flush=True)
+    # Try the preferred provider first
+    qa_response = attempt_vlm(provider)
+
+    # Fallback to others if the preferred one is not configured or failed
+    if not qa_response:
+        for p in ["openrouter", "gemini", "nvidia"]:
+            if p != provider:
+                qa_response = attempt_vlm(p)
+                if qa_response:
+                    break
 
     # Fallback to Local VLM:
     # Attempted only if cloud VLM calls failed (e.g. key missing, or provider is cooled down on 429).
