@@ -20,9 +20,7 @@ level = logging.TRACE if LOG_LEVEL == "TRACE" else getattr(logging, LOG_LEVEL)
 logging.basicConfig(level=level, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("translation")
 
-# Suppress LiteLLM debug logs to avoid massive base64 payload prints
-logging.getLogger("LiteLLM").setLevel(logging.WARNING)
-logging.getLogger("litellm").setLevel(logging.WARNING)
+
 
 # Connection Configs
 REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
