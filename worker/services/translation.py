@@ -734,9 +734,8 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
     strategy_idx = 1
     if not local_only:
         if provider == "openrouter":
-            logger.info(f"{req_prefix}{strategy_idx}. DeepSeek V4 Pro (OpenRouter)")
-            strategy_idx += 1
-            logger.info(f"{req_prefix}{strategy_idx}. Gemini 2.5 Flash (OpenRouter)")
+            preferred = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "meta-llama/llama-3-8b-instruct:free"
+            logger.info(f"{req_prefix}{strategy_idx}. {preferred} (OpenRouter)")
             strategy_idx += 1
         elif provider == "gemini":
             logger.info(f"{req_prefix}{strategy_idx}. Gemini 2.5 Flash (Direct)")
@@ -773,25 +772,13 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
             f"{req_prefix}LOCAL_ONLY mode (provider='{provider}') — skipping cloud AI tiers."
         )
     else:
-        # 1. Cloud LLM Layer (DeepSeek V4 Pro, then Gemini 2.5 Flash / Claude Sonnet fallback)
+        # 1. Cloud LLM Layer
         if provider == "openrouter":
+            preferred = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "meta-llama/llama-3-8b-instruct:free"
             translated = try_cloud_ai(
                 "openrouter",
                 openrouter_key,
-                "deepseek-ai/deepseek-v4-pro",
-                prompt,
-                request_id=request_id,
-            )
-            if translated:
-                cleaned = clean_translated_text(translated)
-                if is_valid_translation(text, cleaned, request_id=request_id):
-                    return cleaned
-
-            # Fallback to Gemini 2.5 Flash via OpenRouter
-            translated = try_cloud_ai(
-                "openrouter",
-                openrouter_key,
-                "gemini-1.5-pro",
+                preferred,
                 prompt,
                 request_id=request_id,
             )
@@ -838,10 +825,11 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
                     return cleaned
 
         if provider == "anthropic":
+            anthropic_model = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "claude-3-5-sonnet-20241022"
             translated = try_cloud_ai(
                 "anthropic",
                 anthropic_key,
-                "claude-3-5-sonnet-20241022",
+                anthropic_model,
                 prompt,
                 request_id=request_id,
             )
@@ -1005,14 +993,14 @@ Input:
             f"{req_prefix}Batch: LOCAL_ONLY mode (provider='{provider}') — skipping cloud AI tiers."
         )
     else:
-        # Try DeepSeek V4 Pro
         if provider == "openrouter":
-            logger.info(f"{req_prefix}Batch: Trying DeepSeek V4 Pro...")
+            preferred = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "meta-llama/llama-3-8b-instruct:free"
+            logger.info(f"{req_prefix}Batch: Trying OpenRouter ({preferred})...")
             try:
                 res = try_cloud_ai(
                     "openrouter",
                     openrouter_key,
-                    "deepseek-ai/deepseek-v4-pro",
+                    preferred,
                     prompt,
                     response_schema,
                     request_id=request_id,
@@ -1020,25 +1008,7 @@ Input:
                 if res:
                     return res
             except Exception as e:
-                logger.error(f"{req_prefix}DeepSeek batch translation failed: {e}")
-
-            # Try Gemini 2.5 Flash via OpenRouter
-            logger.info(f"{req_prefix}Batch: Trying Gemini 2.5 Flash (OpenRouter)...")
-            try:
-                res = try_cloud_ai(
-                    "openrouter",
-                    openrouter_key,
-                    "gemini-1.5-pro",
-                    prompt,
-                    response_schema,
-                    request_id=request_id,
-                )
-                if res:
-                    return res
-            except Exception as e:
-                logger.error(
-                    f"{req_prefix}Gemini OpenRouter batch translation failed: {e}"
-                )
+                logger.error(f"{req_prefix}OpenRouter batch translation failed: {e}")
 
         elif provider == "gemini":
             # Try Direct Gemini API

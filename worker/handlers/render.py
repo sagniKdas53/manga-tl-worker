@@ -571,6 +571,19 @@ def process_render(job_data):
     image_id = job_data["imageId"]
     print(f"[Render] Processing image: {image_id}", flush=True)
 
+    from worker.config import QA_MODE
+    if QA_MODE in ("llm", "none"):
+        print(f"[Render] QA_MODE is '{QA_MODE}', skipping rendering for image: {image_id}", flush=True)
+        callback_payload = {"imageId": image_id}
+        try:
+            res = requests.post(
+                f"{CALLBACK_URL}/render", json=callback_payload, headers=BACKEND_HEADERS
+            )
+            print(f"[Render] Callback status code: {res.status_code}", flush=True)
+        except Exception as e:
+            print(f"[Render] Failed to post callback: {e}", flush=True)
+        return
+
     try:
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
