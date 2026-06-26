@@ -193,15 +193,8 @@ You MUST return a JSON object containing a "results" key with an array of object
         return None
 
     # Try the preferred provider first
-    qa_response = attempt_llm(provider)
-
-    # Fallback to others if the preferred one is not configured or failed
-    if not qa_response:
-        for p in ["openrouter", "gemini", "nvidia"]:
-            if p != provider:
-                qa_response = attempt_llm(p)
-                if qa_response:
-                    break
+    if provider:
+        qa_response = attempt_llm(provider)
 
     local_llm_model = os.environ.get("LOCAL_LLM_MODEL", "").strip()
     disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in ("true", "1", "yes")
@@ -401,15 +394,8 @@ You MUST return a JSON object containing a "results" key with an array of object
         return None
 
     # Try the preferred provider first
-    qa_response = attempt_vlm(provider)
-
-    # Fallback to others if the preferred one is not configured or failed
-    if not qa_response:
-        for p in ["openrouter", "gemini", "nvidia"]:
-            if p != provider:
-                qa_response = attempt_vlm(p)
-                if qa_response:
-                    break
+    if provider:
+        qa_response = attempt_vlm(provider)
 
     # Fallback to Local VLM:
     # Attempted only if cloud VLM calls failed (e.g. key missing, or provider is cooled down on 429).

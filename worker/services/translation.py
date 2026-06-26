@@ -406,47 +406,57 @@ def try_cloud_ai(
                     "json_schema": {"name": "manga_translation", "schema": response_schema, "strict": True},
                 }
 
-    try:
-        logger.info(f"{req_prefix}Sending request to '{provider}' using model '{actual_model}'...")
-        start = time.perf_counter()
-        
-        response = requests.post(url, headers=headers, json=payload, timeout=90 if provider == "nvidia" else 60)
-        
-        if response.status_code == 429:
-            logger.warning(f"{req_prefix}Provider '{provider}' returned 429. Initiating 60s cooldown.")
-            PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
+    max_retries = 3
+    base_backoff = 2.0
+
+    for attempt in range(max_retries + 1):
+        try:
+            logger.info(f"{req_prefix}Sending request to '{provider}' using model '{actual_model}' (attempt {attempt+1}/{max_retries+1})...")
+            start = time.perf_counter()
+            
+            response = requests.post(url, headers=headers, json=payload, timeout=90 if provider == "nvidia" else 60)
+            
+            if response.status_code == 429:
+                if attempt < max_retries:
+                    sleep_time = base_backoff * (2 ** attempt)
+                    logger.warning(f"{req_prefix}Provider '{provider}' returned 429. Retrying in {sleep_time:.2f}s...")
+                    time.sleep(sleep_time)
+                    continue
+                else:
+                    logger.warning(f"{req_prefix}Provider '{provider}' returned 429. Initiating 60s cooldown.")
+                    PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
+                    return None
+                
+            response.raise_for_status()
+            data = response.json()
+            
+            elapsed = time.perf_counter() - start
+            logger.info(f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s")
+            
+            if provider == "anthropic":
+                content = data.get("content", [{}])[0].get("text", "")
+                usage = data.get("usage", {})
+                prompt_tokens = usage.get("input_tokens", 0)
+                completion_tokens = usage.get("output_tokens", 0)
+                total_tokens = prompt_tokens + completion_tokens
+            else:
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                usage = data.get("usage", {})
+                prompt_tokens = usage.get("prompt_tokens", 0)
+                completion_tokens = usage.get("completion_tokens", 0)
+                total_tokens = usage.get("total_tokens", 0)
+                
+            logger.info(f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
+            cost = estimate_cost(actual_model, prompt_tokens, completion_tokens, provider)
+            logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
+            
+            return content
+            
+        except Exception as e:
+            logger.error(f"{req_prefix}Cloud LLM Translation failed: {e}")
+            if 'response' in locals() and hasattr(response, 'text'):
+                logger.error(f"Response text: {response.text}")
             return None
-            
-        response.raise_for_status()
-        data = response.json()
-        
-        elapsed = time.perf_counter() - start
-        logger.info(f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s")
-        
-        if provider == "anthropic":
-            content = data.get("content", [{}])[0].get("text", "")
-            usage = data.get("usage", {})
-            prompt_tokens = usage.get("input_tokens", 0)
-            completion_tokens = usage.get("output_tokens", 0)
-            total_tokens = prompt_tokens + completion_tokens
-        else:
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            usage = data.get("usage", {})
-            prompt_tokens = usage.get("prompt_tokens", 0)
-            completion_tokens = usage.get("completion_tokens", 0)
-            total_tokens = usage.get("total_tokens", 0)
-            
-        logger.info(f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
-        cost = estimate_cost(actual_model, prompt_tokens, completion_tokens, provider)
-        logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
-        
-        return content
-        
-    except Exception as e:
-        logger.error(f"{req_prefix}Cloud LLM Translation failed: {e}")
-        if 'response' in locals() and hasattr(response, 'text'):
-            logger.error(f"Response text: {response.text}")
-        return None
 
 def try_cloud_ai_vision(
     provider,
@@ -506,47 +516,57 @@ def try_cloud_ai_vision(
                     "json_schema": {"name": "manga_translation", "schema": response_schema, "strict": True},
                 }
 
-    try:
-        logger.info(f"{req_prefix}Sending vision request to '{provider}' using model '{actual_model}'...")
-        start = time.perf_counter()
-        
-        response = requests.post(url, headers=headers, json=payload, timeout=90)
-        
-        if response.status_code == 429:
-            logger.warning(f"{req_prefix}Vision provider '{provider}' returned 429. Initiating 60s cooldown.")
-            PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
+    max_retries = 3
+    base_backoff = 2.0
+
+    for attempt in range(max_retries + 1):
+        try:
+            logger.info(f"{req_prefix}Sending vision request to '{provider}' using model '{actual_model}' (attempt {attempt+1}/{max_retries+1})...")
+            start = time.perf_counter()
+            
+            response = requests.post(url, headers=headers, json=payload, timeout=90)
+            
+            if response.status_code == 429:
+                if attempt < max_retries:
+                    sleep_time = base_backoff * (2 ** attempt)
+                    logger.warning(f"{req_prefix}Vision provider '{provider}' returned 429. Retrying in {sleep_time:.2f}s...")
+                    time.sleep(sleep_time)
+                    continue
+                else:
+                    logger.warning(f"{req_prefix}Vision provider '{provider}' returned 429. Initiating 60s cooldown.")
+                    PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
+                    return None
+                
+            response.raise_for_status()
+            data = response.json()
+            
+            elapsed = time.perf_counter() - start
+            logger.info(f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s")
+    
+            if provider == "anthropic":
+                content = data.get("content", [{}])[0].get("text", "")
+                usage = data.get("usage", {})
+                prompt_tokens = usage.get("input_tokens", 0)
+                completion_tokens = usage.get("output_tokens", 0)
+                total_tokens = prompt_tokens + completion_tokens
+            else:
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                usage = data.get("usage", {})
+                prompt_tokens = usage.get("prompt_tokens", 0)
+                completion_tokens = usage.get("completion_tokens", 0)
+                total_tokens = usage.get("total_tokens", 0)
+                
+            logger.info(f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
+            cost = estimate_cost(actual_model, prompt_tokens, completion_tokens, provider)
+            logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
+    
+            return content
+            
+        except Exception as e:
+            logger.error(f"{req_prefix}Vision Translation failed: {e}")
+            if 'response' in locals() and hasattr(response, 'text'):
+                logger.error(f"Response text: {response.text}")
             return None
-            
-        response.raise_for_status()
-        data = response.json()
-        
-        elapsed = time.perf_counter() - start
-        logger.info(f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s")
-
-        if provider == "anthropic":
-            content = data.get("content", [{}])[0].get("text", "")
-            usage = data.get("usage", {})
-            prompt_tokens = usage.get("input_tokens", 0)
-            completion_tokens = usage.get("output_tokens", 0)
-            total_tokens = prompt_tokens + completion_tokens
-        else:
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            usage = data.get("usage", {})
-            prompt_tokens = usage.get("prompt_tokens", 0)
-            completion_tokens = usage.get("completion_tokens", 0)
-            total_tokens = usage.get("total_tokens", 0)
-            
-        logger.info(f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
-        cost = estimate_cost(actual_model, prompt_tokens, completion_tokens, provider)
-        logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
-
-        return content
-        
-    except Exception as e:
-        logger.error(f"{req_prefix}Vision Translation failed: {e}")
-        if 'response' in locals() and hasattr(response, 'text'):
-            logger.error(f"Response text: {response.text}")
-        return None
 
 def try_local_ai(prompt, text, response_schema=None, request_id=None):
     req_prefix = f"[{request_id}] " if request_id else ""
@@ -1274,7 +1294,7 @@ Input:
         api_key if provider == "nvidia" else ""
     )
 
-    if openrouter_key:
+    if provider == "openrouter" and openrouter_key:
         logger.info(f"{req_prefix}VLM: Trying vision model via OpenRouter...")
         vlm_model = os.environ.get("PREFERRED_VLM_MODEL", "").strip() or "gemini-1.5-flash"
         try:
@@ -1294,13 +1314,13 @@ Input:
                 f"{req_prefix}VLM vision translation via OpenRouter failed: {e}"
             )
 
-    if (provider == "gemini" or gemini_key) and gemini_key:
+    elif provider == "gemini" and gemini_key:
         logger.info(f"{req_prefix}VLM: Trying vision model via Gemini...")
         vlm_model = os.environ.get("PREFERRED_VLM_MODEL", "").strip() or "gemini-1.5-flash"
         try:
             res = try_cloud_ai_vision(
                 "gemini",
-                gemini_key or api_key,
+                gemini_key,
                 vlm_model,
                 prompt,
                 base64_image,
@@ -1312,7 +1332,7 @@ Input:
         except Exception as e:
             logger.error(f"{req_prefix}VLM vision translation via Gemini failed: {e}")
 
-    if (provider == "nvidia" or nvidia_key) and nvidia_key:
+    elif provider == "nvidia" and nvidia_key:
         logger.info(f"{req_prefix}VLM: Trying vision model via Nvidia...")
         nvidia_vlm_model = (
             os.environ.get("NVIDIA_VLM_MODEL", "").strip()
