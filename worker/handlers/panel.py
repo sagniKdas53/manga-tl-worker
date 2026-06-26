@@ -1,5 +1,5 @@
 import requests
-from worker.config import CALLBACK_URL, BACKEND_HEADERS
+from worker.config import CALLBACK_URL, BACKEND_HEADERS, redis_client
 from worker.services.panel_detection import detect_panels
 from worker.utils.image import download_image
 
@@ -7,8 +7,20 @@ from worker.utils.image import download_image
 def process_panel_detection(job_data):
     image_id = job_data["imageId"]
     reading_direction = (job_data.get("readingDirection") or "rtl").strip().lower()
+    
+    page_num = job_data.get("pageNumber")
+    chapter_num = job_data.get("chapterNumber")
+    queue_len = redis_client.llen("queue:panel-detection")
+    
+    progress_str = ""
+    if page_num is not None:
+        progress_str = f" | Page {page_num}"
+        if chapter_num is not None:
+            progress_str += f" of Chapter {chapter_num}"
+        progress_str += f" (Queue: {queue_len} remaining)"
+
     print(
-        f"[Panel Detection] Processing image: {image_id} (direction={reading_direction})",
+        f"[Panel Detection] Processing image: {image_id} (direction={reading_direction}){progress_str}",
         flush=True,
     )
 

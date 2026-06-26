@@ -1,7 +1,7 @@
 import io
 import requests
 from PIL import Image, ImageDraw, ImageFont
-from worker.config import CALLBACK_URL, BACKEND_HEADERS, minio_client, logger
+from worker.config import CALLBACK_URL, BACKEND_HEADERS, minio_client, logger, redis_client
 from worker.utils.image import download_image
 import os
 
@@ -569,7 +569,19 @@ def fit_text_in_box_py(
 
 def process_render(job_data):
     image_id = job_data["imageId"]
-    print(f"[Render] Processing image: {image_id}", flush=True)
+    
+    page_num = job_data.get("pageNumber")
+    chapter_num = job_data.get("chapterNumber")
+    queue_len = redis_client.llen("queue:render")
+    
+    progress_str = ""
+    if page_num is not None:
+        progress_str = f" | Page {page_num}"
+        if chapter_num is not None:
+            progress_str += f" of Chapter {chapter_num}"
+        progress_str += f" (Queue: {queue_len} remaining)"
+
+    print(f"[Render] Processing image: {image_id}{progress_str}", flush=True)
 
     from worker.config import QA_MODE
     if QA_MODE in ("llm", "none"):

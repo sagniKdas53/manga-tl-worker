@@ -2,7 +2,7 @@ import os
 import uuid
 import logging
 import requests
-from worker.config import logger, CALLBACK_URL, BACKEND_HEADERS, MODEL_PROVIDER
+from worker.config import logger, CALLBACK_URL, BACKEND_HEADERS, MODEL_PROVIDER, redis_client
 from worker.utils.image import download_image
 from worker.services.translation import (
     should_translate_region,
@@ -27,8 +27,19 @@ def process_translation(job_data):
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(f"{req_prefix}Translation Inputs: job_data={job_data}")
 
+    page_num = job_data.get("pageNumber")
+    chapter_num = job_data.get("chapterNumber")
+    queue_len = redis_client.llen("queue:translation")
+    
+    progress_str = ""
+    if page_num is not None:
+        progress_str = f" | Page {page_num}"
+        if chapter_num is not None:
+            progress_str += f" of Chapter {chapter_num}"
+        progress_str += f" (Queue: {queue_len} remaining)"
+
     logger.info(
-        f"{req_prefix}Processing translation for image: {image_id} ({source_lang} -> {target_lang})"
+        f"{req_prefix}Processing translation for image: {image_id} ({source_lang} -> {target_lang}){progress_str}"
     )
 
     try:

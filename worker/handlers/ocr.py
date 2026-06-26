@@ -8,7 +8,7 @@ import re
 import json
 from functools import cmp_to_key
 
-from worker.config import CALLBACK_URL, BACKEND_HEADERS, logger, YOLO_MASK_EROSION
+from worker.config import CALLBACK_URL, BACKEND_HEADERS, logger, YOLO_MASK_EROSION, redis_client
 from worker.model_manager import model_manager
 from worker.utils.image import downscale_for_ocr, calculate_overlap_area, download_image
 from worker.utils.text import detect_language
@@ -243,8 +243,19 @@ def process_ocr(job_data):
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(f"[OCR] Inputs: job_data={job_data}")
 
+    page_num = job_data.get("pageNumber")
+    chapter_num = job_data.get("chapterNumber")
+    queue_len = redis_client.llen("queue:ocr")
+    
+    progress_str = ""
+    if page_num is not None:
+        progress_str = f" | Page {page_num}"
+        if chapter_num is not None:
+            progress_str += f" of Chapter {chapter_num}"
+        progress_str += f" (Queue: {queue_len} remaining)"
+
     print(
-        f"[OCR] Processing image: {image_id} (lang={source_language}, direction={reading_direction})",
+        f"[OCR] Processing image: {image_id} (lang={source_language}, direction={reading_direction}){progress_str}",
         flush=True,
     )
 

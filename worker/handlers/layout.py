@@ -1,12 +1,24 @@
 import requests
-from worker.config import CALLBACK_URL, BACKEND_HEADERS
+from worker.config import CALLBACK_URL, BACKEND_HEADERS, redis_client
 from worker.services.layout import classify_region_type, group_conversations
 
 
 def process_layout(job_data):
     """Layout analysis: classify region types and group conversations."""
     image_id = job_data["imageId"]
-    print(f"[Layout] Processing image: {image_id}", flush=True)
+    
+    page_num = job_data.get("pageNumber")
+    chapter_num = job_data.get("chapterNumber")
+    queue_len = redis_client.llen("queue:layout")
+    
+    progress_str = ""
+    if page_num is not None:
+        progress_str = f" | Page {page_num}"
+        if chapter_num is not None:
+            progress_str += f" of Chapter {chapter_num}"
+        progress_str += f" (Queue: {queue_len} remaining)"
+
+    print(f"[Layout] Processing image: {image_id}{progress_str}", flush=True)
 
     # 1. Fetch OCR regions + panels from backend
     try:

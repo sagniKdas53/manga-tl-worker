@@ -5,7 +5,7 @@ import json
 import base64
 import requests
 from PIL import Image
-from worker.config import CALLBACK_URL, BACKEND_HEADERS, minio_client, logger, QA_MODE
+from worker.config import CALLBACK_URL, BACKEND_HEADERS, minio_client, logger, QA_MODE, redis_client
 from worker.utils.image import download_image
 from worker.services.translation import try_cloud_ai, try_local_ai, try_cloud_ai_vision, try_local_vlm_vision
 
@@ -50,6 +50,20 @@ QA_JSON_SCHEMA = {
 
 
 def process_qa(job_data):
+    image_id = job_data["imageId"]
+    page_num = job_data.get("pageNumber")
+    chapter_num = job_data.get("chapterNumber")
+    queue_len = redis_client.llen("queue:qa")
+    
+    progress_str = ""
+    if page_num is not None:
+        progress_str = f" | Page {page_num}"
+        if chapter_num is not None:
+            progress_str += f" of Chapter {chapter_num}"
+        progress_str += f" (Queue: {queue_len} remaining)"
+
+    print(f"[QA] Processing image: {image_id}{progress_str} (mode={QA_MODE})", flush=True)
+
     if QA_MODE == "none":
         _auto_pass_all(job_data)
     elif QA_MODE == "llm":
