@@ -1,8 +1,11 @@
+"""Unified workers daemon loop entrypoint."""
+
 import os
 import time
 import json
 import traceback
 import subprocess
+import redis
 from rq import Queue, Retry
 
 from worker.config import redis_client, MODEL_TTL, HEALTH_PORT
@@ -11,7 +14,8 @@ from worker.model_manager import model_manager
 from worker.rq_tasks import process_job_rq
 
 
-def main():
+def main():  # pylint: disable=too-many-locals
+    """Main daemon loop running worker processes and dispatching Redis tasks."""
     start_time = time.time()
 
     # Start the daemon HTTP health check server
@@ -29,15 +33,20 @@ def main():
 
     concurrent_workers = int(os.environ.get("CONCURRENT_WORKERS", "4"))
     print(
-        f"[Unified Worker] Listening to Redis queues: {queues}. Dispatching to RQ with {concurrent_workers} concurrent workers...",
+        f"[Unified Worker] Listening to Redis queues: {queues}. "
+        f"Dispatching to RQ with {concurrent_workers} concurrent workers...",
         flush=True,
     )
 
     # Start RQ workers in the background
-    redis_url = f"redis://{os.environ.get('REDIS_HOST', 'localhost')}:{os.environ.get('REDIS_PORT', 6379)}/0"
+    redis_host = os.environ.get("REDIS_HOST", "localhost")
+    redis_port = os.environ.get("REDIS_PORT", 6379)
+    redis_url = f"redis://{redis_host}:{redis_port}/0"
     worker_procs = []
     for _ in range(concurrent_workers):
-        proc = subprocess.Popen(["rq", "worker", "manga_tasks", "--url", redis_url])
+        proc = subprocess.Popen(  # pylint: disable=consider-using-with
+            ["rq", "worker", "manga_tasks", "--url", redis_url]
+        )
         worker_procs.append(proc)
 
     rq_queue = Queue("manga_tasks", connection=redis_client)
@@ -67,7 +76,7 @@ def main():
                 try:
                     queue_lengths = [f"{q}: {redis_client.llen(q)}" for q in queues]
                     states_str = ", ".join(queue_lengths)
-                except Exception as redis_err:
+                except redis.RedisError as redis_err:
                     states_str = f"Error fetching queue states ({redis_err})"
 
                 print(
@@ -80,8 +89,10 @@ def main():
 
             # Listen for new jobs on the queue
             job_tuple = redis_client.blpop(queues, timeout=5)
-            if job_tuple:
-                queue_bytes, job_json = job_tuple
+            if isinstance(job_tuple, (list, tuple)) and len(job_tuple) == 2:
+                # pylint: disable=unsubscriptable-object
+                queue_bytes = job_tuple[0]
+                job_json = job_tuple[1]
                 queue_name = queue_bytes.decode("utf-8")
                 job_data = json.loads(job_json)
 
@@ -93,8 +104,8 @@ def main():
                     retry=Retry(max=3, interval=[10, 30, 60]),
                     job_timeout=600,
                 )
-        except Exception as e:
-            print(f"[Unified Worker] Error in main loop: {e}", flush=True)
+        except Exception as err_main:  # pylint: disable=broad-except
+            print(f"[Unified Worker] Error in main loop: {err_main}", flush=True)
             traceback.print_exc()
             time.sleep(1)
 

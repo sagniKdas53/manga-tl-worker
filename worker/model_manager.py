@@ -1,27 +1,20 @@
+"""Model caching and manager logic for OCR libraries."""
+
 import os
 import gc
 import time
+import threading
 from manga_ocr import MangaOcr
 
-# Configure PaddleOCR import and environment variables
-PaddleOCR = None
+# Configure PaddleOCR environment variables
 try:
-    print("[Unified Worker] Importing PaddleOCR...", flush=True)
     os.environ["PADDLEX_OFFLINE_MODE"] = "1"
     os.environ["PADDLE_DISABLE_TELEMETRY"] = "1"
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["FLAGS_use_mkldnn"] = "0"
     os.environ["PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT"] = "0"
-
-    from paddleocr import PaddleOCR as _PaddleOCR
-
-    PaddleOCR = _PaddleOCR
-    print(
-        "[Unified Worker] PaddleOCR imported successfully (readers will be initialized on first use per language).",
-        flush=True,
-    )
-except Exception as e:
-    print(f"[Unified Worker] Failed to import PaddleOCR: {e}", flush=True)
+except Exception as err_env:  # pylint: disable=broad-except
+    print(f"[Unified Worker] Failed to set PaddleOCR environment: {err_env}", flush=True)
 
 
 LANG_TO_PADDLE: dict = {
@@ -34,10 +27,11 @@ LANG_TO_PADDLE: dict = {
 }
 
 
-import threading
-
-
 class ModelManager:
+    """Manager class to cache and evict machine learning OCR model instances."""
+
+    paddle_ocr_available = True
+
     def __init__(self):
         # Cached reader instances
         self.paddle_readers = {}
@@ -53,7 +47,7 @@ class ModelManager:
 
     def get_paddle_ocr_reader(self, source_language: str):
         """Return a cached PaddleOCR reader for *source_language* (ISO 639-1 code)."""
-        if PaddleOCR is None:
+        if not ModelManager.paddle_ocr_available:
             return None
 
         paddle_lang = LANG_TO_PADDLE.get((source_language or "ja").lower(), "japan")
@@ -65,10 +59,13 @@ class ModelManager:
             ):
                 try:
                     print(
-                        f"[Unified Worker] Initializing PaddleOCR (PP-OCRv5 Mobile, lang='{paddle_lang}')...",
+                        f"[Unified Worker] Initializing PaddleOCR "
+                        f"(PP-OCRv5 Mobile, lang='{paddle_lang}')...",
                         flush=True,
                     )
-                    self.paddle_readers[paddle_lang] = PaddleOCR(
+                    from paddleocr import PaddleOCR as _PaddleOCR  # pylint: disable=import-outside-toplevel
+
+                    self.paddle_readers[paddle_lang] = _PaddleOCR(
                         lang=paddle_lang,
                         device="cpu",
                         text_detection_model_name="PP-OCRv5_mobile_det",
@@ -82,12 +79,14 @@ class ModelManager:
                         f"[Unified Worker] PaddleOCR reader ready for lang='{paddle_lang}'.",
                         flush=True,
                     )
-                except Exception as e:
+                except Exception as err_init_paddle:  # pylint: disable=broad-except
                     print(
-                        f"[Unified Worker] Failed to initialize PaddleOCR for lang='{paddle_lang}': {e}",
+                        f"[Unified Worker] Failed to initialize PaddleOCR "
+                        f"for lang='{paddle_lang}': {err_init_paddle}",
                         flush=True,
                     )
                     self.paddle_readers[paddle_lang] = None
+                    ModelManager.paddle_ocr_available = False
 
             if self.paddle_readers.get(paddle_lang) is not None:
                 self.paddle_last_used[paddle_lang] = time.time()
@@ -100,16 +99,16 @@ class ModelManager:
             if self.easy_reader is None:
                 try:
                     print("[Unified Worker] Importing EasyOCR...", flush=True)
-                    import easyocr
+                    import easyocr  # pylint: disable=import-outside-toplevel
 
                     print(
                         "[Unified Worker] Initializing EasyOCR Reader (ja, en)...",
                         flush=True,
                     )
                     self.easy_reader = easyocr.Reader(["ja", "en"], gpu=False)
-                except Exception as e:
+                except Exception as err_init_easy:  # pylint: disable=broad-except
                     print(
-                        f"[Unified Worker] Failed to initialize EasyOCR: {e}",
+                        f"[Unified Worker] Failed to initialize EasyOCR: {err_init_easy}",
                         flush=True,
                     )
                     self.easy_reader = None
@@ -122,7 +121,7 @@ class ModelManager:
     def get_manga_ocr_reader(self):
         """Return a cached MangaOCR reader."""
         with self.lock:
-            if self.manga_reader is None:
+            if self.manga_reader is None:  # pylint: disable=too-many-nested-blocks
                 try:
                     print(
                         "[Unified Worker] Initializing MangaOCR Reader...", flush=True
@@ -162,21 +161,23 @@ class ModelManager:
                                     if os.path.isdir(os.path.join(hub_dir, d))
                                 ]
                                 if snapshots:
-                                    for s in snapshots:
+                                    for snap in snapshots:
                                         if os.path.exists(
-                                            os.path.join(s, "config.json")
+                                            os.path.join(snap, "config.json")
                                         ):
-                                            resolved_path = s
+                                            resolved_path = snap
                                             break
                         pretrained_path = resolved_path
                         print(
-                            f"[Unified Worker] Using local cached MangaOCR model resolved to: {pretrained_path}",
+                            f"[Unified Worker] Using local cached MangaOCR model "
+                            f"resolved to: {pretrained_path}",
                             flush=True,
                         )
 
                     if force_cpu:
                         print(
-                            f"[Unified Worker] Forcing CPU for MangaOCR (model={pretrained_path})...",
+                            f"[Unified Worker] Forcing CPU for MangaOCR "
+                            f"(model={pretrained_path})...",
                             flush=True,
                         )
                         self.manga_reader = MangaOcr(
@@ -188,18 +189,20 @@ class ModelManager:
                             self.manga_reader = MangaOcr(
                                 pretrained_model_name_or_path=pretrained_path
                             )
-                        except Exception as init_err:
+                        except Exception as init_err:  # pylint: disable=broad-except
                             print(
-                                f"[Unified Worker] Failed to initialize MangaOCR with default settings: {init_err}. Retrying with force_cpu=True...",
+                                "[Unified Worker] Failed to initialize MangaOCR "
+                                f"with default settings: {init_err}. "
+                                "Retrying with force_cpu=True...",
                                 flush=True,
                             )
                             self.manga_reader = MangaOcr(
                                 pretrained_model_name_or_path=pretrained_path,
                                 force_cpu=True,
                             )
-                except Exception as e:
+                except Exception as err_init_manga:  # pylint: disable=broad-except
                     print(
-                        f"[Unified Worker] Failed to initialize MangaOCR: {e}.",
+                        f"[Unified Worker] Failed to initialize MangaOCR: {err_init_manga}.",
                         flush=True,
                     )
                     self.manga_reader = None
@@ -221,7 +224,8 @@ class ModelManager:
                     last_used = self.paddle_last_used.get(paddle_lang, 0.0)
                     if now - last_used > ttl_seconds:
                         print(
-                            f"[Model Manager] Unloading PaddleOCR ({paddle_lang}) due to inactivity (idle for {now - last_used:.1f}s).",
+                            f"[Model Manager] Unloading PaddleOCR ({paddle_lang}) "
+                            f"due to inactivity (idle for {now - last_used:.1f}s).",
                             flush=True,
                         )
                         self.paddle_readers[paddle_lang] = None
@@ -231,7 +235,8 @@ class ModelManager:
             if self.easy_reader is not None:
                 if now - self.easy_last_used > ttl_seconds:
                     print(
-                        f"[Model Manager] Unloading EasyOCR due to inactivity (idle for {now - self.easy_last_used:.1f}s).",
+                        f"[Model Manager] Unloading EasyOCR due to inactivity "
+                        f"(idle for {now - self.easy_last_used:.1f}s).",
                         flush=True,
                     )
                     self.easy_reader = None
@@ -241,7 +246,8 @@ class ModelManager:
             if self.manga_reader is not None:
                 if now - self.manga_last_used > ttl_seconds:
                     print(
-                        f"[Model Manager] Unloading MangaOCR due to inactivity (idle for {now - self.manga_last_used:.1f}s).",
+                        f"[Model Manager] Unloading MangaOCR due to inactivity "
+                        f"(idle for {now - self.manga_last_used:.1f}s).",
                         flush=True,
                     )
                     self.manga_reader = None

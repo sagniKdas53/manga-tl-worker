@@ -1,3 +1,5 @@
+"""Configuration parameters and initialization for the unified workers."""
+
 import os
 import logging
 import redis
@@ -9,8 +11,9 @@ logging.addLevelName(logging.TRACE, "TRACE")
 
 
 def trace(self, message, *args, **kws):
+    """Log a message with TRACE level."""
     if self.isEnabledFor(logging.TRACE):
-        self._log(logging.TRACE, message, args, **kws)
+        self._log(logging.TRACE, message, args, **kws)  # pylint: disable=protected-access
 
 
 logging.Logger.trace = trace
@@ -59,12 +62,15 @@ minio_client = Minio(
 # YOLO Speech Bubble Segmentation Configs
 YOLO_MODEL_PATH = os.environ.get("YOLO_MODEL_PATH", "")
 if not YOLO_MODEL_PATH:
-    local_path = "/home/sagnik/Projects/docker-composes/manga-library/data/worker/huggingface/models/yolo11n_bubble.onnx"
-    docker_path = "/root/.cache/huggingface/models/yolo11n_bubble.onnx"
-    if os.path.exists(local_path):
-        YOLO_MODEL_PATH = local_path
+    LOCAL_PATH = (
+        "/home/sagnik/Projects/docker-composes/manga-library/data/worker/"
+        "huggingface/models/yolo11n_bubble.onnx"
+    )
+    DOCKER_PATH = "/root/.cache/huggingface/models/yolo11n_bubble.onnx"
+    if os.path.exists(LOCAL_PATH):
+        YOLO_MODEL_PATH = LOCAL_PATH
     else:
-        YOLO_MODEL_PATH = docker_path
+        YOLO_MODEL_PATH = DOCKER_PATH
 
 YOLO_CONF_THRESHOLD = float(os.environ.get("YOLO_CONF_THRESHOLD", "0.25"))
 YOLO_INPUT_SIZE = int(os.environ.get("YOLO_INPUT_SIZE", "1280"))
@@ -85,11 +91,13 @@ LOCAL_LLM_MODEL = os.environ.get("LOCAL_LLM_MODEL", "").strip()
 LOCAL_VLM_MODEL = os.environ.get("LOCAL_VLM_MODEL", "").strip()
 
 # QA Configuration
-# Modes: "none" = skip QA, "llm" = text-only LLM review, "vlm" = full vision review, "auto" = auto-detect based on capabilities.
+# Modes: "none" = skip QA, "llm" = text-only LLM review,
+# "vlm" = full vision review, "auto" = auto-detect based on capabilities.
 QA_MODE = os.environ.get("QA_MODE", "auto").lower().strip()
 
 # QA Mode Auto-Detection Logic:
-# Decides between "vlm", "llm", or "none" dynamically at startup based on configured models and key states.
+# Decides between "vlm", "llm", or "none" dynamically at startup
+# based on configured models and key states.
 # Respects the DISABLE_LOCAL_LLM configuration (ignoring local LLM/VLM models if disabled).
 if QA_MODE == "auto":
     disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
