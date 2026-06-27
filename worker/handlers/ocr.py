@@ -8,7 +8,13 @@ import re
 import json
 from functools import cmp_to_key
 
-from worker.config import CALLBACK_URL, BACKEND_HEADERS, logger, YOLO_MASK_EROSION, redis_client
+from worker.config import (
+    CALLBACK_URL,
+    BACKEND_HEADERS,
+    logger,
+    YOLO_MASK_EROSION,
+    redis_client,
+)
 from worker.model_manager import model_manager
 from worker.utils.image import downscale_for_ocr, calculate_overlap_area, download_image
 from worker.utils.text import detect_language
@@ -152,7 +158,9 @@ def get_split_polygon(mask, bbox, img_w, img_h, margin=20):
         crop_mask = np.zeros_like(mask)
         crop_mask[y1:y2, x1:x2] = mask[y1:y2, x1:x2]
 
-        contours, _ = cv2.findContours(crop_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(
+            crop_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
         if not contours:
             return None
 
@@ -163,7 +171,6 @@ def get_split_polygon(mask, bbox, img_w, img_h, margin=20):
     except Exception as e:
         print(f"[OCR] Error splitting polygon: {e}", flush=True)
         return None
-
 
 
 def detect_bubble_contour(img, ocr_x, ocr_y, ocr_w, ocr_h):
@@ -246,7 +253,7 @@ def process_ocr(job_data):
     page_num = job_data.get("pageNumber")
     chapter_num = job_data.get("chapterNumber")
     queue_len = redis_client.llen("queue:ocr")
-    
+
     progress_str = ""
     if page_num is not None:
         progress_str = f" | Page {page_num}"
@@ -478,26 +485,42 @@ def process_ocr(job_data):
 
                     # Run proximity merging inside the bubble to separate multiple semantic bubbles
                     from worker.services.merge_regions import merge_ocr_regions
-                    merged_bubble_regions = merge_ocr_regions(assigned_frags, reading_direction)
+
+                    merged_bubble_regions = merge_ocr_regions(
+                        assigned_frags, reading_direction
+                    )
 
                     for r_sub in merged_bubble_regions:
                         # 1. Get split polygon for this merged region
-                        r_box = [r_sub["x"], r_sub["y"], r_sub["width"], r_sub["height"]]
-                        poly_pts = get_split_polygon(bubble_mask, r_box, img_w, img_h, margin=20)
+                        r_box = [
+                            r_sub["x"],
+                            r_sub["y"],
+                            r_sub["width"],
+                            r_sub["height"],
+                        ]
+                        poly_pts = get_split_polygon(
+                            bubble_mask, r_box, img_w, img_h, margin=20
+                        )
                         if not poly_pts:
                             poly_pts = bubble["mask_polygon"]
 
                         # 2. Bounding box of the split polygon
-                        sp_x, sp_y, sp_w, sp_h = cv2.boundingRect(np.array(poly_pts, dtype=np.int32))
+                        sp_x, sp_y, sp_w, sp_h = cv2.boundingRect(
+                            np.array(poly_pts, dtype=np.int32)
+                        )
 
                         # 3. Bounding box of the eroded mask (safe area)
                         split_mask = np.zeros((img_h, img_w), dtype=np.uint8)
-                        cv2.fillPoly(split_mask, [np.array(poly_pts, dtype=np.int32)], 255)
+                        cv2.fillPoly(
+                            split_mask, [np.array(poly_pts, dtype=np.int32)], 255
+                        )
                         erosion_px = YOLO_MASK_EROSION
                         kernel_erode = cv2.getStructuringElement(
                             cv2.MORPH_ELLIPSE, (2 * erosion_px + 1, 2 * erosion_px + 1)
                         )
-                        eroded_split_mask = cv2.erode(split_mask, kernel_erode, iterations=1)
+                        eroded_split_mask = cv2.erode(
+                            split_mask, kernel_erode, iterations=1
+                        )
                         if cv2.countNonZero(eroded_split_mask) == 0:
                             eroded_split_mask = split_mask
                         sx, sy, sw, sh = cv2.boundingRect(eroded_split_mask)
@@ -532,8 +555,12 @@ def process_ocr(job_data):
                         regions.append(
                             {
                                 "text": final_text,
-                                "detectedLanguage": detect_language(final_text) if final_text else "ja",
-                                "confidence": 1.0 if is_manga_ocr else r_sub["confidence"],
+                                "detectedLanguage": (
+                                    detect_language(final_text) if final_text else "ja"
+                                ),
+                                "confidence": (
+                                    1.0 if is_manga_ocr else r_sub["confidence"]
+                                ),
                                 "rotation": 0.0,
                                 "x": r_sub["x"],
                                 "y": r_sub["y"],
@@ -711,7 +738,11 @@ def process_ocr(job_data):
                 flush=True,
             )
 
-            avg_conf = sum(r["confidence"] for r in ordered_regions) / len(ordered_regions) if ordered_regions else 1.0
+            avg_conf = (
+                sum(r["confidence"] for r in ordered_regions) / len(ordered_regions)
+                if ordered_regions
+                else 1.0
+            )
 
             callback_payload = {
                 "imageId": image_id,

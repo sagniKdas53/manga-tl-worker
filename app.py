@@ -40,7 +40,7 @@ def main():
         proc = subprocess.Popen(["rq", "worker", "manga_tasks", "--url", redis_url])
         worker_procs.append(proc)
 
-    rq_queue = Queue('manga_tasks', connection=redis_client)
+    rq_queue = Queue("manga_tasks", connection=redis_client)
 
     last_status_time = 0.0
     status_interval = 300.0  # 5 minutes in seconds
@@ -87,11 +87,11 @@ def main():
 
                 # Dispatch to RQ with exponential backoff
                 rq_queue.enqueue(
-                    process_job_rq, 
-                    queue_name, 
-                    job_data, 
+                    process_job_rq,
+                    queue_name,
+                    job_data,
                     retry=Retry(max=3, interval=[10, 30, 60]),
-                    job_timeout=600
+                    job_timeout=600,
                 )
         except Exception as e:
             print(f"[Unified Worker] Error in main loop: {e}", flush=True)

@@ -2,7 +2,13 @@ import os
 import uuid
 import logging
 import requests
-from worker.config import logger, CALLBACK_URL, BACKEND_HEADERS, MODEL_PROVIDER, redis_client
+from worker.config import (
+    logger,
+    CALLBACK_URL,
+    BACKEND_HEADERS,
+    MODEL_PROVIDER,
+    redis_client,
+)
 from worker.utils.image import download_image
 from worker.services.translation import (
     should_translate_region,
@@ -30,7 +36,7 @@ def process_translation(job_data):
     page_num = job_data.get("pageNumber")
     chapter_num = job_data.get("chapterNumber")
     queue_len = redis_client.llen("queue:translation")
-    
+
     progress_str = ""
     if page_num is not None:
         progress_str = f" | Page {page_num}"
@@ -120,8 +126,12 @@ def process_translation(job_data):
             )
             try:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"{req_prefix}translate_batch_llm input chunk: {chunk}")
-                    logger.debug(f"{req_prefix}translate_batch_llm prompt context: {context_str}")
+                    logger.debug(
+                        f"{req_prefix}translate_batch_llm input chunk: {chunk}"
+                    )
+                    logger.debug(
+                        f"{req_prefix}translate_batch_llm prompt context: {context_str}"
+                    )
 
                 batch_res = translate_batch_llm(
                     chunk,
@@ -169,6 +179,7 @@ def process_translation(job_data):
         LOCAL_AI_MAX_BATCH_RETRIES = 1
         if failed_batch_regions:
             from worker.services.translation import wait_for_cooldown
+
             wait_for_cooldown(provider)
             logger.info(f"{req_prefix}Retry pass 1")
             logger.info(
@@ -186,7 +197,9 @@ def process_translation(job_data):
                 r_chunk_mapping = None
                 try:
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"{req_prefix}Retry translate_batch_llm input chunk: {r_chunk}")
+                        logger.debug(
+                            f"{req_prefix}Retry translate_batch_llm input chunk: {r_chunk}"
+                        )
 
                     retry_res = translate_batch_llm(
                         r_chunk,
@@ -198,7 +211,9 @@ def process_translation(job_data):
                     )
 
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"{req_prefix}Retry translate_batch_llm output: {retry_res}")
+                        logger.debug(
+                            f"{req_prefix}Retry translate_batch_llm output: {retry_res}"
+                        )
 
                     r_chunk_mapping = parse_and_validate_batch(retry_res, r_chunk)
                 except Exception as e:
@@ -230,6 +245,7 @@ def process_translation(job_data):
             # 4. Individual fallback for still-failed regions
             if still_failed_regions:
                 from worker.services.translation import wait_for_cooldown
+
                 wait_for_cooldown(provider)
                 logger.info(f"{req_prefix}Individual fallback")
                 logger.info(

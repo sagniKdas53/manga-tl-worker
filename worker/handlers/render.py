@@ -1,10 +1,15 @@
 import io
 import requests
 from PIL import Image, ImageDraw, ImageFont
-from worker.config import CALLBACK_URL, BACKEND_HEADERS, minio_client, logger, redis_client
+from worker.config import (
+    CALLBACK_URL,
+    BACKEND_HEADERS,
+    minio_client,
+    logger,
+    redis_client,
+)
 from worker.utils.image import download_image
 import os
-
 
 # Font registry: map display names to filesystem paths
 FONT_REGISTRY = {
@@ -52,7 +57,9 @@ def load_font(size, font_name="Comic Neue", bold=False, italic=False):
 
     # 1. Try requested font from registry
     if font_name in FONT_REGISTRY:
-        path = FONT_REGISTRY[font_name].get(style_key) or FONT_REGISTRY[font_name].get("normal")
+        path = FONT_REGISTRY[font_name].get(style_key) or FONT_REGISTRY[font_name].get(
+            "normal"
+        )
         font = try_load(path)
         if font:
             return font
@@ -60,7 +67,9 @@ def load_font(size, font_name="Comic Neue", bold=False, italic=False):
     # 2. Try fallbacks from registry in order
     for fallback in DEFAULT_FONT_FALLBACK_ORDER:
         if fallback in FONT_REGISTRY:
-            path = FONT_REGISTRY[fallback].get(style_key) or FONT_REGISTRY[fallback].get("normal")
+            path = FONT_REGISTRY[fallback].get(style_key) or FONT_REGISTRY[
+                fallback
+            ].get("normal")
             font = try_load(path)
             if font:
                 return font
@@ -465,7 +474,7 @@ def fit_text_in_box_py(
                             tentative_lines.append(current_line)
                             line_index += 1
                             if line_index >= N:
-                                    return None
+                                return None
                         current_word_part = ""
                         for char in word:
                             test_part = current_word_part + char
@@ -569,11 +578,11 @@ def fit_text_in_box_py(
 
 def process_render(job_data):
     image_id = job_data["imageId"]
-    
+
     page_num = job_data.get("pageNumber")
     chapter_num = job_data.get("chapterNumber")
     queue_len = redis_client.llen("queue:render")
-    
+
     progress_str = ""
     if page_num is not None:
         progress_str = f" | Page {page_num}"
@@ -584,8 +593,12 @@ def process_render(job_data):
     print(f"[Render] Processing image: {image_id}{progress_str}", flush=True)
 
     from worker.config import QA_MODE
+
     if QA_MODE in ("llm", "none"):
-        print(f"[Render] QA_MODE is '{QA_MODE}', skipping rendering for image: {image_id}", flush=True)
+        print(
+            f"[Render] QA_MODE is '{QA_MODE}', skipping rendering for image: {image_id}",
+            flush=True,
+        )
         callback_payload = {"imageId": image_id}
         try:
             res = requests.post(
@@ -629,8 +642,14 @@ def process_render(job_data):
             box_shape = el.get("boxShape") or "rectangular"
             # Auto-uppercase for speech bubbles
             region_type = el.get("regionType")
-            if region_type == "speech" or (region_type is None and box_shape == "elliptical"):
-                if os.environ.get("USE_UPPERCASE_SPEECH", "true").lower() in ("true", "1", "t"):
+            if region_type == "speech" or (
+                region_type is None and box_shape == "elliptical"
+            ):
+                if os.environ.get("USE_UPPERCASE_SPEECH", "true").lower() in (
+                    "true",
+                    "1",
+                    "t",
+                ):
                     text = text.upper()
 
             ex = float(el.get("x", 0.0))
@@ -735,6 +754,7 @@ def process_render(job_data):
 
         # Save local copy in render cache
         from worker.config import RENDER_CACHE_DIR
+
         os.makedirs(RENDER_CACHE_DIR, exist_ok=True)
         cache_path = os.path.join(RENDER_CACHE_DIR, f"{image_id}.png")
         with open(cache_path, "wb") as f:

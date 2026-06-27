@@ -169,7 +169,10 @@ def perform_redo_ocr(img_crop_bytes, lang):
         .strip()
     )
     api_key = os.environ.get("API_KEY", os.environ.get("LLM_API_KEY", ""))
-    model = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or os.environ.get("LLM_MODEL", "").strip()
+    model = (
+        os.environ.get("PREFERRED_LLM_MODEL", "").strip()
+        or os.environ.get("LLM_MODEL", "").strip()
+    )
 
     # Try Cloud AI OCR if configured
     if api_key and provider in ("openai", "openrouter", "gemini", "anthropic"):

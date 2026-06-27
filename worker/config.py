@@ -21,7 +21,6 @@ logging.basicConfig(level=level, format="%(asctime)s [%(levelname)s] %(message)s
 logger = logging.getLogger("translation")
 
 
-
 # Connection Configs
 REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
@@ -93,13 +92,21 @@ QA_MODE = os.environ.get("QA_MODE", "auto").lower().strip()
 # Decides between "vlm", "llm", or "none" dynamically at startup based on configured models and key states.
 # Respects the DISABLE_LOCAL_LLM configuration (ignoring local LLM/VLM models if disabled).
 if QA_MODE == "auto":
-    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in ("true", "1", "yes")
+    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
     effective_local_vlm = "" if disable_local else LOCAL_VLM_MODEL
     effective_local_llm = "" if disable_local else LOCAL_LLM_MODEL
 
     # Detect VLM capability (Cloud VLM or effective local VLM)
-    has_vlm = bool(os.environ.get("QA_VLM_MODEL", "").strip() or PREFERRED_VLM_MODEL or effective_local_vlm)
-    
+    has_vlm = bool(
+        os.environ.get("QA_VLM_MODEL", "").strip()
+        or PREFERRED_VLM_MODEL
+        or effective_local_vlm
+    )
+
     # Detect LLM capability (Cloud provider or effective local LLM)
     if has_vlm:
         QA_MODE = "vlm"
@@ -110,4 +117,3 @@ if QA_MODE == "auto":
 
 # Render cache
 RENDER_CACHE_DIR = os.environ.get("RENDER_CACHE_DIR", "/app/rendered_cache")
-

@@ -7,11 +7,11 @@ from worker.utils.image import download_image
 def process_panel_detection(job_data):
     image_id = job_data["imageId"]
     reading_direction = (job_data.get("readingDirection") or "rtl").strip().lower()
-    
+
     page_num = job_data.get("pageNumber")
     chapter_num = job_data.get("chapterNumber")
     queue_len = redis_client.llen("queue:panel-detection")
-    
+
     progress_str = ""
     if page_num is not None:
         progress_str = f" | Page {page_num}"

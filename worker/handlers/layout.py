@@ -6,11 +6,11 @@ from worker.services.layout import classify_region_type, group_conversations
 def process_layout(job_data):
     """Layout analysis: classify region types and group conversations."""
     image_id = job_data["imageId"]
-    
+
     page_num = job_data.get("pageNumber")
     chapter_num = job_data.get("chapterNumber")
     queue_len = redis_client.llen("queue:layout")
-    
+
     progress_str = ""
     if page_num is not None:
         progress_str = f" | Page {page_num}"

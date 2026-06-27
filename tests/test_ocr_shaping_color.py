@@ -69,4 +69,3 @@ def test_split_polygon_and_safe_area():
     for p in poly:
         assert p[0] < 100
         assert p[1] < 100
-

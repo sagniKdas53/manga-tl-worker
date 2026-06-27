@@ -364,6 +364,7 @@ def _get_api_url_and_headers(provider, api_key, model):
             actual_model = "nvidia/riva-translate-4b-instruct-v1.1"
     return url, headers, actual_model
 
+
 def try_cloud_ai(
     provider, api_key, model, prompt, response_schema=None, request_id=None
 ):
@@ -381,29 +382,36 @@ def try_cloud_ai(
     url, headers, actual_model = _get_api_url_and_headers(provider, api_key, model)
     if not url:
         return None
-        
+
     payload = {}
     if provider == "anthropic":
         payload = {
             "model": actual_model,
             "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}]
+            "messages": [{"role": "user", "content": prompt}],
         }
         if response_schema:
             payload["system"] = MANGA_TRANSLATION_JSON_SYSTEM_PROMPT
     else:
         payload = {
             "model": actual_model,
-            "messages": [{"role": "user", "content": prompt}]
+            "messages": [{"role": "user", "content": prompt}],
         }
         if response_schema:
             if provider == "nvidia":
                 payload["response_format"] = {"type": "json_object"}
-                payload["messages"].insert(0, {"role": "system", "content": MANGA_TRANSLATION_JSON_SYSTEM_PROMPT})
+                payload["messages"].insert(
+                    0,
+                    {"role": "system", "content": MANGA_TRANSLATION_JSON_SYSTEM_PROMPT},
+                )
             else:
                 payload["response_format"] = {
                     "type": "json_schema",
-                    "json_schema": {"name": "manga_translation", "schema": response_schema, "strict": True},
+                    "json_schema": {
+                        "name": "manga_translation",
+                        "schema": response_schema,
+                        "strict": True,
+                    },
                 }
 
     max_retries = 3
@@ -411,28 +419,41 @@ def try_cloud_ai(
 
     for attempt in range(max_retries + 1):
         try:
-            logger.info(f"{req_prefix}Sending request to '{provider}' using model '{actual_model}' (attempt {attempt+1}/{max_retries+1})...")
+            logger.info(
+                f"{req_prefix}Sending request to '{provider}' using model '{actual_model}' (attempt {attempt+1}/{max_retries+1})..."
+            )
             start = time.perf_counter()
-            
-            response = requests.post(url, headers=headers, json=payload, timeout=90 if provider == "nvidia" else 60)
-            
+
+            response = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=90 if provider == "nvidia" else 60,
+            )
+
             if response.status_code == 429:
                 if attempt < max_retries:
-                    sleep_time = base_backoff * (2 ** attempt)
-                    logger.warning(f"{req_prefix}Provider '{provider}' returned 429. Retrying in {sleep_time:.2f}s...")
+                    sleep_time = base_backoff * (2**attempt)
+                    logger.warning(
+                        f"{req_prefix}Provider '{provider}' returned 429. Retrying in {sleep_time:.2f}s..."
+                    )
                     time.sleep(sleep_time)
                     continue
                 else:
-                    logger.warning(f"{req_prefix}Provider '{provider}' returned 429. Initiating 60s cooldown.")
+                    logger.warning(
+                        f"{req_prefix}Provider '{provider}' returned 429. Initiating 60s cooldown."
+                    )
                     PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
                     return None
-                
+
             response.raise_for_status()
             data = response.json()
-            
+
             elapsed = time.perf_counter() - start
-            logger.info(f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s")
-            
+            logger.info(
+                f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s"
+            )
+
             if provider == "anthropic":
                 content = data.get("content", [{}])[0].get("text", "")
                 usage = data.get("usage", {})
@@ -440,23 +461,30 @@ def try_cloud_ai(
                 completion_tokens = usage.get("output_tokens", 0)
                 total_tokens = prompt_tokens + completion_tokens
             else:
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                content = (
+                    data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                )
                 usage = data.get("usage", {})
                 prompt_tokens = usage.get("prompt_tokens", 0)
                 completion_tokens = usage.get("completion_tokens", 0)
                 total_tokens = usage.get("total_tokens", 0)
-                
-            logger.info(f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
-            cost = estimate_cost(actual_model, prompt_tokens, completion_tokens, provider)
+
+            logger.info(
+                f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}"
+            )
+            cost = estimate_cost(
+                actual_model, prompt_tokens, completion_tokens, provider
+            )
             logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
-            
+
             return content
-            
+
         except Exception as e:
             logger.error(f"{req_prefix}Cloud LLM Translation failed: {e}")
-            if 'response' in locals() and hasattr(response, 'text'):
+            if "response" in locals() and hasattr(response, "text"):
                 logger.error(f"Response text: {response.text}")
             return None
+
 
 def try_cloud_ai_vision(
     provider,
@@ -481,31 +509,46 @@ def try_cloud_ai_vision(
     url, headers, actual_model = _get_api_url_and_headers(provider, api_key, model)
     if not url:
         return None
-        
+
     if provider == "nvidia" and not model:
         actual_model = "nvidia/nemotron-nano-12b-v2-vl"
 
     user_message = [
         {"type": "text", "text": prompt},
-        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
+        },
     ]
-    
+
     payload = {}
     if provider == "anthropic":
         payload = {
             "model": actual_model,
             "max_tokens": 4096,
-            "messages": [{"role": "user", "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64_image}}
-            ]}]
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": base64_image,
+                            },
+                        },
+                    ],
+                }
+            ],
         }
         if response_schema:
             payload["system"] = MANGA_TRANSLATION_JSON_SYSTEM_PROMPT
     else:
         payload = {
             "model": actual_model,
-            "messages": [{"role": "user", "content": user_message}]
+            "messages": [{"role": "user", "content": user_message}],
         }
         if response_schema:
             if provider == "nvidia":
@@ -513,7 +556,11 @@ def try_cloud_ai_vision(
             else:
                 payload["response_format"] = {
                     "type": "json_schema",
-                    "json_schema": {"name": "manga_translation", "schema": response_schema, "strict": True},
+                    "json_schema": {
+                        "name": "manga_translation",
+                        "schema": response_schema,
+                        "strict": True,
+                    },
                 }
 
     max_retries = 3
@@ -521,28 +568,36 @@ def try_cloud_ai_vision(
 
     for attempt in range(max_retries + 1):
         try:
-            logger.info(f"{req_prefix}Sending vision request to '{provider}' using model '{actual_model}' (attempt {attempt+1}/{max_retries+1})...")
+            logger.info(
+                f"{req_prefix}Sending vision request to '{provider}' using model '{actual_model}' (attempt {attempt+1}/{max_retries+1})..."
+            )
             start = time.perf_counter()
-            
+
             response = requests.post(url, headers=headers, json=payload, timeout=90)
-            
+
             if response.status_code == 429:
                 if attempt < max_retries:
-                    sleep_time = base_backoff * (2 ** attempt)
-                    logger.warning(f"{req_prefix}Vision provider '{provider}' returned 429. Retrying in {sleep_time:.2f}s...")
+                    sleep_time = base_backoff * (2**attempt)
+                    logger.warning(
+                        f"{req_prefix}Vision provider '{provider}' returned 429. Retrying in {sleep_time:.2f}s..."
+                    )
                     time.sleep(sleep_time)
                     continue
                 else:
-                    logger.warning(f"{req_prefix}Vision provider '{provider}' returned 429. Initiating 60s cooldown.")
+                    logger.warning(
+                        f"{req_prefix}Vision provider '{provider}' returned 429. Initiating 60s cooldown."
+                    )
                     PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
                     return None
-                
+
             response.raise_for_status()
             data = response.json()
-            
+
             elapsed = time.perf_counter() - start
-            logger.info(f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s")
-    
+            logger.info(
+                f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s"
+            )
+
             if provider == "anthropic":
                 content = data.get("content", [{}])[0].get("text", "")
                 usage = data.get("usage", {})
@@ -550,30 +605,43 @@ def try_cloud_ai_vision(
                 completion_tokens = usage.get("output_tokens", 0)
                 total_tokens = prompt_tokens + completion_tokens
             else:
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                content = (
+                    data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                )
                 usage = data.get("usage", {})
                 prompt_tokens = usage.get("prompt_tokens", 0)
                 completion_tokens = usage.get("completion_tokens", 0)
                 total_tokens = usage.get("total_tokens", 0)
-                
-            logger.info(f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
-            cost = estimate_cost(actual_model, prompt_tokens, completion_tokens, provider)
+
+            logger.info(
+                f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}"
+            )
+            cost = estimate_cost(
+                actual_model, prompt_tokens, completion_tokens, provider
+            )
             logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
-    
+
             return content
-            
+
         except Exception as e:
             logger.error(f"{req_prefix}Vision Translation failed: {e}")
-            if 'response' in locals() and hasattr(response, 'text'):
+            if "response" in locals() and hasattr(response, "text"):
                 logger.error(f"Response text: {response.text}")
             return None
+
 
 def try_local_ai(prompt, text, response_schema=None, request_id=None):
     req_prefix = f"[{request_id}] " if request_id else ""
     enforce_rate_limit()
-    
-    local_provider = os.environ.get("LOCAL_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "lmstudio")).lower().strip()
-    local_endpoint = os.environ.get("LOCAL_LLM_ENDPOINT", os.environ.get("LLM_ENDPOINT", "")).strip()
+
+    local_provider = (
+        os.environ.get("LOCAL_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "lmstudio"))
+        .lower()
+        .strip()
+    )
+    local_endpoint = os.environ.get(
+        "LOCAL_LLM_ENDPOINT", os.environ.get("LLM_ENDPOINT", "")
+    ).strip()
     model = os.environ.get("LOCAL_LLM_MODEL", "gemma3:4b")
 
     if not local_endpoint:
@@ -582,7 +650,9 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
         else:
             local_endpoint = "http://host.docker.internal:1234/v1/chat/completions"
     else:
-        if not local_endpoint.endswith("/v1/chat/completions") and not local_endpoint.endswith("/api/v1/chat"):
+        if not local_endpoint.endswith(
+            "/v1/chat/completions"
+        ) and not local_endpoint.endswith("/api/v1/chat"):
             if local_endpoint.endswith("/"):
                 local_endpoint += "v1/chat/completions"
             else:
@@ -590,20 +660,28 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
 
     endpoints_to_try = [local_endpoint]
     if "localhost" in local_endpoint:
-        endpoints_to_try.append(local_endpoint.replace("localhost", "host.docker.internal"))
+        endpoints_to_try.append(
+            local_endpoint.replace("localhost", "host.docker.internal")
+        )
     elif "host.docker.internal" in local_endpoint:
-        endpoints_to_try.append(local_endpoint.replace("host.docker.internal", "localhost"))
+        endpoints_to_try.append(
+            local_endpoint.replace("host.docker.internal", "localhost")
+        )
 
-    system_pr = MANGA_TRANSLATION_JSON_SYSTEM_PROMPT if response_schema else MANGA_TRANSLATION_SYSTEM_PROMPT
-    
+    system_pr = (
+        MANGA_TRANSLATION_JSON_SYSTEM_PROMPT
+        if response_schema
+        else MANGA_TRANSLATION_SYSTEM_PROMPT
+    )
+
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": system_pr},
             {"role": "user", "content": text},
-        ]
+        ],
     }
-    
+
     if response_schema:
         if local_provider == "ollama":
             payload["format"] = "json"
@@ -612,21 +690,28 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
 
     for endpoint in endpoints_to_try:
         try:
-            logger.info(f"{req_prefix}Trying Local AI endpoint '{endpoint}' using model '{model}'...")
-            
+            logger.info(
+                f"{req_prefix}Trying Local AI endpoint '{endpoint}' using model '{model}'..."
+            )
+
             from worker.utils.lock import acquire_lock
+
             with acquire_lock("local-llm"):
                 start = time.perf_counter()
                 response = requests.post(endpoint, json=payload, timeout=300)
                 response.raise_for_status()
                 data = response.json()
                 elapsed = time.perf_counter() - start
-                
-            logger.info(f"{req_prefix}Provider={local_provider} Model={model} Time={elapsed:.2f}s")
+
+            logger.info(
+                f"{req_prefix}Provider={local_provider} Model={model} Time={elapsed:.2f}s"
+            )
             return data.get("choices", [{}])[0].get("message", {}).get("content", "")
         except Exception as e:
-            logger.error(f"{req_prefix}Local AI connection failed for '{endpoint}': {e}")
-            if 'response' in locals() and hasattr(response, 'text'):
+            logger.error(
+                f"{req_prefix}Local AI connection failed for '{endpoint}': {e}"
+            )
+            if "response" in locals() and hasattr(response, "text"):
                 logger.error(f"Response text: {response.text}")
 
     return None
@@ -754,28 +839,48 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
     strategy_idx = 1
     if not local_only:
         if provider == "openrouter":
-            preferred = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "meta-llama/llama-3-8b-instruct:free"
+            preferred = (
+                os.environ.get("PREFERRED_LLM_MODEL", "").strip()
+                or "meta-llama/llama-3-8b-instruct:free"
+            )
             logger.info(f"{req_prefix}{strategy_idx}. {preferred} (OpenRouter)")
             strategy_idx += 1
         elif provider == "gemini":
             logger.info(f"{req_prefix}{strategy_idx}. Gemini 2.5 Flash (Direct)")
             strategy_idx += 1
         elif provider == "openai":
-            openai_model = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "gpt-4o-mini"
+            openai_model = (
+                os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "gpt-4o-mini"
+            )
             logger.info(f"{req_prefix}{strategy_idx}. {openai_model} (Direct OpenAI)")
             strategy_idx += 1
 
         if provider == "nvidia":
-            nvidia_model = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "google/gemma-3n-e4b-it"
+            nvidia_model = (
+                os.environ.get("PREFERRED_LLM_MODEL", "").strip()
+                or "google/gemma-3n-e4b-it"
+            )
             logger.info(f"{req_prefix}{strategy_idx}. {nvidia_model} (Nvidia)")
             strategy_idx += 1
         if provider == "anthropic":
             logger.info(f"{req_prefix}{strategy_idx}. Claude 3.5 Sonnet (Direct)")
             strategy_idx += 1
 
-    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in ("true", "1", "yes")
-    disable_deepl = os.environ.get("DISABLE_DEEPL_TRANSLATE", "").strip().lower() in ("true", "1", "yes")
-    disable_gt = os.environ.get("DISABLE_GOOGLE_TRANSLATE", "").strip().lower() in ("true", "1", "yes")
+    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+    disable_deepl = os.environ.get("DISABLE_DEEPL_TRANSLATE", "").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+    disable_gt = os.environ.get("DISABLE_GOOGLE_TRANSLATE", "").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
 
     if not disable_local:
         logger.info(f"{req_prefix}{strategy_idx}. Local LLM")
@@ -794,7 +899,10 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
     else:
         # 1. Cloud LLM Layer
         if provider == "openrouter":
-            preferred = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "meta-llama/llama-3-8b-instruct:free"
+            preferred = (
+                os.environ.get("PREFERRED_LLM_MODEL", "").strip()
+                or "meta-llama/llama-3-8b-instruct:free"
+            )
             translated = try_cloud_ai(
                 "openrouter",
                 openrouter_key,
@@ -809,7 +917,9 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
 
         elif provider == "gemini":
             # Direct Gemini API fallback
-            preferred = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "gemini-1.5-pro"
+            preferred = (
+                os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "gemini-1.5-pro"
+            )
             translated = try_cloud_ai(
                 "gemini", gemini_key, preferred, prompt, request_id=request_id
             )
@@ -818,7 +928,9 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
                 if is_valid_translation(text, cleaned, request_id=request_id):
                     return cleaned
         elif provider == "openai":
-            openai_model = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "gpt-4o-mini"
+            openai_model = (
+                os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "gpt-4o-mini"
+            )
             translated = try_cloud_ai(
                 "openai",
                 api_key,
@@ -831,7 +943,10 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
                 if is_valid_translation(text, cleaned, request_id=request_id):
                     return cleaned
         if provider == "nvidia":
-            nvidia_model = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "google/gemma-3n-e4b-it"
+            nvidia_model = (
+                os.environ.get("PREFERRED_LLM_MODEL", "").strip()
+                or "google/gemma-3n-e4b-it"
+            )
             translated = try_cloud_ai(
                 "nvidia",
                 nvidia_key,
@@ -845,7 +960,10 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
                     return cleaned
 
         if provider == "anthropic":
-            anthropic_model = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "claude-3-5-sonnet-20241022"
+            anthropic_model = (
+                os.environ.get("PREFERRED_LLM_MODEL", "").strip()
+                or "claude-3-5-sonnet-20241022"
+            )
             translated = try_cloud_ai(
                 "anthropic",
                 anthropic_key,
@@ -859,7 +977,11 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
                     return cleaned
 
     # 2. Local Ollama/LMStudio Layer
-    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in ("true", "1", "yes")
+    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
     if not disable_local:
         translated = try_local_ai(prompt, text, request_id=request_id)
         if translated:
@@ -877,7 +999,11 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
         return None
 
     # 3. DeepL Layer
-    disable_deepl = os.environ.get("DISABLE_DEEPL_TRANSLATE", "").strip().lower() in ("true", "1", "yes")
+    disable_deepl = os.environ.get("DISABLE_DEEPL_TRANSLATE", "").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
     if not disable_deepl:
         translated = try_deepl(text, target_lang, request_id=request_id)
         if translated:
@@ -888,7 +1014,11 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
         logger.info(f"{req_prefix}DeepL fallback skipped (disabled via environment).")
 
     # 4. Google Translate Layer
-    disable_gt = os.environ.get("DISABLE_GOOGLE_TRANSLATE", "").strip().lower() in ("true", "1", "yes")
+    disable_gt = os.environ.get("DISABLE_GOOGLE_TRANSLATE", "").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
     if not disable_gt:
         translated = try_google_translate(
             text, source_lang, target_lang, request_id=request_id
@@ -898,7 +1028,9 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
             if is_valid_translation(text, cleaned, request_id=request_id):
                 return cleaned
     else:
-        logger.info(f"{req_prefix}Google Translate fallback skipped (disabled via environment).")
+        logger.info(
+            f"{req_prefix}Google Translate fallback skipped (disabled via environment)."
+        )
 
     logger.error(f"{req_prefix}All translation tiers failed for text: '{text}'")
     return None
@@ -1014,7 +1146,10 @@ Input:
         )
     else:
         if provider == "openrouter":
-            preferred = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "meta-llama/llama-3-8b-instruct:free"
+            preferred = (
+                os.environ.get("PREFERRED_LLM_MODEL", "").strip()
+                or "meta-llama/llama-3-8b-instruct:free"
+            )
             logger.info(f"{req_prefix}Batch: Trying OpenRouter ({preferred})...")
             try:
                 res = try_cloud_ai(
@@ -1032,7 +1167,9 @@ Input:
 
         elif provider == "gemini":
             # Try Direct Gemini API
-            preferred = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "gemini-1.5-pro"
+            preferred = (
+                os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "gemini-1.5-pro"
+            )
             logger.info(f"{req_prefix}Batch: Trying Gemini ({preferred}) Direct...")
             try:
                 res = try_cloud_ai(
@@ -1049,7 +1186,9 @@ Input:
                 logger.error(f"{req_prefix}Gemini Direct batch translation failed: {e}")
 
         elif provider == "openai":
-            preferred = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "gpt-4o-mini"
+            preferred = (
+                os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "gpt-4o-mini"
+            )
             logger.info(f"{req_prefix}Batch: Trying OpenAI ({preferred}) Direct...")
             try:
                 res = try_cloud_ai(
@@ -1066,7 +1205,10 @@ Input:
                 logger.error(f"{req_prefix}OpenAI Direct batch translation failed: {e}")
 
         elif provider == "anthropic":
-            preferred = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "claude-3-5-sonnet-20241022"
+            preferred = (
+                os.environ.get("PREFERRED_LLM_MODEL", "").strip()
+                or "claude-3-5-sonnet-20241022"
+            )
             logger.info(f"{req_prefix}Batch: Trying Anthropic ({preferred}) Direct...")
             try:
                 res = try_cloud_ai(
@@ -1086,7 +1228,10 @@ Input:
 
         # Try Nvidia NIM
         if provider == "nvidia":
-            nvidia_model = os.environ.get("PREFERRED_LLM_MODEL", "").strip() or "google/gemma-3n-e4b-it"
+            nvidia_model = (
+                os.environ.get("PREFERRED_LLM_MODEL", "").strip()
+                or "google/gemma-3n-e4b-it"
+            )
             logger.info(f"{req_prefix}Batch: Trying Nvidia model {nvidia_model}...")
             try:
                 res = try_cloud_ai(
@@ -1103,22 +1248,32 @@ Input:
                 logger.error(f"{req_prefix}Nvidia batch translation failed: {e}")
 
     # Try Local LLM (Ollama/LMStudio)
-    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in ("true", "1", "yes")
+    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
     if not disable_local:
         local_provider = (
-            os.environ.get("LOCAL_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "lmstudio"))
+            os.environ.get(
+                "LOCAL_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "lmstudio")
+            )
             .lower()
             .strip()
         )
         logger.info(f"{req_prefix}Batch: Trying Local LLM ({local_provider})...")
         try:
-            res = try_local_ai(prompt, bubbles_json, response_schema, request_id=request_id)
+            res = try_local_ai(
+                prompt, bubbles_json, response_schema, request_id=request_id
+            )
             if res:
                 return res
         except Exception as e:
             logger.error(f"{req_prefix}Local LLM batch translation failed: {e}")
     else:
-        logger.info(f"{req_prefix}Batch: Local LLM layer skipped (disabled via environment).")
+        logger.info(
+            f"{req_prefix}Batch: Local LLM layer skipped (disabled via environment)."
+        )
 
 
 def try_local_vlm_vision(
@@ -1296,7 +1451,9 @@ Input:
 
     if provider == "openrouter" and openrouter_key:
         logger.info(f"{req_prefix}VLM: Trying vision model via OpenRouter...")
-        vlm_model = os.environ.get("PREFERRED_VLM_MODEL", "").strip() or "gemini-1.5-flash"
+        vlm_model = (
+            os.environ.get("PREFERRED_VLM_MODEL", "").strip() or "gemini-1.5-flash"
+        )
         try:
             res = try_cloud_ai_vision(
                 "openrouter",
@@ -1316,7 +1473,9 @@ Input:
 
     elif provider == "gemini" and gemini_key:
         logger.info(f"{req_prefix}VLM: Trying vision model via Gemini...")
-        vlm_model = os.environ.get("PREFERRED_VLM_MODEL", "").strip() or "gemini-1.5-flash"
+        vlm_model = (
+            os.environ.get("PREFERRED_VLM_MODEL", "").strip() or "gemini-1.5-flash"
+        )
         try:
             res = try_cloud_ai_vision(
                 "gemini",
@@ -1357,7 +1516,11 @@ Input:
 
     # Fallback to local VLM if cloud failed or skipped, and LOCAL_VLM_MODEL is configured
     local_vlm_model = os.environ.get("LOCAL_VLM_MODEL", "").strip()
-    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in ("true", "1", "yes")
+    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
     if local_vlm_model and not disable_local:
         logger.info(f"{req_prefix}VLM: Trying local VLM model '{local_vlm_model}'...")
         try:
@@ -1373,7 +1536,9 @@ Input:
         except Exception as e:
             logger.error(f"{req_prefix}Local VLM vision translation failed: {e}")
     elif local_vlm_model and disable_local:
-        logger.info(f"{req_prefix}VLM: Local VLM model '{local_vlm_model}' skipped (disabled via environment).")
+        logger.info(
+            f"{req_prefix}VLM: Local VLM model '{local_vlm_model}' skipped (disabled via environment)."
+        )
 
     return None
 

@@ -12,6 +12,7 @@ from worker.handlers import (
     process_qa,
 )
 
+
 def check_stale_job(queue_name, job_data):
     if queue_name in ("queue:translation", "queue:ocr", "queue:qa", "queue:layout"):
         image_id = job_data.get("imageId")
@@ -24,11 +25,14 @@ def check_stale_job(queue_name, job_data):
                 # If image exists we can proceed. Future logic for specific cancellation can go here.
                 return False
             elif res.status_code == 404:
-                print(f"[RQ Task] Image {image_id} not found, aborting job.", flush=True)
+                print(
+                    f"[RQ Task] Image {image_id} not found, aborting job.", flush=True
+                )
                 return True
         except Exception:
             pass
     return False
+
 
 def process_job_rq(queue_name, job_data):
     try:
