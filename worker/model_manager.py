@@ -14,7 +14,9 @@ try:
     os.environ["FLAGS_use_mkldnn"] = "0"
     os.environ["PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT"] = "0"
 except Exception as err_env:  # pylint: disable=broad-except
-    print(f"[Unified Worker] Failed to set PaddleOCR environment: {err_env}", flush=True)
+    print(
+        f"[Unified Worker] Failed to set PaddleOCR environment: {err_env}", flush=True
+    )
 
 
 LANG_TO_PADDLE: dict = {
@@ -63,7 +65,9 @@ class ModelManager:
                         f"(PP-OCRv5 Mobile, lang='{paddle_lang}')...",
                         flush=True,
                     )
-                    from paddleocr import PaddleOCR as _PaddleOCR  # pylint: disable=import-outside-toplevel
+                    from paddleocr import (
+                        PaddleOCR as _PaddleOCR,
+                    )  # pylint: disable=import-outside-toplevel
 
                     self.paddle_readers[paddle_lang] = _PaddleOCR(
                         lang=paddle_lang,

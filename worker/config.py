@@ -13,7 +13,9 @@ logging.addLevelName(logging.TRACE, "TRACE")
 def trace(self, message, *args, **kws):
     """Log a message with TRACE level."""
     if self.isEnabledFor(logging.TRACE):
-        self._log(logging.TRACE, message, args, **kws)  # pylint: disable=protected-access
+        self._log(
+            logging.TRACE, message, args, **kws
+        )  # pylint: disable=protected-access
 
 
 logging.Logger.trace = trace
