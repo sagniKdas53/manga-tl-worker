@@ -21,6 +21,9 @@ on:
       - "worker/**"
       - ".github/workflows/ci-python.yml"
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Run worker tests
