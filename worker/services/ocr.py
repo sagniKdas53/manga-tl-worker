@@ -155,7 +155,8 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model):
                 return res_json["choices"][0]["message"]["content"]
         else:
             print(
-                f"[OCR Redo] Cloud OCR error {res.status_code}: {res.text}", flush=True
+                f"[OCR Redo] Cloud OCR error {res.status_code} from provider={provider}",
+                flush=True,
             )
     except Exception as e:
         print(f"[OCR Redo] Cloud OCR HTTP post failed: {e}", flush=True)
