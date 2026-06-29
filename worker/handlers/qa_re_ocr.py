@@ -11,9 +11,11 @@ from worker.services.ocr import perform_redo_ocr
 def process_qa_re_ocr(job_data):
     image_id = job_data.get("imageId")
     region_ids = job_data.get("regionsToReOcr", [])
-    
-    print(f"[QA Re-OCR] Processing image {image_id} for regions: {region_ids}", flush=True)
-    
+
+    print(
+        f"[QA Re-OCR] Processing image {image_id} for regions: {region_ids}", flush=True
+    )
+
     if not image_id or not region_ids:
         print("[QA Re-OCR] Missing imageId or regionsToReOcr", flush=True)
         return
@@ -22,7 +24,9 @@ def process_qa_re_ocr(job_data):
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
-            print(f"[QA Re-OCR] Failed to get image info: {res.status_code}", flush=True)
+            print(
+                f"[QA Re-OCR] Failed to get image info: {res.status_code}", flush=True
+            )
             return
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
@@ -69,28 +73,29 @@ def process_qa_re_ocr(job_data):
                         crop_bytes, region["detectedLanguage"]
                     )
                     detected_lang = detect_language(text)
-                    
-                    results.append({
-                        "regionId": region["id"],
-                        "text": text,
-                        "confidence": confidence,
-                        "detectedLanguage": detected_lang
-                    })
+
+                    results.append(
+                        {
+                            "regionId": region["id"],
+                            "text": text,
+                            "confidence": confidence,
+                            "detectedLanguage": detected_lang,
+                        }
+                    )
                     print(
                         f"[QA Re-OCR] Region {region['id']} success: '{text}' (conf={confidence})",
                         flush=True,
                     )
             except Exception as e:
-                print(f"[QA Re-OCR] Failed to OCR region {region['id']}: {e}", flush=True)
-                
+                print(
+                    f"[QA Re-OCR] Failed to OCR region {region['id']}: {e}", flush=True
+                )
+
     except Exception as e:
         print(f"[QA Re-OCR] Error during batch OCR process: {e}", flush=True)
         return
 
-    callback_payload = {
-        "imageId": image_id,
-        "results": results
-    }
+    callback_payload = {"imageId": image_id, "results": results}
 
     try:
         callback_url = f"{CALLBACK_URL}/qa-re-ocr"
