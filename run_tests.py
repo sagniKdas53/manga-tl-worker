@@ -14,6 +14,12 @@ from tests.test_typesetting import (
     test_fit_text_rectangular,
     test_fit_text_polygon,
 )
+from tests.test_render_and_qa import (
+    test_process_render_success,
+    test_process_qa_llm_success,
+    test_process_qa_vlm_cloud_success,
+    test_process_qa_vlm_local_fallback,
+)
 
 print("Running test_detect_background_color...")
 try:
@@ -61,6 +67,38 @@ try:
     print("test_fit_text_polygon passed!")
 except AssertionError as e:
     print("test_fit_text_polygon failed!", e)
+    sys.exit(1)
+
+print("Running test_process_render_success...")
+try:
+    test_process_render_success()
+    print("test_process_render_success passed!")
+except Exception as e:
+    print("test_process_render_success failed!", e)
+    sys.exit(1)
+
+print("Running test_process_qa_llm_success...")
+try:
+    test_process_qa_llm_success()
+    print("test_process_qa_llm_success passed!")
+except Exception as e:
+    print("test_process_qa_llm_success failed!", e)
+    sys.exit(1)
+
+print("Running test_process_qa_vlm_cloud_success...")
+try:
+    test_process_qa_vlm_cloud_success()
+    print("test_process_qa_vlm_cloud_success passed!")
+except Exception as e:
+    print("test_process_qa_vlm_cloud_success failed!", e)
+    sys.exit(1)
+
+print("Running test_process_qa_vlm_local_fallback...")
+try:
+    test_process_qa_vlm_local_fallback()
+    print("test_process_qa_vlm_local_fallback passed!")
+except Exception as e:
+    print("test_process_qa_vlm_local_fallback failed!", e)
     sys.exit(1)
 
 print("All tests passed successfully!")
