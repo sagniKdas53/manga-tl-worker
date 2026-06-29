@@ -77,7 +77,7 @@ def process_qa_re_ocr(job_data):
                         "detectedLanguage": detected_lang
                     })
                     print(
-                        f"[QA Re-OCR] Region {region['id']} success: '{text}' (conf={confidence})",
+                        f"[QA Re-OCR] Region {region['id']} success (conf={confidence}, chars={len(text)}, lang={detected_lang})",
                         flush=True,
                     )
             except Exception as e:
