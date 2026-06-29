@@ -10,6 +10,7 @@ from worker.handlers import (
     process_stub,
     process_render,
     process_qa,
+    process_qa_re_ocr,
 )
 
 
@@ -53,6 +54,8 @@ def process_job_rq(queue_name, job_data):
             process_render(job_data)
         elif queue_name == "queue:qa":
             process_qa(job_data)
+        elif queue_name == "queue:qa-re-ocr":
+            process_qa_re_ocr(job_data)
     except Exception as e:
         print(f"[RQ Worker] Error processing job from {queue_name}: {e}", flush=True)
         traceback.print_exc()

@@ -48,6 +48,8 @@ QA_JSON_SCHEMA = {
                         "properties": {
                             "ocrBad": {"type": "boolean"},
                             "correctedSourceText": {"type": "string"},
+                            "needsReOcr": {"type": "boolean"},
+                            "needsManualIntervention": {"type": "boolean"},
                             "orderBad": {"type": "boolean"},
                             "suggestedReadingOrderIndex": {"type": "number"},
                         },
@@ -167,7 +169,10 @@ Your job is to evaluate translation quality and conversation flow based on text-
 For each region in the provided metadata, evaluate and check if:
 1. The English translation is accurate, natural, and contextually appropriate compared to the original Japanese OCR text.
 2. The conversation flow between dialogue regions feels coherent.
-3. The original Japanese OCR transcription was bad/inaccurate (flag with ocrBad=true and provide correctedSourceText).
+3. The original Japanese OCR transcription was bad/inaccurate:
+   - If you can deduce the correct text, flag with ocrBad=true and provide correctedSourceText.
+   - If the OCR text is garbage (like misread sound effects) and you CANNOT deduce it, flag needsReOcr=true.
+   - If the region is completely unfixable or obscured, flag needsManualIntervention=true.
 4. The reading order/bubble sequence is incorrect (flag with orderBad=true and provide suggestedReadingOrderIndex).
 
 Status categories:
@@ -396,7 +401,10 @@ For each region in the provided metadata, evaluate and check if:
 1. Text overflows the speech bubble/mask boundaries.
 2. Text overlaps with panel borders or other text.
 3. Translation flow is awkward, or the English translation does not match the original Japanese text.
-4. The OCR transcription was bad/inaccurate (flag with ocrBad=true and provide correctedSourceText).
+4. The OCR transcription was bad/inaccurate:
+   - If you can deduce the correct text from the image, flag with ocrBad=true and provide correctedSourceText.
+   - If the OCR text is garbage and you CANNOT deduce it or read it, flag needsReOcr=true.
+   - If the region is completely unfixable or obscured, flag needsManualIntervention=true.
 5. The reading order/bubble sequence is incorrect (flag with orderBad=true and provide suggestedReadingOrderIndex).
 
 Status categories:

@@ -7,6 +7,7 @@ from .redo import process_region_redo, perform_redo_ocr
 from .stub import process_stub
 from .render import process_render
 from .qa import process_qa
+from .qa_re_ocr import process_qa_re_ocr
 
 __all__ = [
     "process_panel_detection",
@@ -18,4 +19,5 @@ __all__ = [
     "process_stub",
     "process_render",
     "process_qa",
+    "process_qa_re_ocr",
 ]
