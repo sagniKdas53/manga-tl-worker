@@ -184,7 +184,10 @@ def perform_redo_ocr(img_crop_bytes, lang):
             )
             text = try_cloud_ocr(img_crop_bytes, provider, api_key, model)
             if text and len(text.strip()) > 0:
-                print(f"[OCR Redo] Cloud AI OCR Success: '{text}'", flush=True)
+                print(
+                    f"[OCR Redo] Cloud AI OCR Success (chars={len(text.strip())})",
+                    flush=True,
+                )
                 return text.strip(), 1.0
         except Exception as e:
             print(f"[OCR Redo] Cloud AI OCR failed: {e}", flush=True)
