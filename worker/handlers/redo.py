@@ -106,7 +106,7 @@ def process_region_redo(job_data):
                 callback_payload["confidence"] = confidence
                 callback_payload["detectedLanguage"] = detected_lang
                 print(
-                    f"[Region Redo] Redo OCR success: '{text}' (conf={confidence}, lang={detected_lang})",
+                    f"[Region Redo] Redo OCR success (text_len={len(text) if text else 0}, conf={confidence}, lang={detected_lang})",
                     flush=True,
                 )
         except Exception as e:
@@ -121,7 +121,7 @@ def process_region_redo(job_data):
             callback_payload["translatedText"] = translated
             callback_payload["translationFailed"] = translated is None
             logger.info(
-                f"{req_prefix}Redo Translation result: '{translated}' (failed={translated is None})"
+                f"{req_prefix}Redo Translation result (text_len={len(translated) if translated else 0}, failed={translated is None})"
             )
         except Exception as e:
             logger.error(f"{req_prefix}Redo Translation failed: {e}")
