@@ -7,12 +7,6 @@ from PIL import Image
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_CACHE_DIR = os.path.join(TEST_DIR, "test_rendered_cache")
 
-# Mock redis_client globally to avoid connection errors in tests
-redis_mock = MagicMock()
-redis_mock.llen.return_value = 0
-redis_patcher = patch("worker.config.redis_client", redis_mock)
-redis_patcher.start()
-
 from worker.handlers.render import process_render
 from worker.handlers.qa import process_qa
 
