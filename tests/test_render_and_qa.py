@@ -10,22 +10,24 @@ TEST_CACHE_DIR = os.path.join(TEST_DIR, "test_rendered_cache")
 from worker.handlers.render import process_render
 from worker.handlers.qa import process_qa
 
+
 def get_dummy_image_bytes():
     img = Image.new("RGB", (200, 200), (255, 255, 255))
     out = io.BytesIO()
     img.save(out, format="PNG")
     return out.getvalue()
 
+
 @patch("worker.handlers.render.download_image")
 @patch("worker.handlers.render.minio_client")
 @patch("worker.handlers.render.requests.get")
 @patch("worker.handlers.render.requests.post")
-@patch("worker.config.QA_MODE", "vlm") # Set QA_MODE to trigger rendering
+@patch("worker.config.QA_MODE", "vlm")  # Set QA_MODE to trigger rendering
 @patch("worker.config.RENDER_CACHE_DIR", TEST_CACHE_DIR)
 def test_process_render_success(mock_post, mock_get, mock_minio, mock_download):
     # Setup mocks
     mock_download.return_value = get_dummy_image_bytes()
-    
+
     mock_image_info = {
         "id": "image-uuid-1",
         "filename": "page1.png",
@@ -44,26 +46,22 @@ def test_process_render_success(mock_post, mock_get, mock_minio, mock_download):
                 "fontWeight": "bold",
                 "fontStyle": "normal",
                 "boxShape": "rectangular",
-                "font": "Comic Neue"
+                "font": "Comic Neue",
             }
-        ]
+        ],
     }
-    
+
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
     mock_get_res.json.return_value = mock_image_info
     mock_get.return_value = mock_get_res
-    
+
     mock_post_res = MagicMock()
     mock_post_res.status_code = 200
     mock_post.return_value = mock_post_res
 
     # Invoke process_render
-    job_data = {
-        "imageId": "image-uuid-1",
-        "pageNumber": 1,
-        "chapterNumber": 1.0
-    }
+    job_data = {"imageId": "image-uuid-1", "pageNumber": 1, "chapterNumber": 1.0}
     process_render(job_data)
 
     # Assertions
@@ -73,7 +71,7 @@ def test_process_render_success(mock_post, mock_get, mock_minio, mock_download):
     assert args[0] == "manga-library"
     assert args[1] == "rendered/image-uuid-1.png"
     assert kwargs.get("content_type") == "image/png"
-    
+
     mock_post.assert_called_once()
     post_args, post_kwargs = mock_post.call_args
     assert "render" in post_args[0]
@@ -95,25 +93,27 @@ def test_process_qa_llm_success(mock_post, mock_get, mock_try_cloud_ai):
                 "confidence": 0.9,
                 "translatedText": "Hello",
                 "translationScore": 0.95,
-                "bubbleReadingOrder": 1
+                "bubbleReadingOrder": 1,
             }
-        ]
+        ],
     }
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
     mock_get_res.json.return_value = mock_image_info
     mock_get.return_value = mock_get_res
 
-    mock_try_cloud_ai.return_value = json.dumps({
-        "results": [
-            {
-                "regionId": "region-uuid-1",
-                "qaStatus": "passed",
-                "qaScore": 0.98,
-                "qaFeedback": "Perfect translation."
-            }
-        ]
-    })
+    mock_try_cloud_ai.return_value = json.dumps(
+        {
+            "results": [
+                {
+                    "regionId": "region-uuid-1",
+                    "qaStatus": "passed",
+                    "qaScore": 0.98,
+                    "qaFeedback": "Perfect translation.",
+                }
+            ]
+        }
+    )
 
     mock_post_res = MagicMock()
     mock_post_res.status_code = 200
@@ -144,7 +144,9 @@ def test_process_qa_llm_success(mock_post, mock_get, mock_try_cloud_ai):
 @patch("worker.handlers.qa.requests.get")
 @patch("worker.handlers.qa.requests.post")
 @patch("worker.handlers.qa.QA_MODE", "vlm")
-def test_process_qa_vlm_cloud_success(mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm):
+def test_process_qa_vlm_cloud_success(
+    mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm
+):
     # Setup mocks
     mock_image_info = {
         "id": "image-uuid-1",
@@ -152,11 +154,14 @@ def test_process_qa_vlm_cloud_success(mock_post, mock_get, mock_minio, mock_down
             {
                 "id": "region-uuid-1",
                 "text": "こんにちは",
-                "bboxX": 10, "bboxY": 20, "bboxW": 100, "bboxH": 50,
+                "bboxX": 10,
+                "bboxY": 20,
+                "bboxW": 100,
+                "bboxH": 50,
                 "translatedText": "Hello",
-                "bubbleReadingOrder": 1
+                "bubbleReadingOrder": 1,
             }
-        ]
+        ],
     }
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
@@ -164,21 +169,23 @@ def test_process_qa_vlm_cloud_success(mock_post, mock_get, mock_minio, mock_down
     mock_get.return_value = mock_get_res
 
     mock_download.return_value = get_dummy_image_bytes()
-    
+
     mock_minio_res = MagicMock()
     mock_minio_res.read.return_value = get_dummy_image_bytes()
     mock_minio.get_object.return_value = mock_minio_res
 
-    mock_try_cloud_vlm.return_value = json.dumps({
-        "results": [
-            {
-                "regionId": "region-uuid-1",
-                "qaStatus": "passed",
-                "qaScore": 0.99,
-                "qaFeedback": "VLM verified rendering matches text exactly."
-            }
-        ]
-    })
+    mock_try_cloud_vlm.return_value = json.dumps(
+        {
+            "results": [
+                {
+                    "regionId": "region-uuid-1",
+                    "qaStatus": "passed",
+                    "qaScore": 0.99,
+                    "qaFeedback": "VLM verified rendering matches text exactly.",
+                }
+            ]
+        }
+    )
 
     mock_post_res = MagicMock()
     mock_post_res.status_code = 200
@@ -193,7 +200,9 @@ def test_process_qa_vlm_cloud_success(mock_post, mock_get, mock_minio, mock_down
 
     # Assertions
     mock_try_cloud_vlm.assert_called_once()
-    mock_minio.get_object.assert_called_once_with("manga-library", "rendered/image-uuid-1.png")
+    mock_minio.get_object.assert_called_once_with(
+        "manga-library", "rendered/image-uuid-1.png"
+    )
     mock_post.assert_called_once()
     post_args, post_kwargs = mock_post.call_args
     qa_results = post_kwargs["json"]["qaResults"]
@@ -209,7 +218,14 @@ def test_process_qa_vlm_cloud_success(mock_post, mock_get, mock_minio, mock_down
 @patch("worker.handlers.qa.requests.get")
 @patch("worker.handlers.qa.requests.post")
 @patch("worker.handlers.qa.QA_MODE", "vlm")
-def test_process_qa_vlm_local_fallback(mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm, mock_try_local_vlm):
+def test_process_qa_vlm_local_fallback(
+    mock_post,
+    mock_get,
+    mock_minio,
+    mock_download,
+    mock_try_cloud_vlm,
+    mock_try_local_vlm,
+):
     # Setup mocks
     mock_image_info = {
         "id": "image-uuid-1",
@@ -217,11 +233,14 @@ def test_process_qa_vlm_local_fallback(mock_post, mock_get, mock_minio, mock_dow
             {
                 "id": "region-uuid-1",
                 "text": "こんにちは",
-                "bboxX": 10, "bboxY": 20, "bboxW": 100, "bboxH": 50,
+                "bboxX": 10,
+                "bboxY": 20,
+                "bboxW": 100,
+                "bboxH": 50,
                 "translatedText": "Hello",
-                "bubbleReadingOrder": 1
+                "bubbleReadingOrder": 1,
             }
-        ]
+        ],
     }
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
@@ -229,7 +248,7 @@ def test_process_qa_vlm_local_fallback(mock_post, mock_get, mock_minio, mock_dow
     mock_get.return_value = mock_get_res
 
     mock_download.return_value = get_dummy_image_bytes()
-    
+
     mock_minio_res = MagicMock()
     mock_minio_res.read.return_value = get_dummy_image_bytes()
     mock_minio.get_object.return_value = mock_minio_res
@@ -238,20 +257,19 @@ def test_process_qa_vlm_local_fallback(mock_post, mock_get, mock_minio, mock_dow
     mock_try_cloud_vlm.side_effect = Exception("API quota exceeded")
 
     # Set up local VLM return
-    mock_try_local_vlm.return_value = json.dumps({
-        "results": [
-            {
-                "regionId": "region-uuid-1",
-                "qaStatus": "direct_fix",
-                "qaScore": 0.8,
-                "qaFeedback": "Slight layout wrap issue.",
-                "directFix": {
-                    "correctedText": "Hello!",
-                    "suggestedFontSize": 12.0
+    mock_try_local_vlm.return_value = json.dumps(
+        {
+            "results": [
+                {
+                    "regionId": "region-uuid-1",
+                    "qaStatus": "direct_fix",
+                    "qaScore": 0.8,
+                    "qaFeedback": "Slight layout wrap issue.",
+                    "directFix": {"correctedText": "Hello!", "suggestedFontSize": 12.0},
                 }
-            }
-        ]
-    })
+            ]
+        }
+    )
 
     mock_post_res = MagicMock()
     mock_post_res.status_code = 200
@@ -285,12 +303,11 @@ def test_process_qa_vlm_local_fallback(mock_post, mock_get, mock_minio, mock_dow
 @patch("worker.handlers.qa.requests.get")
 @patch("worker.handlers.qa.requests.post")
 @patch("worker.handlers.qa.QA_MODE", "vlm")
-def test_process_qa_vlm_empty_ocr_regions(mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm):
+def test_process_qa_vlm_empty_ocr_regions(
+    mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm
+):
     # Setup mock image info with empty ocrRegions
-    mock_image_info = {
-        "id": "image-uuid-1",
-        "ocrRegions": []
-    }
+    mock_image_info = {"id": "image-uuid-1", "ocrRegions": []}
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
     mock_get_res.json.return_value = mock_image_info
@@ -307,17 +324,16 @@ def test_process_qa_vlm_empty_ocr_regions(mock_post, mock_get, mock_minio, mock_
     # Assertions:
     # 1. Requests GET should be called twice (once in _process_qa_vlm, and once in _auto_pass_all)
     assert mock_get.call_count == 2
-    
+
     # 2. VLM cloud model should NOT be called
     mock_try_cloud_vlm.assert_not_called()
-    
+
     # 3. Image download should NOT be called
     mock_download.assert_not_called()
-    
+
     # 4. Callback POST should be called with empty qaResults
     mock_post.assert_called_once()
     post_args, post_kwargs = mock_post.call_args
     assert "qa" in post_args[0]
     assert post_kwargs["json"]["imageId"] == "image-uuid-1"
     assert post_kwargs["json"]["qaResults"] == []
-
