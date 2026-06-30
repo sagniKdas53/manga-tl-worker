@@ -493,6 +493,7 @@ def try_cloud_ai_vision(
     prompt,
     base64_image,
     response_schema=None,
+    system_prompt=None,
     request_id=None,
 ):
     req_prefix = f"[{request_id}] " if request_id else ""
@@ -543,13 +544,18 @@ def try_cloud_ai_vision(
                 }
             ],
         }
-        if response_schema:
+        if system_prompt:
+            payload["system"] = system_prompt
+        elif response_schema:
             payload["system"] = MANGA_TRANSLATION_JSON_SYSTEM_PROMPT
     else:
         payload = {
             "model": actual_model,
             "messages": [{"role": "user", "content": user_message}],
         }
+        if system_prompt:
+            payload["messages"].insert(0, {"role": "system", "content": system_prompt})
+            
         if response_schema:
             if provider == "nvidia":
                 payload["response_format"] = {"type": "json_object"}
@@ -557,7 +563,7 @@ def try_cloud_ai_vision(
                 payload["response_format"] = {
                     "type": "json_schema",
                     "json_schema": {
-                        "name": "manga_translation",
+                        "name": "vision_schema",
                         "schema": response_schema,
                         "strict": True,
                     },
@@ -1277,7 +1283,7 @@ Input:
 
 
 def try_local_vlm_vision(
-    model, prompt, base64_image, response_schema=None, request_id=None
+    model, prompt, base64_image, response_schema=None, system_prompt=None, request_id=None
 ):
     req_prefix = f"[{request_id}] " if request_id else ""
     local_provider = os.environ.get("LOCAL_LLM_PROVIDER", "ollama").lower().strip()
@@ -1296,20 +1302,24 @@ def try_local_vlm_vision(
         else:
             local_endpoint += "/v1/chat/completions"
 
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+        
+    messages.append({
+        "role": "user",
+        "content": [
+            {"type": "text", "text": prompt},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
+            },
+        ],
+    })
+
     payload = {
         "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
-                    },
-                ],
-            }
-        ],
+        "messages": messages,
     }
 
     if response_schema:
@@ -1343,204 +1353,7 @@ def try_local_vlm_vision(
     return None
 
 
-def translate_vlm_vision(
-    img_bytes,
-    unmatched_regions,
-    context_str="",
-    response_schema=None,
-    request_id=None,
-    source_lang="ja",
-    target_lang="en",
-):
-    if not img_bytes:
-        return None
-    req_prefix = f"[{request_id}] " if request_id else ""
 
-    import base64
-
-    base64_image = base64.b64encode(img_bytes).decode("utf-8")
-
-    bubbles_input = []
-    for r in unmatched_regions:
-        entry = {
-            "id": r["id"],
-            "panel": r.get("panelReadingOrder") or r.get("panelId") or 0,
-            "bubble": r.get("bubbleReadingOrder") or 0,
-            "speaker": r.get("speakerLabel") or None,
-            "regionType": r.get("regionType") or "speech",
-            "conversationGroup": r.get("conversationId") or None,
-            "text": r["text"],
-        }
-        if r.get("qaStatus") == "failed" and r.get("qaFeedback"):
-            entry["previousTranslation"] = r.get("translatedText")
-            entry["qaFeedback"] = r.get("qaFeedback")
-        bubbles_input.append(entry)
-
-    src_name = LANG_MAP.get(source_lang.lower(), source_lang)
-    tgt_name = LANG_MAP.get(target_lang.lower(), target_lang)
-
-    prompt = f"""{context_str}These OCR regions were extracted from this manga page using automated OCR.
-
-IMPORTANT — Before translating:
-1. Verify each region's OCR text against the visible text in the image. If the OCR text
-   appears incorrect (garbled, truncated, or mis-recognized), use the text you actually
-   see in the image instead.
-2. For each bubble, identify the speaker based on visual cues (speech bubble tails,
-   character positions, expressions, panel context).
-3. If a region's "regionType" is "sfx", look at the visual style of the text (bold,
-   angular, wavy) to inform your transliteration style.
-
-Translate each region from {src_name} into natural manga {tgt_name}.
-Preserve:
-- tone
-- emotional state
-- relationships
-- ongoing conversation
-
-Region type handling:
-- "speech": Translate as natural dialogue.
-- "narration": Translate as third-person narrative prose.
-- "sfx": Transliterate the sound effect AND provide a {tgt_name} equivalent in parentheses (e.g. "DOKAA (WHAM)").
-- "caption": Translate as editorial/scene-setting text.
-- "sign": Translate literally, noting it's environmental text.
-
-If multiple regions share the same conversationGroup, treat them as a continuous dialogue exchange and ensure coherent flow.
-
-If a region has "previousTranslation" and "qaFeedback" fields, it means the previous translation attempt failed QA (e.g. text overflow, poor phrasing, or formatting issues). Adjust your translation accordingly based on the feedback (for example, shortening the text to fit if it overflowed).
-
-You MUST return a JSON object containing a "translations" key with an array of objects.
-Each object in the array MUST have the following keys:
-- "id" (the original string ID)
-- "translation" (your {tgt_name} translation)
-- "translationNotes" (brief explanation of translation decisions or register choices)
-- "emotion" (detected speaker emotion, e.g. "earnest", "angry", "playful")
-- "tone" (detected tone, e.g. "formal", "sarcastic", "casual")
-- "translationScore" (a self-evaluation score from 0.0 to 1.0 representing translation quality/confidence)
-
-Example structure:
-{{
-  "translations": [
-    {{
-      "id": "some-id-1",
-      "translation": "Translated text here",
-      "translationNotes": "Preserved informal/teasing tone",
-      "emotion": "playful",
-      "tone": "casual",
-      "translationScore": 0.95
-    }}
-  ]
-}}
-
-Return ONLY valid JSON.
-
-Input:
-{json.dumps(bubbles_input, ensure_ascii=False, indent=2)}
-"""
-    provider = os.environ.get("MODEL_PROVIDER", "").lower().strip()
-    api_key = os.environ.get("API_KEY", "").strip()
-
-    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip() or (
-        api_key if provider == "openrouter" else ""
-    )
-    gemini_key = os.environ.get("GEMINI_API_KEY", "").strip() or (
-        api_key if provider == "gemini" else ""
-    )
-    nvidia_key = os.environ.get("NVIDIA_API_KEY", "").strip() or (
-        api_key if provider == "nvidia" else ""
-    )
-
-    if provider == "openrouter" and openrouter_key:
-        logger.info(f"{req_prefix}VLM: Trying vision model via OpenRouter...")
-        vlm_model = (
-            os.environ.get("PREFERRED_VLM_MODEL", "").strip() or "gemini-1.5-flash"
-        )
-        try:
-            res = try_cloud_ai_vision(
-                "openrouter",
-                openrouter_key,
-                vlm_model,
-                prompt,
-                base64_image,
-                response_schema,
-                request_id=request_id,
-            )
-            if res:
-                return res
-        except Exception as e:
-            logger.error(
-                f"{req_prefix}VLM vision translation via OpenRouter failed: {e}"
-            )
-
-    elif provider == "gemini" and gemini_key:
-        logger.info(f"{req_prefix}VLM: Trying vision model via Gemini...")
-        vlm_model = (
-            os.environ.get("PREFERRED_VLM_MODEL", "").strip() or "gemini-1.5-flash"
-        )
-        try:
-            res = try_cloud_ai_vision(
-                "gemini",
-                gemini_key,
-                vlm_model,
-                prompt,
-                base64_image,
-                response_schema,
-                request_id=request_id,
-            )
-            if res:
-                return res
-        except Exception as e:
-            logger.error(f"{req_prefix}VLM vision translation via Gemini failed: {e}")
-
-    elif provider == "nvidia" and nvidia_key:
-        logger.info(f"{req_prefix}VLM: Trying vision model via Nvidia...")
-        nvidia_vlm_model = (
-            os.environ.get("NVIDIA_VLM_MODEL", "").strip()
-            or os.environ.get("PREFERRED_VLM_MODEL", "").strip()
-        )
-        if not nvidia_vlm_model:
-            nvidia_vlm_model = "nvidia/nemotron-nano-12b-v2-vl"
-        try:
-            res = try_cloud_ai_vision(
-                "nvidia",
-                nvidia_key,
-                nvidia_vlm_model,
-                prompt,
-                base64_image,
-                response_schema,
-                request_id=request_id,
-            )
-            if res:
-                return res
-        except Exception as e:
-            logger.error(f"{req_prefix}VLM vision translation via Nvidia failed: {e}")
-
-    # Fallback to local VLM if cloud failed or skipped, and LOCAL_VLM_MODEL is configured
-    local_vlm_model = os.environ.get("LOCAL_VLM_MODEL", "").strip()
-    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
-        "true",
-        "1",
-        "yes",
-    )
-    if local_vlm_model and not disable_local:
-        logger.info(f"{req_prefix}VLM: Trying local VLM model '{local_vlm_model}'...")
-        try:
-            res = try_local_vlm_vision(
-                local_vlm_model,
-                prompt,
-                base64_image,
-                response_schema,
-                request_id=request_id,
-            )
-            if res:
-                return res
-        except Exception as e:
-            logger.error(f"{req_prefix}Local VLM vision translation failed: {e}")
-    elif local_vlm_model and disable_local:
-        logger.info(
-            f"{req_prefix}VLM: Local VLM model '{local_vlm_model}' skipped (disabled via environment)."
-        )
-
-    return None
 
 
 def translate_batch_deepl(unmatched_regions, target_lang="en", request_id=None):
