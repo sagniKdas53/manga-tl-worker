@@ -4,6 +4,9 @@ import os
 from unittest.mock import patch, MagicMock
 from PIL import Image
 
+TEST_DIR = os.path.dirname(os.path.abspath(__file__))
+TEST_CACHE_DIR = os.path.join(TEST_DIR, "test_rendered_cache")
+
 from worker.handlers.render import process_render
 from worker.handlers.qa import process_qa
 
@@ -18,7 +21,7 @@ def get_dummy_image_bytes():
 @patch("worker.handlers.render.requests.get")
 @patch("worker.handlers.render.requests.post")
 @patch("worker.config.QA_MODE", "vlm") # Set QA_MODE to trigger rendering
-@patch("worker.config.RENDER_CACHE_DIR", "./test_rendered_cache")
+@patch("worker.config.RENDER_CACHE_DIR", TEST_CACHE_DIR)
 def test_process_render_success(mock_post, mock_get, mock_minio, mock_download):
     # Setup mocks
     mock_download.return_value = get_dummy_image_bytes()
@@ -274,3 +277,47 @@ def test_process_qa_vlm_local_fallback(mock_post, mock_get, mock_minio, mock_dow
     assert qa_results[0]["regionId"] == "region-uuid-1"
     assert qa_results[0]["qaStatus"] == "direct_fix"
     assert qa_results[0]["directFix"]["correctedText"] == "Hello!"
+
+
+@patch("worker.handlers.qa.try_cloud_ai_vision")
+@patch("worker.handlers.qa.download_image")
+@patch("worker.handlers.qa.minio_client")
+@patch("worker.handlers.qa.requests.get")
+@patch("worker.handlers.qa.requests.post")
+@patch("worker.handlers.qa.QA_MODE", "vlm")
+def test_process_qa_vlm_empty_ocr_regions(mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm):
+    # Setup mock image info with empty ocrRegions
+    mock_image_info = {
+        "id": "image-uuid-1",
+        "ocrRegions": []
+    }
+    mock_get_res = MagicMock()
+    mock_get_res.status_code = 200
+    mock_get_res.json.return_value = mock_image_info
+    mock_get.return_value = mock_get_res
+
+    mock_post_res = MagicMock()
+    mock_post_res.status_code = 200
+    mock_post.return_value = mock_post_res
+
+    # Invoke process_qa
+    job_data = {"imageId": "image-uuid-1"}
+    process_qa(job_data)
+
+    # Assertions:
+    # 1. Requests GET should be called twice (once in _process_qa_vlm, and once in _auto_pass_all)
+    assert mock_get.call_count == 2
+    
+    # 2. VLM cloud model should NOT be called
+    mock_try_cloud_vlm.assert_not_called()
+    
+    # 3. Image download should NOT be called
+    mock_download.assert_not_called()
+    
+    # 4. Callback POST should be called with empty qaResults
+    mock_post.assert_called_once()
+    post_args, post_kwargs = mock_post.call_args
+    assert "qa" in post_args[0]
+    assert post_kwargs["json"]["imageId"] == "image-uuid-1"
+    assert post_kwargs["json"]["qaResults"] == []
+

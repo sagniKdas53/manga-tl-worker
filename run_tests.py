@@ -19,6 +19,7 @@ from tests.test_render_and_qa import (
     test_process_qa_llm_success,
     test_process_qa_vlm_cloud_success,
     test_process_qa_vlm_local_fallback,
+    test_process_qa_vlm_empty_ocr_regions,
 )
 
 print("Running test_detect_background_color...")
@@ -99,6 +100,14 @@ try:
     print("test_process_qa_vlm_local_fallback passed!")
 except Exception as e:
     print("test_process_qa_vlm_local_fallback failed!", e)
+    sys.exit(1)
+
+print("Running test_process_qa_vlm_empty_ocr_regions...")
+try:
+    test_process_qa_vlm_empty_ocr_regions()
+    print("test_process_qa_vlm_empty_ocr_regions passed!")
+except Exception as e:
+    print("test_process_qa_vlm_empty_ocr_regions failed!", e)
     sys.exit(1)
 
 print("All tests passed successfully!")

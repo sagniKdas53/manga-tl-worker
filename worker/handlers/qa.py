@@ -141,6 +141,10 @@ def _process_qa_llm(job_data):
             return
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
+        if not ocr_regions:
+            print("[QA] No OCR regions found. Skipping LLM QA.", flush=True)
+            _auto_pass_all(job_data)
+            return
     except Exception as e:
         print(f"[QA] Error fetching image details: {e}", flush=True)
         return
@@ -328,6 +332,10 @@ def _process_qa_vlm(job_data):
             return
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
+        if not ocr_regions:
+            print("[QA] No OCR regions found. Skipping VLM QA.", flush=True)
+            _auto_pass_all(job_data)
+            return
     except Exception as e:
         print(f"[QA] Error fetching image details: {e}", flush=True)
         return
