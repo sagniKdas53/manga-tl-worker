@@ -298,8 +298,8 @@ def process_ocr(job_data):
             disable_local_ocr = os.environ.get("DISABLE_LOCAL_OCR", "").strip().lower() in ("true", "1", "yes")
 
             # Try PaddleOCR (PP-OCRv5) first — reader is lazily created per language
-            paddle_ocr_reader = model_manager.get_paddle_ocr_reader(source_language)
-            if not disable_local_ocr and paddle_ocr_reader is not None:
+            paddle_ocr_reader = None if disable_local_ocr else model_manager.get_paddle_ocr_reader(source_language)
+            if paddle_ocr_reader is not None:
                 try:
                     print(
                         f"[OCR] Running PaddleOCR (PP-OCRv5 Mobile, lang={source_language}).",
@@ -347,8 +347,8 @@ def process_ocr(job_data):
                     )
 
             # Fallback to EasyOCR if results are empty and reader is available
-            easy_reader = model_manager.get_easy_ocr_reader()
-            if not disable_local_ocr and not results and easy_reader is not None:
+            easy_reader = None if disable_local_ocr else model_manager.get_easy_ocr_reader(source_language)
+            if not results and easy_reader is not None:
                 try:
                     print("[OCR] Running EasyOCR fallback...", flush=True)
                     results = easy_reader.readtext(img_bytes)
@@ -365,7 +365,7 @@ def process_ocr(job_data):
             # Use the full-resolution original image for MangaOCR crops
             # (img_decoded may be downscaled, so we use img_original instead)
             img = img_original if img_original is not None else img_decoded
-            manga_ocr_reader = model_manager.get_manga_ocr_reader()
+            manga_ocr_reader = None if disable_local_ocr else model_manager.get_manga_ocr_reader()
             if img is None and manga_ocr_reader is not None:
                 try:
                     nparr = np.frombuffer(img_bytes, np.uint8)

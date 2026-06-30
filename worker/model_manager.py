@@ -28,6 +28,15 @@ LANG_TO_PADDLE: dict = {
     "en": "en",
 }
 
+LANG_TO_EASY: dict = {
+    "ja": "ja",
+    "zh": "ch_tra",
+    "zh-tw": "ch_tra",
+    "zh-cn": "ch_sim",
+    "ko": "ko",
+    "en": "en",
+}
+
 
 class ModelManager:
     """Manager class to cache and evict machine learning OCR model instances."""
@@ -37,12 +46,12 @@ class ModelManager:
     def __init__(self):
         # Cached reader instances
         self.paddle_readers = {}
-        self.easy_reader = None
+        self.easy_readers = {}
         self.manga_reader = None
 
         # Access timestamps
         self.paddle_last_used = {}
-        self.easy_last_used = 0.0
+        self.easy_last_used = {}
         self.manga_last_used = 0.0
 
         self.lock = threading.Lock()
@@ -97,30 +106,39 @@ class ModelManager:
 
             return self.paddle_readers.get(paddle_lang)
 
-    def get_easy_ocr_reader(self):
-        """Return a cached EasyOCR reader."""
+    def get_easy_ocr_reader(self, source_language: str):
+        """Return a cached EasyOCR reader for the given language."""
+        easy_lang = LANG_TO_EASY.get((source_language or "ja").lower(), "ja")
+
         with self.lock:
-            if self.easy_reader is None:
+            if (
+                easy_lang not in self.easy_readers
+                or self.easy_readers[easy_lang] is None
+            ):
                 try:
                     print("[Unified Worker] Importing EasyOCR...", flush=True)
                     import easyocr  # pylint: disable=import-outside-toplevel
 
+                    langs = [easy_lang]
+                    if easy_lang != "en":
+                        langs.append("en")
+
                     print(
-                        "[Unified Worker] Initializing EasyOCR Reader (ja, en)...",
+                        f"[Unified Worker] Initializing EasyOCR Reader ({', '.join(langs)})...",
                         flush=True,
                     )
-                    self.easy_reader = easyocr.Reader(["ja", "en"], gpu=False)
+                    self.easy_readers[easy_lang] = easyocr.Reader(langs, gpu=False)
                 except Exception as err_init_easy:  # pylint: disable=broad-except
                     print(
-                        f"[Unified Worker] Failed to initialize EasyOCR: {err_init_easy}",
+                        f"[Unified Worker] Failed to initialize EasyOCR for lang '{easy_lang}': {err_init_easy}",
                         flush=True,
                     )
-                    self.easy_reader = None
+                    self.easy_readers[easy_lang] = None
 
-            if self.easy_reader is not None:
-                self.easy_last_used = time.time()
+            if self.easy_readers.get(easy_lang) is not None:
+                self.easy_last_used[easy_lang] = time.time()
 
-            return self.easy_reader
+            return self.easy_readers.get(easy_lang)
 
     def get_manga_ocr_reader(self):
         """Return a cached MangaOCR reader."""
@@ -235,16 +253,19 @@ class ModelManager:
                         self.paddle_readers[paddle_lang] = None
                         gc.collect()
 
-            # Check EasyOCR reader
-            if self.easy_reader is not None:
-                if now - self.easy_last_used > ttl_seconds:
-                    print(
-                        f"[Model Manager] Unloading EasyOCR due to inactivity "
-                        f"(idle for {now - self.easy_last_used:.1f}s).",
-                        flush=True,
-                    )
-                    self.easy_reader = None
-                    gc.collect()
+            # Check EasyOCR readers
+            for easy_lang in list(self.easy_readers.keys()):
+                reader = self.easy_readers[easy_lang]
+                if reader is not None:
+                    last_used = self.easy_last_used.get(easy_lang, 0.0)
+                    if now - last_used > ttl_seconds:
+                        print(
+                            f"[Model Manager] Unloading EasyOCR ({easy_lang}) "
+                            f"due to inactivity (idle for {now - last_used:.1f}s).",
+                            flush=True,
+                        )
+                        self.easy_readers[easy_lang] = None
+                        gc.collect()
 
             # Check MangaOCR reader
             if self.manga_reader is not None:
@@ -272,10 +293,12 @@ class ModelManager:
                         f"PaddleOCR:{paddle_lang} (unloads in {int(remaining)}s)"
                     )
 
-            # EasyOCR
-            if self.easy_reader is not None:
-                remaining = max(0.0, ttl_seconds - (now - self.easy_last_used))
-                loaded.append(f"EasyOCR (unloads in {int(remaining)}s)")
+            # EasyOCR readers
+            for easy_lang, reader in self.easy_readers.items():
+                if reader is not None:
+                    last_used = self.easy_last_used.get(easy_lang, 0.0)
+                    remaining = max(0.0, ttl_seconds - (now - last_used))
+                    loaded.append(f"EasyOCR:{easy_lang} (unloads in {int(remaining)}s)")
 
             # MangaOCR
             if self.manga_reader is not None:
