@@ -21,6 +21,15 @@ from tests.test_render_and_qa import (
     test_process_qa_vlm_local_fallback,
     test_process_qa_vlm_empty_ocr_regions,
 )
+from tests.test_qa_feedback_loop import (
+    test_translate_batch_llm_handles_qa_feedback,
+)
+from tests.test_translation_validation import (
+    test_valid_translation,
+    test_cjk_leak_translation,
+    test_length_ratio_translation,
+    test_excessive_repetition_translation,
+)
 
 print("Running test_detect_background_color...")
 try:
@@ -108,6 +117,46 @@ try:
     print("test_process_qa_vlm_empty_ocr_regions passed!")
 except Exception as e:
     print("test_process_qa_vlm_empty_ocr_regions failed!", e)
+    sys.exit(1)
+
+print("Running test_translate_batch_llm_handles_qa_feedback...")
+try:
+    test_translate_batch_llm_handles_qa_feedback()
+    print("test_translate_batch_llm_handles_qa_feedback passed!")
+except Exception as e:
+    print("test_translate_batch_llm_handles_qa_feedback failed!", e)
+    sys.exit(1)
+
+print("Running test_valid_translation...")
+try:
+    test_valid_translation()
+    print("test_valid_translation passed!")
+except Exception as e:
+    print("test_valid_translation failed!", e)
+    sys.exit(1)
+
+print("Running test_cjk_leak_translation...")
+try:
+    test_cjk_leak_translation()
+    print("test_cjk_leak_translation passed!")
+except Exception as e:
+    print("test_cjk_leak_translation failed!", e)
+    sys.exit(1)
+
+print("Running test_length_ratio_translation...")
+try:
+    test_length_ratio_translation()
+    print("test_length_ratio_translation passed!")
+except Exception as e:
+    print("test_length_ratio_translation failed!", e)
+    sys.exit(1)
+
+print("Running test_excessive_repetition_translation...")
+try:
+    test_excessive_repetition_translation()
+    print("test_excessive_repetition_translation passed!")
+except Exception as e:
+    print("test_excessive_repetition_translation failed!", e)
     sys.exit(1)
 
 print("All tests passed successfully!")
