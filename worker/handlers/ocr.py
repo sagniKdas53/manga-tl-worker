@@ -366,13 +366,13 @@ def process_ocr(job_data):
             # (img_decoded may be downscaled, so we use img_original instead)
             img = img_original if img_original is not None else img_decoded
             manga_ocr_reader = None if disable_local_ocr else model_manager.get_manga_ocr_reader()
-            if img is None and manga_ocr_reader is not None:
+            if img is None:
                 try:
                     nparr = np.frombuffer(img_bytes, np.uint8)
                     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                     del nparr
                 except Exception as e:
-                    print(f"[OCR] Error decoding image for MangaOCR: {e}", flush=True)
+                    print(f"[OCR] Error decoding image: {e}", flush=True)
 
             img_h, img_w = img.shape[:2] if img is not None else (0, 0)
             detected_bubbles = None

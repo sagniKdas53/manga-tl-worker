@@ -30,6 +30,12 @@ from tests.test_translation_validation import (
     test_length_ratio_translation,
     test_excessive_repetition_translation,
 )
+from tests.test_ocr_vlm import (
+    test_process_ocr_vlm_gemini,
+    test_process_ocr_vlm_openrouter,
+    test_process_ocr_vlm_nvidia,
+    test_process_ocr_vlm_local_fallback,
+)
 
 print("Running test_detect_background_color...")
 try:
@@ -157,6 +163,38 @@ try:
     print("test_excessive_repetition_translation passed!")
 except Exception as e:
     print("test_excessive_repetition_translation failed!", e)
+    sys.exit(1)
+
+print("Running test_process_ocr_vlm_gemini...")
+try:
+    test_process_ocr_vlm_gemini()
+    print("test_process_ocr_vlm_gemini passed!")
+except Exception as e:
+    print("test_process_ocr_vlm_gemini failed!", e)
+    sys.exit(1)
+
+print("Running test_process_ocr_vlm_openrouter...")
+try:
+    test_process_ocr_vlm_openrouter()
+    print("test_process_ocr_vlm_openrouter passed!")
+except Exception as e:
+    print("test_process_ocr_vlm_openrouter failed!", e)
+    sys.exit(1)
+
+print("Running test_process_ocr_vlm_nvidia...")
+try:
+    test_process_ocr_vlm_nvidia()
+    print("test_process_ocr_vlm_nvidia passed!")
+except Exception as e:
+    print("test_process_ocr_vlm_nvidia failed!", e)
+    sys.exit(1)
+
+print("Running test_process_ocr_vlm_local_fallback...")
+try:
+    test_process_ocr_vlm_local_fallback()
+    print("test_process_ocr_vlm_local_fallback passed!")
+except Exception as e:
+    print("test_process_ocr_vlm_local_fallback failed!", e)
     sys.exit(1)
 
 print("All tests passed successfully!")
