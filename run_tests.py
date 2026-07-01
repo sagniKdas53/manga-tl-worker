@@ -36,6 +36,26 @@ from tests.test_ocr_vlm import (
     test_process_ocr_vlm_nvidia,
     test_process_ocr_vlm_local_fallback,
 )
+from tests.test_translation_pipeline import (
+    test_process_translation_gemini,
+    test_process_translation_openrouter,
+    test_process_translation_openai,
+    test_process_translation_anthropic,
+    test_process_translation_nvidia,
+    test_process_translation_local_fallback,
+    test_process_translation_retry_individual_fallback,
+)
+from tests.test_qa_pipeline import (
+    test_process_qa_llm_gemini,
+    test_process_qa_llm_nvidia,
+    test_process_qa_vlm_openrouter,
+    test_process_qa_vlm_nvidia,
+)
+from tests.test_redo_pipeline import (
+    test_process_region_redo_ocr,
+    test_process_region_redo_translation,
+    test_process_qa_re_ocr,
+)
 
 print("Running test_detect_background_color...")
 try:
@@ -195,6 +215,52 @@ try:
     print("test_process_ocr_vlm_local_fallback passed!")
 except Exception as e:
     print("test_process_ocr_vlm_local_fallback failed!", e)
+    sys.exit(1)
+
+print("Running translation pipeline tests...")
+try:
+    test_process_translation_gemini()
+    print("test_process_translation_gemini passed!")
+    test_process_translation_openrouter()
+    print("test_process_translation_openrouter passed!")
+    test_process_translation_openai()
+    print("test_process_translation_openai passed!")
+    test_process_translation_anthropic()
+    print("test_process_translation_anthropic passed!")
+    test_process_translation_nvidia()
+    print("test_process_translation_nvidia passed!")
+    test_process_translation_local_fallback()
+    print("test_process_translation_local_fallback passed!")
+    test_process_translation_retry_individual_fallback()
+    print("test_process_translation_retry_individual_fallback passed!")
+except Exception as e:
+    print("translation pipeline tests failed!", e)
+    sys.exit(1)
+
+print("Running QA pipeline tests...")
+try:
+    test_process_qa_llm_gemini()
+    print("test_process_qa_llm_gemini passed!")
+    test_process_qa_llm_nvidia()
+    print("test_process_qa_llm_nvidia passed!")
+    test_process_qa_vlm_openrouter()
+    print("test_process_qa_vlm_openrouter passed!")
+    test_process_qa_vlm_nvidia()
+    print("test_process_qa_vlm_nvidia passed!")
+except Exception as e:
+    print("QA pipeline tests failed!", e)
+    sys.exit(1)
+
+print("Running Redo pipeline tests...")
+try:
+    test_process_region_redo_ocr()
+    print("test_process_region_redo_ocr passed!")
+    test_process_region_redo_translation()
+    print("test_process_region_redo_translation passed!")
+    test_process_qa_re_ocr()
+    print("test_process_qa_re_ocr passed!")
+except Exception as e:
+    print("Redo pipeline tests failed!", e)
     sys.exit(1)
 
 print("All tests passed successfully!")
