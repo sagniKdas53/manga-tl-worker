@@ -8,11 +8,14 @@ from worker.handlers.translation import process_translation
 @patch("worker.services.translation.try_cloud_ai")
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
-@patch.dict(os.environ, {
-    "MODEL_PROVIDER": "gemini",
-    "GEMINI_API_KEY": "fake-gemini-key",
-    "PREFERRED_LLM_MODEL": "gemini-1.5-pro"
-})
+@patch.dict(
+    os.environ,
+    {
+        "MODEL_PROVIDER": "gemini",
+        "GEMINI_API_KEY": "fake-gemini-key",
+        "PREFERRED_LLM_MODEL": "gemini-1.5-pro",
+    },
+)
 def test_process_translation_gemini(mock_post, mock_get, mock_try_cloud_ai):
     # Setup mock backend image details response
     mock_image_info = {
@@ -28,7 +31,7 @@ def test_process_translation_gemini(mock_post, mock_get, mock_try_cloud_ai):
                 "bubbleReadingOrder": 1,
             }
         ],
-        "conversations": []
+        "conversations": [],
     }
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
@@ -36,25 +39,31 @@ def test_process_translation_gemini(mock_post, mock_get, mock_try_cloud_ai):
     mock_get.return_value = mock_get_res
 
     # Mock batch LLM translation response
-    mock_try_cloud_ai.return_value = json.dumps({
-        "translations": [
-            {
-                "id": "region-uuid-1",
-                "translation": "Hello",
-                "translationNotes": "Greeting",
-                "emotion": "neutral",
-                "tone": "polite",
-                "translationScore": 0.98
-            }
-        ]
-    })
+    mock_try_cloud_ai.return_value = json.dumps(
+        {
+            "translations": [
+                {
+                    "id": "region-uuid-1",
+                    "translation": "Hello",
+                    "translationNotes": "Greeting",
+                    "emotion": "neutral",
+                    "tone": "polite",
+                    "translationScore": 0.98,
+                }
+            ]
+        }
+    )
 
     mock_post_res = MagicMock()
     mock_post_res.status_code = 200
     mock_post.return_value = mock_post_res
 
     # Invoke process_translation
-    job_data = {"imageId": "image-uuid-1", "sourceLanguage": "ja", "targetLanguage": "en"}
+    job_data = {
+        "imageId": "image-uuid-1",
+        "sourceLanguage": "ja",
+        "targetLanguage": "en",
+    }
     process_translation(job_data)
 
     # Assertions
@@ -79,11 +88,14 @@ def test_process_translation_gemini(mock_post, mock_get, mock_try_cloud_ai):
 @patch("worker.services.translation.try_cloud_ai")
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
-@patch.dict(os.environ, {
-    "MODEL_PROVIDER": "openrouter",
-    "OPENROUTER_API_KEY": "fake-openrouter-key",
-    "PREFERRED_LLM_MODEL": "meta-llama/llama-3-8b-instruct:free"
-})
+@patch.dict(
+    os.environ,
+    {
+        "MODEL_PROVIDER": "openrouter",
+        "OPENROUTER_API_KEY": "fake-openrouter-key",
+        "PREFERRED_LLM_MODEL": "meta-llama/llama-3-8b-instruct:free",
+    },
+)
 def test_process_translation_openrouter(mock_post, mock_get, mock_try_cloud_ai):
     mock_image_info = {
         "id": "image-uuid-1",
@@ -98,31 +110,37 @@ def test_process_translation_openrouter(mock_post, mock_get, mock_try_cloud_ai):
                 "bubbleReadingOrder": 1,
             }
         ],
-        "conversations": []
+        "conversations": [],
     }
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
     mock_get_res.json.return_value = mock_image_info
     mock_get.return_value = mock_get_res
 
-    mock_try_cloud_ai.return_value = json.dumps({
-        "translations": [
-            {
-                "id": "region-uuid-1",
-                "translation": "Hello",
-                "translationNotes": "Greeting",
-                "emotion": "neutral",
-                "tone": "polite",
-                "translationScore": 0.98
-            }
-        ]
-    })
+    mock_try_cloud_ai.return_value = json.dumps(
+        {
+            "translations": [
+                {
+                    "id": "region-uuid-1",
+                    "translation": "Hello",
+                    "translationNotes": "Greeting",
+                    "emotion": "neutral",
+                    "tone": "polite",
+                    "translationScore": 0.98,
+                }
+            ]
+        }
+    )
 
     mock_post_res = MagicMock()
     mock_post_res.status_code = 200
     mock_post.return_value = mock_post_res
 
-    job_data = {"imageId": "image-uuid-1", "sourceLanguage": "ja", "targetLanguage": "en"}
+    job_data = {
+        "imageId": "image-uuid-1",
+        "sourceLanguage": "ja",
+        "targetLanguage": "en",
+    }
     process_translation(job_data)
 
     mock_try_cloud_ai.assert_called_once()
@@ -139,11 +157,14 @@ def test_process_translation_openrouter(mock_post, mock_get, mock_try_cloud_ai):
 @patch("worker.services.translation.try_cloud_ai")
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
-@patch.dict(os.environ, {
-    "MODEL_PROVIDER": "openai",
-    "API_KEY": "fake-openai-key",
-    "PREFERRED_LLM_MODEL": "gpt-4o-mini"
-})
+@patch.dict(
+    os.environ,
+    {
+        "MODEL_PROVIDER": "openai",
+        "API_KEY": "fake-openai-key",
+        "PREFERRED_LLM_MODEL": "gpt-4o-mini",
+    },
+)
 def test_process_translation_openai(mock_post, mock_get, mock_try_cloud_ai):
     mock_image_info = {
         "id": "image-uuid-1",
@@ -158,31 +179,37 @@ def test_process_translation_openai(mock_post, mock_get, mock_try_cloud_ai):
                 "bubbleReadingOrder": 1,
             }
         ],
-        "conversations": []
+        "conversations": [],
     }
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
     mock_get_res.json.return_value = mock_image_info
     mock_get.return_value = mock_get_res
 
-    mock_try_cloud_ai.return_value = json.dumps({
-        "translations": [
-            {
-                "id": "region-uuid-1",
-                "translation": "Hello",
-                "translationNotes": "Greeting",
-                "emotion": "neutral",
-                "tone": "polite",
-                "translationScore": 0.98
-            }
-        ]
-    })
+    mock_try_cloud_ai.return_value = json.dumps(
+        {
+            "translations": [
+                {
+                    "id": "region-uuid-1",
+                    "translation": "Hello",
+                    "translationNotes": "Greeting",
+                    "emotion": "neutral",
+                    "tone": "polite",
+                    "translationScore": 0.98,
+                }
+            ]
+        }
+    )
 
     mock_post_res = MagicMock()
     mock_post_res.status_code = 200
     mock_post.return_value = mock_post_res
 
-    job_data = {"imageId": "image-uuid-1", "sourceLanguage": "ja", "targetLanguage": "en"}
+    job_data = {
+        "imageId": "image-uuid-1",
+        "sourceLanguage": "ja",
+        "targetLanguage": "en",
+    }
     process_translation(job_data)
 
     mock_try_cloud_ai.assert_called_once()
@@ -199,11 +226,14 @@ def test_process_translation_openai(mock_post, mock_get, mock_try_cloud_ai):
 @patch("worker.services.translation.try_cloud_ai")
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
-@patch.dict(os.environ, {
-    "MODEL_PROVIDER": "anthropic",
-    "API_KEY": "fake-anthropic-key",
-    "PREFERRED_LLM_MODEL": "claude-3-5-sonnet-20241022"
-})
+@patch.dict(
+    os.environ,
+    {
+        "MODEL_PROVIDER": "anthropic",
+        "API_KEY": "fake-anthropic-key",
+        "PREFERRED_LLM_MODEL": "claude-3-5-sonnet-20241022",
+    },
+)
 def test_process_translation_anthropic(mock_post, mock_get, mock_try_cloud_ai):
     mock_image_info = {
         "id": "image-uuid-1",
@@ -218,31 +248,37 @@ def test_process_translation_anthropic(mock_post, mock_get, mock_try_cloud_ai):
                 "bubbleReadingOrder": 1,
             }
         ],
-        "conversations": []
+        "conversations": [],
     }
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
     mock_get_res.json.return_value = mock_image_info
     mock_get.return_value = mock_get_res
 
-    mock_try_cloud_ai.return_value = json.dumps({
-        "translations": [
-            {
-                "id": "region-uuid-1",
-                "translation": "Hello",
-                "translationNotes": "Greeting",
-                "emotion": "neutral",
-                "tone": "polite",
-                "translationScore": 0.98
-            }
-        ]
-    })
+    mock_try_cloud_ai.return_value = json.dumps(
+        {
+            "translations": [
+                {
+                    "id": "region-uuid-1",
+                    "translation": "Hello",
+                    "translationNotes": "Greeting",
+                    "emotion": "neutral",
+                    "tone": "polite",
+                    "translationScore": 0.98,
+                }
+            ]
+        }
+    )
 
     mock_post_res = MagicMock()
     mock_post_res.status_code = 200
     mock_post.return_value = mock_post_res
 
-    job_data = {"imageId": "image-uuid-1", "sourceLanguage": "ja", "targetLanguage": "en"}
+    job_data = {
+        "imageId": "image-uuid-1",
+        "sourceLanguage": "ja",
+        "targetLanguage": "en",
+    }
     process_translation(job_data)
 
     mock_try_cloud_ai.assert_called_once()
@@ -259,11 +295,14 @@ def test_process_translation_anthropic(mock_post, mock_get, mock_try_cloud_ai):
 @patch("worker.services.translation.try_cloud_ai")
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
-@patch.dict(os.environ, {
-    "MODEL_PROVIDER": "nvidia",
-    "NVIDIA_API_KEY": "fake-nvidia-key",
-    "PREFERRED_LLM_MODEL": "google/gemma-3n-e4b-it"
-})
+@patch.dict(
+    os.environ,
+    {
+        "MODEL_PROVIDER": "nvidia",
+        "NVIDIA_API_KEY": "fake-nvidia-key",
+        "PREFERRED_LLM_MODEL": "google/gemma-3n-e4b-it",
+    },
+)
 def test_process_translation_nvidia(mock_post, mock_get, mock_try_cloud_ai):
     mock_image_info = {
         "id": "image-uuid-1",
@@ -278,31 +317,37 @@ def test_process_translation_nvidia(mock_post, mock_get, mock_try_cloud_ai):
                 "bubbleReadingOrder": 1,
             }
         ],
-        "conversations": []
+        "conversations": [],
     }
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
     mock_get_res.json.return_value = mock_image_info
     mock_get.return_value = mock_get_res
 
-    mock_try_cloud_ai.return_value = json.dumps({
-        "translations": [
-            {
-                "id": "region-uuid-1",
-                "translation": "Hello",
-                "translationNotes": "Greeting",
-                "emotion": "neutral",
-                "tone": "polite",
-                "translationScore": 0.98
-            }
-        ]
-    })
+    mock_try_cloud_ai.return_value = json.dumps(
+        {
+            "translations": [
+                {
+                    "id": "region-uuid-1",
+                    "translation": "Hello",
+                    "translationNotes": "Greeting",
+                    "emotion": "neutral",
+                    "tone": "polite",
+                    "translationScore": 0.98,
+                }
+            ]
+        }
+    )
 
     mock_post_res = MagicMock()
     mock_post_res.status_code = 200
     mock_post.return_value = mock_post_res
 
-    job_data = {"imageId": "image-uuid-1", "sourceLanguage": "ja", "targetLanguage": "en"}
+    job_data = {
+        "imageId": "image-uuid-1",
+        "sourceLanguage": "ja",
+        "targetLanguage": "en",
+    }
     process_translation(job_data)
 
     mock_try_cloud_ai.assert_called_once()
@@ -319,15 +364,18 @@ def test_process_translation_nvidia(mock_post, mock_get, mock_try_cloud_ai):
 @patch("worker.services.translation.try_local_ai")
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
-@patch.dict(os.environ, {
-    "MODEL_PROVIDER": "ollama",
-    "API_KEY": "",
-    "OPENROUTER_API_KEY": "",
-    "GEMINI_API_KEY": "",
-    "NVIDIA_API_KEY": "",
-    "LOCAL_LLM_PROVIDER": "ollama",
-    "LOCAL_LLM_MODEL": "gemma3:4b"
-})
+@patch.dict(
+    os.environ,
+    {
+        "MODEL_PROVIDER": "ollama",
+        "API_KEY": "",
+        "OPENROUTER_API_KEY": "",
+        "GEMINI_API_KEY": "",
+        "NVIDIA_API_KEY": "",
+        "LOCAL_LLM_PROVIDER": "ollama",
+        "LOCAL_LLM_MODEL": "gemma3:4b",
+    },
+)
 def test_process_translation_local_fallback(mock_post, mock_get, mock_try_local_ai):
     mock_image_info = {
         "id": "image-uuid-1",
@@ -342,31 +390,37 @@ def test_process_translation_local_fallback(mock_post, mock_get, mock_try_local_
                 "bubbleReadingOrder": 1,
             }
         ],
-        "conversations": []
+        "conversations": [],
     }
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
     mock_get_res.json.return_value = mock_image_info
     mock_get.return_value = mock_get_res
 
-    mock_try_local_ai.return_value = json.dumps({
-        "translations": [
-            {
-                "id": "region-uuid-1",
-                "translation": "Hello",
-                "translationNotes": "Greeting",
-                "emotion": "neutral",
-                "tone": "polite",
-                "translationScore": 0.98
-            }
-        ]
-    })
+    mock_try_local_ai.return_value = json.dumps(
+        {
+            "translations": [
+                {
+                    "id": "region-uuid-1",
+                    "translation": "Hello",
+                    "translationNotes": "Greeting",
+                    "emotion": "neutral",
+                    "tone": "polite",
+                    "translationScore": 0.98,
+                }
+            ]
+        }
+    )
 
     mock_post_res = MagicMock()
     mock_post_res.status_code = 200
     mock_post.return_value = mock_post_res
 
-    job_data = {"imageId": "image-uuid-1", "sourceLanguage": "ja", "targetLanguage": "en"}
+    job_data = {
+        "imageId": "image-uuid-1",
+        "sourceLanguage": "ja",
+        "targetLanguage": "en",
+    }
     process_translation(job_data)
 
     mock_try_local_ai.assert_called_once()
@@ -380,12 +434,17 @@ def test_process_translation_local_fallback(mock_post, mock_get, mock_try_local_
 @patch("worker.handlers.translation.translate_text")
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
-@patch.dict(os.environ, {
-    "MODEL_PROVIDER": "gemini",
-    "GEMINI_API_KEY": "fake-gemini-key",
-    "PREFERRED_LLM_MODEL": "gemini-1.5-pro"
-})
-def test_process_translation_retry_individual_fallback(mock_post, mock_get, mock_translate_text, mock_try_cloud_ai, mock_try_local_ai):
+@patch.dict(
+    os.environ,
+    {
+        "MODEL_PROVIDER": "gemini",
+        "GEMINI_API_KEY": "fake-gemini-key",
+        "PREFERRED_LLM_MODEL": "gemini-1.5-pro",
+    },
+)
+def test_process_translation_retry_individual_fallback(
+    mock_post, mock_get, mock_translate_text, mock_try_cloud_ai, mock_try_local_ai
+):
     mock_image_info = {
         "id": "image-uuid-1",
         "ocrRegions": [
@@ -399,7 +458,7 @@ def test_process_translation_retry_individual_fallback(mock_post, mock_get, mock
                 "bubbleReadingOrder": 1,
             }
         ],
-        "conversations": []
+        "conversations": [],
     }
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
@@ -417,7 +476,11 @@ def test_process_translation_retry_individual_fallback(mock_post, mock_get, mock
     mock_post_res.status_code = 200
     mock_post.return_value = mock_post_res
 
-    job_data = {"imageId": "image-uuid-1", "sourceLanguage": "ja", "targetLanguage": "en"}
+    job_data = {
+        "imageId": "image-uuid-1",
+        "sourceLanguage": "ja",
+        "targetLanguage": "en",
+    }
     process_translation(job_data)
 
     # Verifies both retry and individual fallback were triggered
@@ -426,4 +489,7 @@ def test_process_translation_retry_individual_fallback(mock_post, mock_get, mock
     mock_post.assert_called_once()
     payload = mock_post.call_args[1]["json"]
     assert payload["translations"][0]["translatedText"] == "Hello"
-    assert payload["translations"][0]["translationNotes"] == "Individual translation fallback"
+    assert (
+        payload["translations"][0]["translationNotes"]
+        == "Individual translation fallback"
+    )

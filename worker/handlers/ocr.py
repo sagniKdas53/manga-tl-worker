@@ -24,7 +24,11 @@ from worker.services.ocr import parse_paddle_ocr_results
 from worker.services.layout import bubble_compare
 from worker.utils.lock import acquire_lock
 from worker.services.bubble_detector import detect_bubbles_yolo
-from worker.services.translation import try_cloud_ai_vision, try_local_vlm_vision, LANG_MAP
+from worker.services.translation import (
+    try_cloud_ai_vision,
+    try_local_vlm_vision,
+    LANG_MAP,
+)
 
 
 def sort_fragments_vertical(fragments, reading_direction="rtl"):
@@ -295,10 +299,16 @@ def process_ocr(job_data):
             img_original = None  # full-resolution image for MangaOCR crops
 
             # Check if we should disable local OCR
-            disable_local_ocr = os.environ.get("DISABLE_LOCAL_OCR", "").strip().lower() in ("true", "1", "yes")
+            disable_local_ocr = os.environ.get(
+                "DISABLE_LOCAL_OCR", ""
+            ).strip().lower() in ("true", "1", "yes")
 
             # Try PaddleOCR (PP-OCRv5) first — reader is lazily created per language
-            paddle_ocr_reader = None if disable_local_ocr else model_manager.get_paddle_ocr_reader(source_language)
+            paddle_ocr_reader = (
+                None
+                if disable_local_ocr
+                else model_manager.get_paddle_ocr_reader(source_language)
+            )
             if paddle_ocr_reader is not None:
                 try:
                     print(
@@ -347,7 +357,11 @@ def process_ocr(job_data):
                     )
 
             # Fallback to EasyOCR if results are empty and reader is available
-            easy_reader = None if disable_local_ocr else model_manager.get_easy_ocr_reader(source_language)
+            easy_reader = (
+                None
+                if disable_local_ocr
+                else model_manager.get_easy_ocr_reader(source_language)
+            )
             if not results and easy_reader is not None:
                 try:
                     print("[OCR] Running EasyOCR fallback...", flush=True)
@@ -365,7 +379,9 @@ def process_ocr(job_data):
             # Use the full-resolution original image for MangaOCR crops
             # (img_decoded may be downscaled, so we use img_original instead)
             img = img_original if img_original is not None else img_decoded
-            manga_ocr_reader = None if disable_local_ocr else model_manager.get_manga_ocr_reader()
+            manga_ocr_reader = (
+                None if disable_local_ocr else model_manager.get_manga_ocr_reader()
+            )
             if img is None:
                 try:
                     nparr = np.frombuffer(img_bytes, np.uint8)
@@ -386,12 +402,21 @@ def process_ocr(job_data):
             is_yolo_active = detected_bubbles is not None
 
             if is_yolo_active and disable_local_ocr:
-                print(f"[OCR] VLM OCR Mode active for {len(detected_bubbles)} bubbles.", flush=True)
+                print(
+                    f"[OCR] VLM OCR Mode active for {len(detected_bubbles)} bubbles.",
+                    flush=True,
+                )
                 provider = os.environ.get("MODEL_PROVIDER", "").lower().strip()
                 api_key = os.environ.get("API_KEY", "").strip()
-                openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip() or (api_key if provider == "openrouter" else "")
-                gemini_key = os.environ.get("GEMINI_API_KEY", "").strip() or (api_key if provider == "gemini" else "")
-                nvidia_key = os.environ.get("NVIDIA_API_KEY", "").strip() or (api_key if provider == "nvidia" else "")
+                openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip() or (
+                    api_key if provider == "openrouter" else ""
+                )
+                gemini_key = os.environ.get("GEMINI_API_KEY", "").strip() or (
+                    api_key if provider == "gemini" else ""
+                )
+                nvidia_key = os.environ.get("NVIDIA_API_KEY", "").strip() or (
+                    api_key if provider == "nvidia" else ""
+                )
 
                 for b_idx, bubble in enumerate(detected_bubbles):
                     bx, by, bw, bh = bubble["bbox"]
@@ -402,71 +427,122 @@ def process_ocr(job_data):
                         continue
 
                     crop = img[by1:by2, bx1:bx2]
-                    _, buffer = cv2.imencode('.jpg', crop)
-                    base64_image = base64.b64encode(buffer).decode('utf-8')
+                    _, buffer = cv2.imencode(".jpg", crop)
+                    base64_image = base64.b64encode(buffer).decode("utf-8")
 
                     lang_name = LANG_MAP.get(source_language.lower(), source_language)
                     sys_prompt = f"You are an expert manga OCR system. Extract all text from the provided image crop exactly as it appears. The source language is {lang_name}. Return ONLY a valid JSON object."
                     user_prompt = "Extract the text from this speech bubble."
-                    
+
                     schema = {
                         "type": "object",
                         "properties": {
-                            "text": {"type": "string", "description": "The extracted text"},
+                            "text": {
+                                "type": "string",
+                                "description": "The extracted text",
+                            },
                         },
-                        "required": ["text"]
+                        "required": ["text"],
                     }
 
                     res_text = None
                     if provider == "openrouter" and openrouter_key:
-                        vlm_model = os.environ.get("PREFERRED_VLM_MODEL", "").strip() or "qwen/qwen3-vl-8b-instruct"
-                        res_text = try_cloud_ai_vision("openrouter", openrouter_key, vlm_model, user_prompt, base64_image, schema, system_prompt=sys_prompt)
+                        vlm_model = (
+                            os.environ.get("PREFERRED_VLM_MODEL", "").strip()
+                            or "qwen/qwen3-vl-8b-instruct"
+                        )
+                        res_text = try_cloud_ai_vision(
+                            "openrouter",
+                            openrouter_key,
+                            vlm_model,
+                            user_prompt,
+                            base64_image,
+                            schema,
+                            system_prompt=sys_prompt,
+                        )
                     elif provider == "gemini" and gemini_key:
-                        vlm_model = os.environ.get("PREFERRED_VLM_MODEL", "").strip() or "gemini-1.5-flash"
-                        res_text = try_cloud_ai_vision("gemini", gemini_key, vlm_model, user_prompt, base64_image, schema, system_prompt=sys_prompt)
+                        vlm_model = (
+                            os.environ.get("PREFERRED_VLM_MODEL", "").strip()
+                            or "gemini-1.5-flash"
+                        )
+                        res_text = try_cloud_ai_vision(
+                            "gemini",
+                            gemini_key,
+                            vlm_model,
+                            user_prompt,
+                            base64_image,
+                            schema,
+                            system_prompt=sys_prompt,
+                        )
                     elif provider == "nvidia" and nvidia_key:
-                        vlm_model = os.environ.get("PREFERRED_VLM_MODEL", "").strip() or "nvidia/nemotron-nano-12b-v2-vl"
-                        res_text = try_cloud_ai_vision("nvidia", nvidia_key, vlm_model, user_prompt, base64_image, schema, system_prompt=sys_prompt)
+                        vlm_model = (
+                            os.environ.get("PREFERRED_VLM_MODEL", "").strip()
+                            or "nvidia/nemotron-nano-12b-v2-vl"
+                        )
+                        res_text = try_cloud_ai_vision(
+                            "nvidia",
+                            nvidia_key,
+                            vlm_model,
+                            user_prompt,
+                            base64_image,
+                            schema,
+                            system_prompt=sys_prompt,
+                        )
                     else:
                         local_model = os.environ.get("LOCAL_VLM_MODEL", "").strip()
                         if local_model:
-                            res_text = try_local_vlm_vision(local_model, user_prompt, base64_image, schema, system_prompt=sys_prompt)
+                            res_text = try_local_vlm_vision(
+                                local_model,
+                                user_prompt,
+                                base64_image,
+                                schema,
+                                system_prompt=sys_prompt,
+                            )
 
                     extracted_text = ""
                     if res_text:
                         try:
-                            parsed = json.loads(res_text.strip().removeprefix('```json').removesuffix('```').strip())
+                            parsed = json.loads(
+                                res_text.strip()
+                                .removeprefix("```json")
+                                .removesuffix("```")
+                                .strip()
+                            )
                             extracted_text = parsed.get("text", "")
                         except Exception:
                             extracted_text = res_text
 
                     if extracted_text and len(extracted_text.strip()) > 0:
-                        bg_color = detect_background_color_poly(img, bubble["mask_polygon"])
-                        regions.append({
-                            "text": extracted_text,
-                            "detectedLanguage": detect_language(extracted_text),
-                            "confidence": 0.99,
-                            "rotation": 0.0,
-                            "x": bx,
-                            "y": by,
-                            "width": bw,
-                            "height": bh,
-                            "panelId": None,
-                            "bubbleReadingOrder": 0,
-                            "backgroundColor": bg_color,
-                            "bubbleX": bx,
-                            "bubbleY": by,
-                            "bubbleWidth": bw,
-                            "bubbleHeight": bh,
-                            "bubbleId": f"bubble_{b_idx}",
-                            "detectionConfidence": bubble["confidence"],
-                            "maskPolygon": json.dumps(bubble["mask_polygon"]),
-                            "safeTextX": bubble["safe_rect"][0],
-                            "safeTextY": bubble["safe_rect"][1],
-                            "safeTextW": bubble["safe_rect"][2],
-                            "safeTextH": bubble["safe_rect"][3],
-                        })
-            
+                        bg_color = detect_background_color_poly(
+                            img, bubble["mask_polygon"]
+                        )
+                        regions.append(
+                            {
+                                "text": extracted_text,
+                                "detectedLanguage": detect_language(extracted_text),
+                                "confidence": 0.99,
+                                "rotation": 0.0,
+                                "x": bx,
+                                "y": by,
+                                "width": bw,
+                                "height": bh,
+                                "panelId": None,
+                                "bubbleReadingOrder": 0,
+                                "backgroundColor": bg_color,
+                                "bubbleX": bx,
+                                "bubbleY": by,
+                                "bubbleWidth": bw,
+                                "bubbleHeight": bh,
+                                "bubbleId": f"bubble_{b_idx}",
+                                "detectionConfidence": bubble["confidence"],
+                                "maskPolygon": json.dumps(bubble["mask_polygon"]),
+                                "safeTextX": bubble["safe_rect"][0],
+                                "safeTextY": bubble["safe_rect"][1],
+                                "safeTextW": bubble["safe_rect"][2],
+                                "safeTextH": bubble["safe_rect"][3],
+                            }
+                        )
+
             elif is_yolo_active and not disable_local_ocr:
                 # 1. Map raw PaddleOCR fragments to original image dimensions
                 raw_fragments = []

@@ -45,4 +45,3 @@ def test_translate_batch_llm_handles_qa_feedback(mock_try_cloud_ai):
     assert "previousTranslation" in prompt or "qaFeedback" in prompt
     assert "It should be more polite." in prompt
     assert "Failed previous translation" in prompt
-

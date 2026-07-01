@@ -3,21 +3,27 @@ from unittest.mock import patch, MagicMock
 
 from worker.handlers.layout import process_layout
 
+
 @patch("worker.handlers.layout.requests.get")
 @patch("worker.handlers.layout.requests.post")
 @patch("worker.handlers.layout.redis_client.llen")
 def test_process_layout_success(mock_llen, mock_post, mock_get):
     mock_llen.return_value = 0
-    
+
     mock_get_resp = MagicMock()
     mock_get_resp.status_code = 200
     mock_get_resp.json.return_value = {
         "ocrRegions": [
-            {"id": "r1", "bboxX": 10, "bboxY": 10, "bboxW": 100, "bboxH": 50, "text": "Hello"}
+            {
+                "id": "r1",
+                "bboxX": 10,
+                "bboxY": 10,
+                "bboxW": 100,
+                "bboxH": 50,
+                "text": "Hello",
+            }
         ],
-        "panels": [
-            {"id": "p1", "bboxX": 0, "bboxY": 0, "bboxW": 500, "bboxH": 500}
-        ]
+        "panels": [{"id": "p1", "bboxX": 0, "bboxY": 0, "bboxW": 500, "bboxH": 500}],
     }
     mock_get.return_value = mock_get_resp
 
@@ -30,7 +36,7 @@ def test_process_layout_success(mock_llen, mock_post, mock_get):
 
     mock_get.assert_called_once()
     mock_post.assert_called_once()
-    
+
     # Check payload of callback
     call_args = mock_post.call_args
     assert call_args is not None
@@ -40,6 +46,7 @@ def test_process_layout_success(mock_llen, mock_post, mock_get):
     assert len(payload["regionTypes"]) == 1
     assert payload["regionTypes"][0]["regionId"] == "r1"
     assert "conversations" in payload
+
 
 @patch("worker.handlers.layout.requests.get")
 def test_process_layout_api_failure(mock_get):

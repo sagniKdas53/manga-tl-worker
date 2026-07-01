@@ -21,13 +21,18 @@ def get_dummy_image_bytes():
 @patch("worker.handlers.ocr.try_cloud_ai_vision")
 @patch("worker.handlers.ocr.requests.get")
 @patch("worker.handlers.ocr.requests.post")
-@patch.dict(os.environ, {
-    "DISABLE_LOCAL_OCR": "true",
-    "MODEL_PROVIDER": "gemini",
-    "GEMINI_API_KEY": "fake-gemini-key",
-    "PREFERRED_VLM_MODEL": "gemini-1.5-flash"
-})
-def test_process_ocr_vlm_gemini(mock_post, mock_get, mock_try_cloud_vlm, mock_detect_yolo, mock_download):
+@patch.dict(
+    os.environ,
+    {
+        "DISABLE_LOCAL_OCR": "true",
+        "MODEL_PROVIDER": "gemini",
+        "GEMINI_API_KEY": "fake-gemini-key",
+        "PREFERRED_VLM_MODEL": "gemini-1.5-flash",
+    },
+)
+def test_process_ocr_vlm_gemini(
+    mock_post, mock_get, mock_try_cloud_vlm, mock_detect_yolo, mock_download
+):
     # Setup mocks
     mock_download.return_value = get_dummy_image_bytes()
     mock_detect_yolo.return_value = [
@@ -35,15 +40,12 @@ def test_process_ocr_vlm_gemini(mock_post, mock_get, mock_try_cloud_vlm, mock_de
             "bbox": [10, 20, 100, 80],
             "confidence": 0.95,
             "mask_polygon": [[10, 20], [110, 20], [110, 100], [10, 100]],
-            "safe_rect": [15, 25, 90, 70]
+            "safe_rect": [15, 25, 90, 70],
         }
     ]
     mock_try_cloud_vlm.return_value = json.dumps({"text": "Hello from Gemini VLM OCR"})
 
-    mock_image_info = {
-        "id": "image-uuid-1",
-        "panels": []
-    }
+    mock_image_info = {"id": "image-uuid-1", "panels": []}
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
     mock_get_res.json.return_value = mock_image_info
@@ -60,7 +62,7 @@ def test_process_ocr_vlm_gemini(mock_post, mock_get, mock_try_cloud_vlm, mock_de
     # Assertions
     mock_download.assert_called_once()
     mock_detect_yolo.assert_called_once()
-    
+
     # Check cloud VLM called with gemini parameters
     mock_try_cloud_vlm.assert_called_once()
     args, kwargs = mock_try_cloud_vlm.call_args
@@ -85,28 +87,32 @@ def test_process_ocr_vlm_gemini(mock_post, mock_get, mock_try_cloud_vlm, mock_de
 @patch("worker.handlers.ocr.try_cloud_ai_vision")
 @patch("worker.handlers.ocr.requests.get")
 @patch("worker.handlers.ocr.requests.post")
-@patch.dict(os.environ, {
-    "DISABLE_LOCAL_OCR": "true",
-    "MODEL_PROVIDER": "openrouter",
-    "OPENROUTER_API_KEY": "fake-openrouter-key",
-    "PREFERRED_VLM_MODEL": "qwen/qwen3-vl-8b-instruct"
-})
-def test_process_ocr_vlm_openrouter(mock_post, mock_get, mock_try_cloud_vlm, mock_detect_yolo, mock_download):
+@patch.dict(
+    os.environ,
+    {
+        "DISABLE_LOCAL_OCR": "true",
+        "MODEL_PROVIDER": "openrouter",
+        "OPENROUTER_API_KEY": "fake-openrouter-key",
+        "PREFERRED_VLM_MODEL": "qwen/qwen3-vl-8b-instruct",
+    },
+)
+def test_process_ocr_vlm_openrouter(
+    mock_post, mock_get, mock_try_cloud_vlm, mock_detect_yolo, mock_download
+):
     mock_download.return_value = get_dummy_image_bytes()
     mock_detect_yolo.return_value = [
         {
             "bbox": [10, 20, 100, 80],
             "confidence": 0.95,
             "mask_polygon": [[10, 20], [110, 20], [110, 100], [10, 100]],
-            "safe_rect": [15, 25, 90, 70]
+            "safe_rect": [15, 25, 90, 70],
         }
     ]
-    mock_try_cloud_vlm.return_value = "```json\n{\"text\": \"Hello from OpenRouter VLM OCR\"}\n```"
+    mock_try_cloud_vlm.return_value = (
+        '```json\n{"text": "Hello from OpenRouter VLM OCR"}\n```'
+    )
 
-    mock_image_info = {
-        "id": "image-uuid-1",
-        "panels": []
-    }
+    mock_image_info = {"id": "image-uuid-1", "panels": []}
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
     mock_get_res.json.return_value = mock_image_info
@@ -135,28 +141,30 @@ def test_process_ocr_vlm_openrouter(mock_post, mock_get, mock_try_cloud_vlm, moc
 @patch("worker.handlers.ocr.try_cloud_ai_vision")
 @patch("worker.handlers.ocr.requests.get")
 @patch("worker.handlers.ocr.requests.post")
-@patch.dict(os.environ, {
-    "DISABLE_LOCAL_OCR": "true",
-    "MODEL_PROVIDER": "nvidia",
-    "NVIDIA_API_KEY": "fake-nvidia-key",
-    "PREFERRED_VLM_MODEL": "nvidia/nemotron-nano-12b-v2-vl"
-})
-def test_process_ocr_vlm_nvidia(mock_post, mock_get, mock_try_cloud_vlm, mock_detect_yolo, mock_download):
+@patch.dict(
+    os.environ,
+    {
+        "DISABLE_LOCAL_OCR": "true",
+        "MODEL_PROVIDER": "nvidia",
+        "NVIDIA_API_KEY": "fake-nvidia-key",
+        "PREFERRED_VLM_MODEL": "nvidia/nemotron-nano-12b-v2-vl",
+    },
+)
+def test_process_ocr_vlm_nvidia(
+    mock_post, mock_get, mock_try_cloud_vlm, mock_detect_yolo, mock_download
+):
     mock_download.return_value = get_dummy_image_bytes()
     mock_detect_yolo.return_value = [
         {
             "bbox": [10, 20, 100, 80],
             "confidence": 0.95,
             "mask_polygon": [[10, 20], [110, 20], [110, 100], [10, 100]],
-            "safe_rect": [15, 25, 90, 70]
+            "safe_rect": [15, 25, 90, 70],
         }
     ]
     mock_try_cloud_vlm.return_value = json.dumps({"text": "Hello from Nvidia VLM OCR"})
 
-    mock_image_info = {
-        "id": "image-uuid-1",
-        "panels": []
-    }
+    mock_image_info = {"id": "image-uuid-1", "panels": []}
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
     mock_get_res.json.return_value = mock_image_info
@@ -186,31 +194,38 @@ def test_process_ocr_vlm_nvidia(mock_post, mock_get, mock_try_cloud_vlm, mock_de
 @patch("worker.handlers.ocr.try_cloud_ai_vision")
 @patch("worker.handlers.ocr.requests.get")
 @patch("worker.handlers.ocr.requests.post")
-@patch.dict(os.environ, {
-    "DISABLE_LOCAL_OCR": "true",
-    "MODEL_PROVIDER": "",
-    "API_KEY": "",
-    "OPENROUTER_API_KEY": "",
-    "GEMINI_API_KEY": "",
-    "NVIDIA_API_KEY": "",
-    "LOCAL_VLM_MODEL": "local-vlm-model"
-})
-def test_process_ocr_vlm_local_fallback(mock_post, mock_get, mock_try_cloud_vlm, mock_try_local_vlm, mock_detect_yolo, mock_download):
+@patch.dict(
+    os.environ,
+    {
+        "DISABLE_LOCAL_OCR": "true",
+        "MODEL_PROVIDER": "",
+        "API_KEY": "",
+        "OPENROUTER_API_KEY": "",
+        "GEMINI_API_KEY": "",
+        "NVIDIA_API_KEY": "",
+        "LOCAL_VLM_MODEL": "local-vlm-model",
+    },
+)
+def test_process_ocr_vlm_local_fallback(
+    mock_post,
+    mock_get,
+    mock_try_cloud_vlm,
+    mock_try_local_vlm,
+    mock_detect_yolo,
+    mock_download,
+):
     mock_download.return_value = get_dummy_image_bytes()
     mock_detect_yolo.return_value = [
         {
             "bbox": [10, 20, 100, 80],
             "confidence": 0.95,
             "mask_polygon": [[10, 20], [110, 20], [110, 100], [10, 100]],
-            "safe_rect": [15, 25, 90, 70]
+            "safe_rect": [15, 25, 90, 70],
         }
     ]
     mock_try_local_vlm.return_value = json.dumps({"text": "Hello from Local VLM OCR"})
 
-    mock_image_info = {
-        "id": "image-uuid-1",
-        "panels": []
-    }
+    mock_image_info = {"id": "image-uuid-1", "panels": []}
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
     mock_get_res.json.return_value = mock_image_info

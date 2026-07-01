@@ -190,14 +190,6 @@ def should_translate_region(region):
         )
         return False
 
-    # Reject low confidence regions (< 0.30)
-    if confidence < 0.30:
-        print(
-            f"[Quality Filter] Rejecting region: low confidence ({confidence:.2f}) - text: '{text}'",
-            flush=True,
-        )
-        return False
-
     # Special handling for SFX and Japanese kana-only text
     sfx_whitelist = {"ドン", "ガッ", "ぱんッ", "ズキュン"}
 
@@ -217,6 +209,14 @@ def should_translate_region(region):
 
     if is_kana_only:
         return True
+
+    # Reject low confidence regions (< 0.30)
+    if confidence < 0.30:
+        print(
+            f"[Quality Filter] Rejecting region: low confidence ({confidence:.2f}) - text: '{text}'",
+            flush=True,
+        )
+        return False
 
     # Otherwise, reject obvious garbage / non-Japanese low quality texts
     if len(stripped) < 2:
@@ -555,7 +555,7 @@ def try_cloud_ai_vision(
         }
         if system_prompt:
             payload["messages"].insert(0, {"role": "system", "content": system_prompt})
-            
+
         if response_schema:
             if provider == "nvidia":
                 payload["response_format"] = {"type": "json_object"}
@@ -1283,7 +1283,12 @@ Input:
 
 
 def try_local_vlm_vision(
-    model, prompt, base64_image, response_schema=None, system_prompt=None, request_id=None
+    model,
+    prompt,
+    base64_image,
+    response_schema=None,
+    system_prompt=None,
+    request_id=None,
 ):
     req_prefix = f"[{request_id}] " if request_id else ""
     local_provider = os.environ.get("LOCAL_LLM_PROVIDER", "ollama").lower().strip()
@@ -1305,17 +1310,19 @@ def try_local_vlm_vision(
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-        
-    messages.append({
-        "role": "user",
-        "content": [
-            {"type": "text", "text": prompt},
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
-            },
-        ],
-    })
+
+    messages.append(
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
+                },
+            ],
+        }
+    )
 
     payload = {
         "model": model,
@@ -1351,9 +1358,6 @@ def try_local_vlm_vision(
     except Exception as e:
         logger.error(f"{req_prefix}Error during local VLM query: {e}")
     return None
-
-
-
 
 
 def translate_batch_deepl(unmatched_regions, target_lang="en", request_id=None):
