@@ -39,6 +39,21 @@ def enforce_rate_limit():
         print(f"[Translation] Error enforcing rate limit: {e}", flush=True)
 
 
+import threading
+
+_local_data = threading.local()
+
+
+def reset_job_costs():
+    _local_data.costs = []
+
+
+def get_job_costs():
+    if not hasattr(_local_data, "costs"):
+        _local_data.costs = []
+    return _local_data.costs
+
+
 def estimate_cost(model, prompt_tokens, completion_tokens, provider=None):
     if not prompt_tokens or not completion_tokens:
         return 0.0
@@ -60,4 +75,19 @@ def estimate_cost(model, prompt_tokens, completion_tokens, provider=None):
         in_rate = 3.0 / 1_000_000
         out_rate = 15.0 / 1_000_000
 
-    return (prompt_tokens * in_rate) + (completion_tokens * out_rate)
+    cost = (prompt_tokens * in_rate) + (completion_tokens * out_rate)
+    
+    cost_info = {
+        "estimated_cost": cost,
+        "currency": "USD",
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "model": model,
+        "provider": provider or "unknown"
+    }
+    
+    if not hasattr(_local_data, "costs"):
+        _local_data.costs = []
+    _local_data.costs.append(cost_info)
+    
+    return cost

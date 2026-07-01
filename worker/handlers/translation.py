@@ -23,6 +23,8 @@ from worker.services.layout import chunk_regions_by_conversation
 
 
 def process_translation(job_data):
+    from worker.utils.rate_limit import reset_job_costs
+    reset_job_costs()
     image_id = job_data["imageId"]
     request_id = str(uuid.uuid4())[:8]
     req_prefix = f"[{request_id}] "
@@ -320,6 +322,19 @@ def process_translation(job_data):
         )
 
     callback_payload = {"imageId": image_id, "translations": translations}
+    from worker.utils.rate_limit import get_job_costs
+    costs = get_job_costs()
+    if costs:
+        total_estimated_cost = sum(c["estimated_cost"] for c in costs)
+        total_prompt_tokens = sum(c["prompt_tokens"] for c in costs)
+        total_completion_tokens = sum(c["completion_tokens"] for c in costs)
+        callback_payload["cost"] = {
+            "estimated_cost": total_estimated_cost,
+            "currency": "USD",
+            "prompt_tokens": total_prompt_tokens,
+            "completion_tokens": total_completion_tokens,
+            "breakdown": costs
+        }
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(
             f"{req_prefix}Translation Outputs: callback_payload={callback_payload}"
