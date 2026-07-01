@@ -12,3 +12,6 @@ psutil
 easyocr
 onnxruntime
 rq
+pytest
+pytest-cov
+pytest-mock
