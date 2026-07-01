@@ -11,6 +11,7 @@ on:
       - "worker/**"
       - ".github/workflows/ci-python.yml"
   pull_request:
+    branches: ["main"]
     paths:
       - "Dockerfile"
       - "app.py"
