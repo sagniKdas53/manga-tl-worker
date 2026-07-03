@@ -311,8 +311,10 @@ def process_ocr(job_data):
             )
             if paddle_ocr_reader is not None:
                 try:
+                    det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv5_mobile_det").strip()
+                    rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv5_mobile_rec").strip()
                     print(
-                        f"[OCR] Running PaddleOCR (PP-OCRv5 Mobile, lang={source_language}).",
+                        f"[OCR] Running PaddleOCR ({det_model}/{rec_model}, lang={source_language}).",
                         flush=True,
                     )
 
@@ -748,34 +750,81 @@ def process_ocr(job_data):
                         )
 
                 # 5. Add unmatched fragments as separate standalone regions (SFX/sign)
-                for f in raw_fragments:
-                    if f.get("bubble_idx", -1) == -1:
+                # 5. Add unmatched fragments as merged standalone regions (direct text / SFX)
+                unmatched_frags = [
+                    f for f in raw_fragments if f.get("bubble_idx", -1) == -1
+                ]
+                if unmatched_frags:
+                    from worker.services.merge_regions import merge_ocr_regions
+
+                    merged_unmatched = merge_ocr_regions(
+                        unmatched_frags, reading_direction
+                    )
+
+                    for idx, r_sub in enumerate(merged_unmatched):
+                        rx, ry, rw, rh = r_sub["x"], r_sub["y"], r_sub["width"], r_sub["height"]
+
+                        # Crop and run MangaOCR for high accuracy vertical/horizontal Japanese OCR
+                        final_text = r_sub["text"]
+                        is_manga_ocr = False
+                        if manga_ocr_reader is not None:
+                            rx1 = max(0, rx)
+                            ry1 = max(0, ry)
+                            rx2 = min(img_w, rx + rw)
+                            ry2 = min(img_h, ry + rh)
+                            if (rx2 - rx1) > 0 and (ry2 - ry1) > 0:
+                                try:
+                                    crop = img[ry1:ry2, rx1:rx2]
+                                    crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                                    pil_img = Image.fromarray(crop_rgb)
+                                    manga_text = manga_ocr_reader(pil_img)
+                                    if manga_text and len(manga_text.strip()) > 0:
+                                        final_text = manga_text
+                                        is_manga_ocr = True
+                                except Exception as e:
+                                    print(
+                                        f"[OCR] MangaOCR failed on unmatched fragment crop: {e}",
+                                        flush=True,
+                                    )
+
+                        # Generate tight padded "virtual bubble" mask to allow typesetter inpainting / background cleaning
+                        pad = 6
+                        px1 = max(0, rx - pad)
+                        py1 = max(0, ry - pad)
+                        px2 = min(img_w, rx + rw + pad)
+                        py2 = min(img_h, ry + rh + pad)
+                        mask_polygon = [[px1, py1], [px2, py1], [px2, py2], [px1, py2]]
+
+                        bg_color = detect_background_color_poly(img, mask_polygon)
+
                         regions.append(
                             {
-                                "text": f["text"],
-                                "detectedLanguage": f["detectedLanguage"],
-                                "confidence": f["confidence"],
+                                "text": final_text,
+                                "detectedLanguage": (
+                                    detect_language(final_text) if final_text else r_sub["detectedLanguage"]
+                                ),
+                                "confidence": (
+                                    1.0 if is_manga_ocr else r_sub["confidence"]
+                                ),
                                 "rotation": 0.0,
-                                "x": f["x"],
-                                "y": f["y"],
-                                "width": f["width"],
-                                "height": f["height"],
+                                "x": rx,
+                                "y": ry,
+                                "width": rw,
+                                "height": rh,
                                 "panelId": None,
                                 "bubbleReadingOrder": 0,
-                                "backgroundColor": detect_background_color(
-                                    img, f["x"], f["y"], f["width"], f["height"]
-                                ),
-                                "bubbleX": f["x"],
-                                "bubbleY": f["y"],
-                                "bubbleWidth": f["width"],
-                                "bubbleHeight": f["height"],
-                                "bubbleId": None,
+                                "backgroundColor": bg_color,
+                                "bubbleX": rx,
+                                "bubbleY": ry,
+                                "bubbleWidth": rw,
+                                "bubbleHeight": rh,
+                                "bubbleId": f"direct_text_{idx}",
                                 "detectionConfidence": 0.0,
-                                "maskPolygon": None,
-                                "safeTextX": f["x"],
-                                "safeTextY": f["y"],
-                                "safeTextW": f["width"],
-                                "safeTextH": f["height"],
+                                "maskPolygon": json.dumps(mask_polygon),
+                                "safeTextX": px1,
+                                "safeTextY": py1,
+                                "safeTextW": px2 - px1,
+                                "safeTextH": py2 - py1,
                             }
                         )
 
@@ -908,9 +957,10 @@ def process_ocr(job_data):
                 else 1.0
             )
 
+            rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv5_mobile_rec").strip()
             callback_payload = {
                 "imageId": image_id,
-                "modelIdentifier": "MangaOCR/PaddleOCR",
+                "modelIdentifier": f"MangaOCR/PaddleOCR({rec_model})",
                 "confidence": avg_conf,
                 "sourceLanguage": source_language,
                 "readingDirection": reading_direction,

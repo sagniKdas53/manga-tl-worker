@@ -69,9 +69,13 @@ class ModelManager:
                 or self.paddle_readers[paddle_lang] is None
             ):
                 try:
+                    det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv5_mobile_det").strip()
+                    rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv5_mobile_rec").strip()
+                    ocr_device = os.environ.get("PADDLEOCR_DEVICE", "cpu").strip().lower()
+
                     print(
                         f"[Unified Worker] Initializing PaddleOCR "
-                        f"(PP-OCRv5 Mobile, lang='{paddle_lang}')...",
+                        f"(Det: {det_model}, Rec: {rec_model}, Device: {ocr_device}, lang='{paddle_lang}')...",
                         flush=True,
                     )
                     from paddleocr import (
@@ -80,9 +84,9 @@ class ModelManager:
 
                     self.paddle_readers[paddle_lang] = _PaddleOCR(
                         lang=paddle_lang,
-                        device="cpu",
-                        text_detection_model_name="PP-OCRv5_mobile_det",
-                        text_recognition_model_name="PP-OCRv5_mobile_rec",
+                        device=ocr_device,
+                        text_detection_model_name=det_model,
+                        text_recognition_model_name=rec_model,
                         use_textline_orientation=False,
                         use_doc_unwarping=False,
                         use_doc_orientation_classify=False,
