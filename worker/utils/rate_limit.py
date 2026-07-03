@@ -2,9 +2,9 @@ import os
 import time
 import json
 import requests
-from worker.config import redis_client, logger
+from worker.config import redis_client, logger, RENDER_CACHE_DIR
 
-COSTS_FILE = os.environ.get("COSTS_FILE", "costs.json")
+COSTS_FILE = os.environ.get("COSTS_FILE", os.path.join(RENDER_CACHE_DIR, "costs.json"))
 
 LAST_REQUEST_TIME = 0.0
 
