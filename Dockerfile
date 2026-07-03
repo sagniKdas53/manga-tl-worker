@@ -9,14 +9,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxext6 \
     libxrender-dev \
     fonts-comic-neue \
+    fonts-ipafont-gothic \
+    fonts-wqy-microhei \
+    fonts-nanum \
     fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
-# Install additional FOSS fonts from Google Fonts (Bangers, Luckiest Guy)
+# Install additional fonts (Bangers, Luckiest Guy, Arial, Courier New)
 RUN mkdir -p /usr/share/fonts/truetype/google && \
     apt-get update && apt-get install -y --no-install-recommends wget && \
     wget -q -O /usr/share/fonts/truetype/google/Bangers-Regular.ttf "https://github.com/google/fonts/raw/main/ofl/bangers/Bangers-Regular.ttf" && \
     wget -q -O /usr/share/fonts/truetype/google/LuckiestGuy-Regular.ttf "https://github.com/google/fonts/raw/main/apache/luckiestguy/LuckiestGuy-Regular.ttf" && \
+    wget -q -O /usr/share/fonts/truetype/google/Arial.ttf "https://raw.githubusercontent.com/root-project/root/master/fonts/arial.ttf" && \
+    wget -q -O /usr/share/fonts/truetype/google/CourierNew.ttf "https://raw.githubusercontent.com/jfmdev/TuringFonts/master/fonts/Courier%20New.ttf" && \
     apt-get purge -y wget && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/* && \
     fc-cache -f

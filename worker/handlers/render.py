@@ -14,10 +14,10 @@ import os
 # Font registry: map display names to filesystem paths
 FONT_REGISTRY = {
     "Comic Neue": {
-        "normal": "/usr/share/fonts/truetype/comic-neue/ComicNeue-Regular.ttf",
-        "bold": "/usr/share/fonts/truetype/comic-neue/ComicNeue-Bold.ttf",
-        "italic": "/usr/share/fonts/truetype/comic-neue/ComicNeue-Italic.ttf",
-        "bolditalic": "/usr/share/fonts/truetype/comic-neue/ComicNeue-BoldItalic.ttf",
+        "normal": "/usr/share/fonts/opentype/comic-neue/ComicNeue-Regular.otf",
+        "bold": "/usr/share/fonts/opentype/comic-neue/ComicNeue-Bold.otf",
+        "italic": "/usr/share/fonts/opentype/comic-neue/ComicNeue-Italic.otf",
+        "bolditalic": "/usr/share/fonts/opentype/comic-neue/ComicNeue-BoldItalic.otf",
     },
     "Bangers": {
         "normal": "/usr/share/fonts/truetype/google/Bangers-Regular.ttf",
@@ -31,8 +31,38 @@ FONT_REGISTRY = {
         "italic": "/usr/share/fonts/truetype/google/LuckiestGuy-Regular.ttf",
         "bolditalic": "/usr/share/fonts/truetype/google/LuckiestGuy-Regular.ttf",
     },
+    "Arial": {
+        "normal": "/usr/share/fonts/truetype/google/Arial.ttf",
+        "bold": "/usr/share/fonts/truetype/google/Arial.ttf",
+        "italic": "/usr/share/fonts/truetype/google/Arial.ttf",
+        "bolditalic": "/usr/share/fonts/truetype/google/Arial.ttf",
+    },
+    "Courier New": {
+        "normal": "/usr/share/fonts/truetype/google/CourierNew.ttf",
+        "bold": "/usr/share/fonts/truetype/google/CourierNew.ttf",
+        "italic": "/usr/share/fonts/truetype/google/CourierNew.ttf",
+        "bolditalic": "/usr/share/fonts/truetype/google/CourierNew.ttf",
+    },
+    "WenQuanYi Micro Hei": {
+        "normal": "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "bold": "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "italic": "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "bolditalic": "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    },
+    "NanumGothic": {
+        "normal": "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "bold": "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+        "italic": "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "bolditalic": "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+    },
+    "IPAGothic": {
+        "normal": "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+        "bold": "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+        "italic": "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+        "bolditalic": "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+    },
 }
-DEFAULT_FONT_FALLBACK_ORDER = ["Comic Neue", "Luckiest Guy", "Bangers"]
+DEFAULT_FONT_FALLBACK_ORDER = ["Comic Neue", "Luckiest Guy", "Bangers", "IPAGothic", "WenQuanYi Micro Hei", "NanumGothic"]
 
 
 def load_font(size, font_name="Comic Neue", bold=False, italic=False):
