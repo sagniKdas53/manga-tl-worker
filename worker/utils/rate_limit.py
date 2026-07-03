@@ -1,5 +1,10 @@
 import os
 import time
+import json
+import requests
+from worker.config import redis_client, logger
+
+COSTS_FILE = os.environ.get("COSTS_FILE", "costs.json")
 
 LAST_REQUEST_TIME = 0.0
 
@@ -48,6 +53,90 @@ def reset_job_costs():
     _local_data.costs = []
 
 
+def update_model_costs(models=None):
+    """
+    Fetch average cost per token from OpenRouter for given models.
+    Saves to costs.json and Redis. Raises ValueError if a model is not available.
+    """
+    if not models:
+        return
+
+    # Load existing costs
+    persisted_costs = {}
+    if os.path.exists(COSTS_FILE):
+        try:
+            with open(COSTS_FILE, 'r') as f:
+                persisted_costs = json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to read {COSTS_FILE}: {e}")
+
+    now = time.time()
+    one_week = 7 * 24 * 3600
+
+    for model in models:
+        try:
+            model_key = model.lower()
+            cached_data = persisted_costs.get(model_key)
+            if cached_data and (now - cached_data.get("timestamp", 0) < one_week):
+                # Still fresh, just push to Redis
+                redis_client.set(f"model_cost:{model_key}", json.dumps({
+                    "prompt": cached_data["prompt"],
+                    "completion": cached_data["completion"]
+                }))
+                continue
+
+            # Need to fetch
+            base_model = model.split(":")[0]  # Strip any :free suffix for API query
+            url = f"https://openrouter.ai/api/v1/models/{base_model}/endpoints"
+            res = requests.get(url, timeout=10)
+            if res.status_code == 200:
+                data = res.json()
+                endpoints = data.get("data", {}).get("endpoints", [])
+                if not endpoints:
+                    raise ValueError(f"Model {model} is not available on OpenRouter (no endpoints returned).")
+
+                prompt_costs = []
+                completion_costs = []
+                for ep in endpoints:
+                    pricing = ep.get("pricing")
+                    if pricing:
+                        prompt_cost = float(pricing.get("prompt") or 0)
+                        comp_cost = float(pricing.get("completion") or 0)
+                        prompt_costs.append(prompt_cost)
+                        completion_costs.append(comp_cost)
+                
+                if prompt_costs and completion_costs:
+                    avg_prompt = sum(prompt_costs) / len(prompt_costs)
+                    avg_comp = sum(completion_costs) / len(completion_costs)
+                    
+                    cost_data = {
+                        "prompt": avg_prompt,
+                        "completion": avg_comp,
+                        "timestamp": now
+                    }
+                    persisted_costs[model_key] = cost_data
+                    redis_client.set(f"model_cost:{model_key}", json.dumps({
+                        "prompt": avg_prompt,
+                        "completion": avg_comp
+                    }))
+                    logger.info(f"Updated average cost for {model}: Prompt=${avg_prompt*1e6:.2f}/M, Completion=${avg_comp*1e6:.2f}/M")
+            elif res.status_code == 404:
+                raise ValueError(f"Model {model} is not available on OpenRouter (404 Not Found).")
+            else:
+                logger.warning(f"Failed to fetch endpoints for {model}: {res.status_code}")
+        except ValueError as ve:
+            raise ve
+        except Exception as e:
+            logger.error(f"Error fetching cost for {model}: {e}")
+
+    # Save persisted costs
+    try:
+        with open(COSTS_FILE, 'w') as f:
+            json.dump(persisted_costs, f, indent=2)
+    except Exception as e:
+        logger.warning(f"Failed to write {COSTS_FILE}: {e}")
+
+
 def get_job_costs():
     if not hasattr(_local_data, "costs"):
         _local_data.costs = []
@@ -61,19 +150,37 @@ def estimate_cost(model, prompt_tokens, completion_tokens, provider=None):
     out_rate = 0.0
     model_lower = (model or "").lower()
 
-    if "deepseek-v4-pro" in model_lower:
-        in_rate = 0.435 / 1_000_000
-        out_rate = 0.87 / 1_000_000
-    elif "gemini-2.5-flash" in model_lower:
-        if provider == "gemini":
-            in_rate = 0.075 / 1_000_000
-            out_rate = 0.30 / 1_000_000
-        else:  # OpenRouter
-            in_rate = 0.30 / 1_000_000
-            out_rate = 2.50 / 1_000_000
-    elif "claude-3-5-sonnet" in model_lower:
-        in_rate = 3.0 / 1_000_000
-        out_rate = 15.0 / 1_000_000
+    try:
+        cached = redis_client.get(f"model_cost:{model_lower}")
+        if cached:
+            cost_data = json.loads(cached)
+            in_rate = float(cost_data.get("prompt", 0))
+            out_rate = float(cost_data.get("completion", 0))
+        else:
+            # Fallback to checking costs.json
+            if os.path.exists(COSTS_FILE):
+                with open(COSTS_FILE, 'r') as f:
+                    persisted = json.load(f)
+                    if model_lower in persisted:
+                        in_rate = float(persisted[model_lower].get("prompt", 0))
+                        out_rate = float(persisted[model_lower].get("completion", 0))
+    except Exception:
+        pass
+
+    if in_rate == 0.0 and out_rate == 0.0:
+        if "deepseek-v4-pro" in model_lower:
+            in_rate = 0.435 / 1_000_000
+            out_rate = 0.87 / 1_000_000
+        elif "gemini-2.5-flash" in model_lower:
+            if provider == "gemini":
+                in_rate = 0.075 / 1_000_000
+                out_rate = 0.30 / 1_000_000
+            else:  # OpenRouter
+                in_rate = 0.30 / 1_000_000
+                out_rate = 2.50 / 1_000_000
+        elif "claude-3-5-sonnet" in model_lower:
+            in_rate = 3.0 / 1_000_000
+            out_rate = 15.0 / 1_000_000
 
     cost = (prompt_tokens * in_rate) + (completion_tokens * out_rate)
     
