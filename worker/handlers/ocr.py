@@ -323,6 +323,12 @@ def process_ocr(job_data):
                 if disable_local_ocr
                 else model_manager.get_paddle_ocr_reader(source_language)
             )
+            if not disable_local_ocr and paddle_ocr_reader is None:
+                raise RuntimeError(
+                    f"Required local PaddleOCR model failed to initialize for language: {source_language}. "
+                    "Cannot proceed in offline mode without the required model."
+                )
+
             if paddle_ocr_reader is not None:
                 try:
                     det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv5_mobile_det").strip()
@@ -368,9 +374,10 @@ def process_ocr(job_data):
                         )
                 except Exception as ocr_err:
                     print(
-                        f"[OCR] PaddleOCR failed with exception: {ocr_err}. Falling back...",
+                        f"[OCR] PaddleOCR failed with exception: {ocr_err}.",
                         flush=True,
                     )
+                    raise ocr_err
 
             # Fallback to EasyOCR if results are empty and reader is available
             easy_reader = (
@@ -398,6 +405,12 @@ def process_ocr(job_data):
             manga_ocr_reader = (
                 None if disable_local_ocr else model_manager.get_manga_ocr_reader()
             )
+            if not disable_local_ocr and source_language.lower() in ("ja", "jp") and manga_ocr_reader is None:
+                raise RuntimeError(
+                    "Required local MangaOCR model failed to initialize for Japanese refinement. "
+                    "Cannot proceed in offline mode without the required model."
+                )
+
             if img is None:
                 try:
                     nparr = np.frombuffer(img_bytes, np.uint8)
@@ -409,10 +422,7 @@ def process_ocr(job_data):
             img_h, img_w = img.shape[:2] if img is not None else (0, 0)
             detected_bubbles = None
             if img is not None:
-                try:
-                    detected_bubbles = detect_bubbles_yolo(img)
-                except Exception as e:
-                    print(f"[OCR] Failed to run YOLO bubble detection: {e}", flush=True)
+                detected_bubbles = detect_bubbles_yolo(img)
 
             regions = []
             is_yolo_active = detected_bubbles is not None

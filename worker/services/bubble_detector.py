@@ -32,8 +32,10 @@ def get_ort_session():
         return _ort_session
 
     if not YOLO_MODEL_PATH or not os.path.exists(YOLO_MODEL_PATH):
-        logger.warning(f"[YOLO] ONNX model not found at path: {YOLO_MODEL_PATH}")
-        return None
+        raise FileNotFoundError(
+            f"Required YOLO bubble detection model is not available at path: {YOLO_MODEL_PATH}. "
+            "Cannot proceed in offline mode without the required model."
+        )
 
     # Checksum verification
     current_checksum = get_sha256(YOLO_MODEL_PATH)
@@ -57,8 +59,7 @@ def get_ort_session():
         logger.info("[YOLO] ONNX Runtime session initialized successfully.")
         return _ort_session
     except Exception as e:
-        logger.error(f"[YOLO] Failed to load ONNX model via ONNX Runtime: {e}")
-        return None
+        raise RuntimeError(f"Failed to load ONNX model via ONNX Runtime: {e}")
 
 
 def letterbox(img, new_shape=(1280, 1280), color=(114, 114, 114)):
@@ -98,10 +99,9 @@ def detect_bubbles_yolo(img):
     """
     session = get_ort_session()
     if session is None:
-        logger.warning(
-            "[YOLO] Falling back to OpenCV bubble contour detection because ONNX model loading failed."
+        raise RuntimeError(
+            "YOLO model session initialization failed. Cannot proceed without the required model."
         )
-        return None
 
     if img is None:
         return []
