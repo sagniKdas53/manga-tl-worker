@@ -373,7 +373,7 @@ def test_process_translation_nvidia(mock_post, mock_get, mock_try_cloud_ai):
         "GEMINI_API_KEY": "",
         "NVIDIA_API_KEY": "",
         "LOCAL_LLM_PROVIDER": "ollama",
-        "LOCAL_LLM_MODEL": "gemma3:4b",
+        "LOCAL_LLM_MODEL": "gemma4:e4b",
     },
 )
 def test_process_translation_local_fallback(mock_post, mock_get, mock_try_local_ai):
