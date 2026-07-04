@@ -406,9 +406,10 @@ def process_ocr(job_data):
                 None if disable_local_ocr else model_manager.get_manga_ocr_reader()
             )
             if not disable_local_ocr and source_language.lower() in ("ja", "jp") and manga_ocr_reader is None:
-                raise RuntimeError(
-                    "Required local MangaOCR model failed to initialize for Japanese refinement. "
-                    "Cannot proceed in offline mode without the required model."
+                print(
+                    "[OCR] Warning: Required local MangaOCR model failed to initialize for Japanese refinement. "
+                    "Proceeding without MangaOCR refinement.",
+                    flush=True,
                 )
 
             if img is None:
