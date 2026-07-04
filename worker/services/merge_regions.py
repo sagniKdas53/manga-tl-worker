@@ -1,8 +1,88 @@
 import os
 import re
 import logging
+import json
 
 logger = logging.getLogger("translation")
+
+
+def _parse_polygon(mask_polygon):
+    if not mask_polygon:
+        return None
+    try:
+        pts = (
+            json.loads(mask_polygon)
+            if isinstance(mask_polygon, str)
+            else mask_polygon
+        )
+    except Exception:
+        return None
+    if not isinstance(pts, list) or len(pts) < 3:
+        return None
+    polygon = []
+    for pt in pts:
+        if not isinstance(pt, list) or len(pt) != 2:
+            return None
+        polygon.append([int(pt[0]), int(pt[1])])
+    return polygon
+
+
+def _polygon_area(points):
+    area = 0
+    for idx, p1 in enumerate(points):
+        p2 = points[(idx + 1) % len(points)]
+        area += p1[0] * p2[1] - p2[0] * p1[1]
+    return abs(area) / 2
+
+
+def _convex_hull(points):
+    unique = sorted({(p[0], p[1]) for p in points})
+    if len(unique) <= 1:
+        return [[p[0], p[1]] for p in unique]
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower = []
+    for p in unique:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+
+    upper = []
+    for p in reversed(unique):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+
+    hull = lower[:-1] + upper[:-1]
+    return [[p[0], p[1]] for p in hull]
+
+
+def _merged_mask_polygon(regions, comp):
+    polygons = [
+        polygon
+        for polygon in (
+            _parse_polygon(regions[idx].get("maskPolygon")) for idx in comp
+        )
+        if polygon
+    ]
+    if not polygons:
+        return None
+    if len(polygons) == 1:
+        return json.dumps(polygons[0])
+
+    first = polygons[0]
+    if all(poly == first for poly in polygons[1:]):
+        return json.dumps(first)
+
+    points = [pt for polygon in polygons for pt in polygon]
+    hull = _convex_hull(points)
+    if len(hull) >= 3:
+        return json.dumps(hull)
+
+    largest = max(polygons, key=_polygon_area)
+    return json.dumps(largest)
 
 
 def merge_ocr_regions(regions: list, reading_direction: str = "rtl") -> list:
@@ -173,6 +253,7 @@ def merge_ocr_regions(regions: list, reading_direction: str = "rtl") -> list:
             + regions[idx].get("safeTextH", regions[idx]["height"])
             for idx in comp
         )
+        merged_mask_polygon = _merged_mask_polygon(regions, comp)
 
         merged_regions.append(
             {
@@ -192,8 +273,11 @@ def merge_ocr_regions(regions: list, reading_direction: str = "rtl") -> list:
                 "bubbleWidth": bx_max - bx_min,
                 "bubbleHeight": by_max - by_min,
                 "bubbleId": None,
-                "detectionConfidence": 0.0,
-                "maskPolygon": None,
+                "detectionConfidence": float(
+                    sum(regions[idx].get("detectionConfidence", 0.0) for idx in comp)
+                    / len(comp)
+                ),
+                "maskPolygon": merged_mask_polygon,
                 "safeTextX": sx_min,
                 "safeTextY": sy_min,
                 "safeTextW": sx_max - sx_min,

@@ -22,6 +22,7 @@ from worker.utils.image import downscale_for_ocr, calculate_overlap_area, downlo
 from worker.utils.text import detect_language
 from worker.services.ocr import parse_paddle_ocr_results
 from worker.services.layout import bubble_compare
+from worker.services.merge_regions import merge_ocr_regions
 from worker.utils.lock import acquire_lock
 from worker.services.bubble_detector import detect_bubbles_yolo
 from worker.services.translation import (
@@ -223,6 +224,7 @@ def detect_bubble_contour(img, ocr_x, ocr_y, ocr_w, ocr_h):
     cx = (ocr_x + ocr_w / 2) - x1
     cy = (ocr_y + ocr_h / 2) - y1
 
+    best_contour = None
     best_rect = None
     max_overlap_area = 0
 
@@ -238,11 +240,23 @@ def detect_bubble_contour(img, ocr_x, ocr_y, ocr_w, ocr_h):
 
         if overlap_area > max_overlap_area:
             max_overlap_area = overlap_area
+            best_contour = c
             best_rect = (bx, by, bw, bh)
 
-    if best_rect is not None and max_overlap_area > 0:
+    if best_rect is not None and best_contour is not None and max_overlap_area > 0:
         bx, by, bw, bh = best_rect
-        return {"x": x1 + bx, "y": y1 + by, "width": bw, "height": bh}
+        epsilon = 0.002 * cv2.arcLength(best_contour, True)
+        simplified = cv2.approxPolyDP(best_contour, epsilon, True)
+        polygon = [
+            [int(x1 + pt[0][0]), int(y1 + pt[0][1])] for pt in simplified
+        ]
+        return {
+            "x": x1 + bx,
+            "y": y1 + by,
+            "width": bw,
+            "height": bh,
+            "maskPolygon": polygon,
+        }
 
     return None
 
@@ -650,8 +664,6 @@ def process_ocr(job_data):
                         continue
 
                     # Run proximity merging inside the bubble to separate multiple semantic bubbles
-                    from worker.services.merge_regions import merge_ocr_regions
-
                     merged_bubble_regions = merge_ocr_regions(
                         assigned_frags, reading_direction
                     )
@@ -755,8 +767,6 @@ def process_ocr(job_data):
                     f for f in raw_fragments if f.get("bubble_idx", -1) == -1
                 ]
                 if unmatched_frags:
-                    from worker.services.merge_regions import merge_ocr_regions
-
                     merged_unmatched = merge_ocr_regions(
                         unmatched_frags, reading_direction
                     )
@@ -857,14 +867,14 @@ def process_ocr(job_data):
                         except Exception:
                             pass
 
-                    bg_color = detect_background_color(img, x, y, width, height)
                     bubble_box = detect_bubble_contour(img, x, y, width, height)
 
-                    if (
+                    use_bubble_contour = (
                         bubble_box
                         and bubble_box["width"] <= width * 2.5
                         and bubble_box["height"] <= height * 2.5
-                    ):
+                    )
+                    if use_bubble_contour:
                         bx, by, bw, bh = (
                             bubble_box["x"],
                             bubble_box["y"],
@@ -873,6 +883,15 @@ def process_ocr(job_data):
                         )
                     else:
                         bx, by, bw, bh = x, y, width, height
+
+                    mask_polygon = (
+                        bubble_box.get("maskPolygon") if use_bubble_contour else None
+                    )
+                    bg_color = (
+                        detect_background_color_poly(img, mask_polygon)
+                        if mask_polygon
+                        else detect_background_color(img, x, y, width, height)
+                    )
 
                     regions.append(
                         {
@@ -893,7 +912,9 @@ def process_ocr(job_data):
                             "bubbleHeight": bh,
                             "bubbleId": None,
                             "detectionConfidence": 0.0,
-                            "maskPolygon": None,
+                            "maskPolygon": (
+                                json.dumps(mask_polygon) if mask_polygon else None
+                            ),
                             "safeTextX": bx,
                             "safeTextY": by,
                             "safeTextW": bw,
@@ -901,9 +922,41 @@ def process_ocr(job_data):
                         }
                     )
 
-                from worker.services.merge_regions import merge_ocr_regions
-
                 regions = merge_ocr_regions(regions, reading_direction)
+
+            regions = merge_ocr_regions(regions, reading_direction)
+
+            if img is not None:
+                for r in regions:
+                    if r.get("maskPolygon"):
+                        continue
+
+                    bubble_box = detect_bubble_contour(
+                        img, r["x"], r["y"], r["width"], r["height"]
+                    )
+                    if not (
+                        bubble_box
+                        and bubble_box["width"] <= r["width"] * 2.5
+                        and bubble_box["height"] <= r["height"] * 2.5
+                    ):
+                        continue
+
+                    mask_polygon = bubble_box.get("maskPolygon")
+                    if not mask_polygon:
+                        continue
+
+                    r["bubbleX"] = bubble_box["x"]
+                    r["bubbleY"] = bubble_box["y"]
+                    r["bubbleWidth"] = bubble_box["width"]
+                    r["bubbleHeight"] = bubble_box["height"]
+                    r["safeTextX"] = bubble_box["x"]
+                    r["safeTextY"] = bubble_box["y"]
+                    r["safeTextW"] = bubble_box["width"]
+                    r["safeTextH"] = bubble_box["height"]
+                    r["maskPolygon"] = json.dumps(mask_polygon)
+                    r["backgroundColor"] = detect_background_color_poly(
+                        img, mask_polygon
+                    )
 
             panel_regions_map = {}
             unmapped_regions = []

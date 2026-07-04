@@ -37,6 +37,7 @@ def test_detect_bubble_contour():
     assert abs(bubble_box["y"] - 60) <= 5
     assert abs(bubble_box["width"] - 80) <= 5
     assert abs(bubble_box["height"] - 80) <= 5
+    assert len(bubble_box["maskPolygon"]) >= 3
 
 
 def test_detect_background_color_poly():
