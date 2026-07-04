@@ -65,9 +65,15 @@ class ModelManager:
                 or self.paddle_readers[paddle_lang] is None
             ):
                 try:
-                    det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det").strip()
-                    rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
-                    ocr_device = os.environ.get("PADDLEOCR_DEVICE", "cpu").strip().lower()
+                    det_model = os.environ.get(
+                        "PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det"
+                    ).strip()
+                    rec_model = os.environ.get(
+                        "PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec"
+                    ).strip()
+                    ocr_device = (
+                        os.environ.get("PADDLEOCR_DEVICE", "cpu").strip().lower()
+                    )
 
                     print(
                         f"[Unified Worker] Initializing PaddleOCR "

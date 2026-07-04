@@ -1,4 +1,3 @@
-import os
 import uuid
 import logging
 import requests
@@ -9,7 +8,6 @@ from worker.config import (
     MODEL_PROVIDER,
     redis_client,
 )
-from worker.utils.image import download_image
 from worker.services.translation import (
     should_translate_region,
     is_valid_translation,
@@ -24,6 +22,7 @@ from worker.services.layout import chunk_regions_by_conversation
 
 def process_translation(job_data):
     from worker.utils.rate_limit import reset_job_costs
+
     reset_job_costs()
     image_id = job_data["imageId"]
     request_id = str(uuid.uuid4())[:8]
@@ -118,13 +117,13 @@ def process_translation(job_data):
 
         for idx, chunk in enumerate(unmatched_chunks):
             logger.info(
-                f"{req_prefix}Processing batch chunk {idx+1}/{len(unmatched_chunks)} ({len(chunk)} regions)..."
+                f"{req_prefix}Processing batch chunk {idx + 1}/{len(unmatched_chunks)} ({len(chunk)} regions)..."
             )
             chunk_mapping = None
 
             # 1. Standard LLM batch translation
             logger.info(
-                f"{req_prefix}Running standard batch translation for chunk {idx+1}..."
+                f"{req_prefix}Running standard batch translation for chunk {idx + 1}..."
             )
             try:
                 if logger.isEnabledFor(logging.DEBUG):
@@ -150,7 +149,7 @@ def process_translation(job_data):
                 chunk_mapping = parse_and_validate_batch(batch_res, chunk)
             except Exception as e:
                 logger.error(
-                    f"{req_prefix}Standard batch translation failed for chunk {idx+1}: {e}"
+                    f"{req_prefix}Standard batch translation failed for chunk {idx + 1}: {e}"
                 )
 
             if chunk_mapping:
@@ -194,7 +193,7 @@ def process_translation(job_data):
             retry_mapping = {}
             for idx, r_chunk in enumerate(retry_chunks):
                 logger.info(
-                    f"{req_prefix}Processing retry batch chunk {idx+1}/{len(retry_chunks)} ({len(r_chunk)} regions)..."
+                    f"{req_prefix}Processing retry batch chunk {idx + 1}/{len(retry_chunks)} ({len(r_chunk)} regions)..."
                 )
                 r_chunk_mapping = None
                 try:
@@ -220,7 +219,7 @@ def process_translation(job_data):
                     r_chunk_mapping = parse_and_validate_batch(retry_res, r_chunk)
                 except Exception as e:
                     logger.error(
-                        f"{req_prefix}Retry batch chunk {idx+1} translation failed: {e}"
+                        f"{req_prefix}Retry batch chunk {idx + 1} translation failed: {e}"
                     )
                 if r_chunk_mapping:
                     for rid, trans in r_chunk_mapping.items():
@@ -323,6 +322,7 @@ def process_translation(job_data):
 
     callback_payload = {"imageId": image_id, "translations": translations}
     from worker.utils.rate_limit import get_job_costs
+
     costs = get_job_costs()
     if costs:
         total_estimated_cost = sum(c["estimated_cost"] for c in costs)
@@ -333,7 +333,7 @@ def process_translation(job_data):
             "currency": "USD",
             "prompt_tokens": total_prompt_tokens,
             "completion_tokens": total_completion_tokens,
-            "breakdown": costs
+            "breakdown": costs,
         }
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(

@@ -103,9 +103,7 @@ def is_valid_translation(source, translated, request_id=None):
     # Check if translated == source for Japanese
     if contains_japanese(source_stripped) and translated_stripped == source_stripped:
         logger.warning(
-            f"{req_prefix}Validation failed "
-            f"reason=identical_to_source "
-            f"source={source}"
+            f"{req_prefix}Validation failed reason=identical_to_source source={source}"
         )
         return False
 
@@ -420,7 +418,7 @@ def try_cloud_ai(
     for attempt in range(max_retries + 1):
         try:
             logger.info(
-                f"{req_prefix}Sending request to '{provider}' using model '{actual_model}' (attempt {attempt+1}/{max_retries+1})..."
+                f"{req_prefix}Sending request to '{provider}' using model '{actual_model}' (attempt {attempt + 1}/{max_retries + 1})..."
             )
             start = time.perf_counter()
 
@@ -575,7 +573,7 @@ def try_cloud_ai_vision(
     for attempt in range(max_retries + 1):
         try:
             logger.info(
-                f"{req_prefix}Sending vision request to '{provider}' using model '{actual_model}' (attempt {attempt+1}/{max_retries+1})..."
+                f"{req_prefix}Sending vision request to '{provider}' using model '{actual_model}' (attempt {attempt + 1}/{max_retries + 1})..."
             )
             start = time.perf_counter()
 
@@ -748,9 +746,7 @@ def try_deepl(text, target_lang="en", request_id=None):
         start = time.perf_counter()
         res = requests.post(url, json=payload, headers=headers, timeout=8)
         elapsed = time.perf_counter() - start
-        logger.info(
-            f"{req_prefix}Provider=deepl " f"Model=deepl " f"Time={elapsed:.2f}s"
-        )
+        logger.info(f"{req_prefix}Provider=deepl Model=deepl Time={elapsed:.2f}s")
         if logger.isEnabledFor(logging.TRACE):
             logger.trace(
                 f"{req_prefix}[TRACE] DeepL Response Status: {res.status_code}"
@@ -796,9 +792,7 @@ def try_google_translate(text, source_lang="auto", target_lang="en", request_id=
                 f"{req_prefix}[TRACE] Google Translate Response Headers: {dict(res.headers)}"
             )
         logger.info(
-            f"{req_prefix}Provider=google_translate "
-            f"Model=free_api "
-            f"Time={elapsed:.2f}s"
+            f"{req_prefix}Provider=google_translate Model=free_api Time={elapsed:.2f}s"
         )
 
         if res.status_code == 200:
@@ -836,7 +830,7 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
     )
     deepl_key = os.environ.get("DEEPL_API_KEY", os.environ.get("DEEPL_KEY", "")).strip()
 
-    src_name = LANG_MAP.get(source_lang.lower(), source_lang)
+    LANG_MAP.get(source_lang.lower(), source_lang)
     tgt_name = LANG_MAP.get(target_lang.lower(), target_lang)
     prompt = f"Translate the following text to natural {tgt_name}, maintaining its tone and context. Respond ONLY with the translated text. Do not include any tags, notes, or explanations.\n\nText: {text}"
 
@@ -1385,9 +1379,7 @@ def translate_batch_deepl(unmatched_regions, target_lang="en", request_id=None):
         start = time.perf_counter()
         res = requests.post(url, json=payload, headers=headers, timeout=8)
         elapsed = time.perf_counter() - start
-        logger.info(
-            f"{req_prefix}Provider=deepl " f"Model=deepl_batch " f"Time={elapsed:.2f}s"
-        )
+        logger.info(f"{req_prefix}Provider=deepl Model=deepl_batch Time={elapsed:.2f}s")
 
         if res.status_code == 200:
             res_json = res.json()

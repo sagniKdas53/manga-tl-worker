@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import patch, MagicMock
 from worker.services.translation import (
     is_valid_translation,
@@ -9,36 +8,30 @@ from worker.services.translation import (
 
 def test_is_valid_translation():
     # Valid translation
-    assert is_valid_translation("こんにちは", "Hello") == True
+    assert is_valid_translation("こんにちは", "Hello")
 
     # Boilerplate check
-    assert is_valid_translation("こんにちは", "Here is the translation: Hello") == True
-    assert (
-        is_valid_translation("こんにちは", "translate the following text: Hello")
-        == False
-    )
+    assert is_valid_translation("こんにちは", "Here is the translation: Hello")
+    assert not is_valid_translation("こんにちは", "translate the following text: Hello")
 
     # Identical to Japanese source check
-    assert is_valid_translation("こんにちは", "こんにちは") == False
+    assert not is_valid_translation("こんにちは", "こんにちは")
 
     # Pathologically long
-    assert (
-        is_valid_translation(
-            "hi",
-            "This is an extremely long translation for a very short text which should definitely fail the validation check because it exceeds the length ratio by a huge margin.",
-        )
-        == False
+    assert not is_valid_translation(
+        "hi",
+        "This is an extremely long translation for a very short text which should definitely fail the validation check because it exceeds the length ratio by a huge margin.",
     )
 
 
 def test_should_translate_region():
     # Reject too small
     region_small = {"width": 5, "height": 5, "text": "a"}
-    assert should_translate_region(region_small) == False
+    assert not should_translate_region(region_small)
 
     # Reject low confidence
     region_low_conf = {"width": 20, "height": 20, "text": "hello", "confidence": 0.2}
-    assert should_translate_region(region_low_conf) == False
+    assert not should_translate_region(region_low_conf)
 
     # SFX whitelist
     region_sfx = {
@@ -47,11 +40,11 @@ def test_should_translate_region():
         "text": "ドン",
         "confidence": 0.2,
     }  # Should pass despite low conf due to whitelist
-    assert should_translate_region(region_sfx) == True
+    assert should_translate_region(region_sfx)
 
     # Alphanumeric with low confidence
     region_alpha = {"width": 20, "height": 20, "text": "AB12", "confidence": 0.4}
-    assert should_translate_region(region_alpha) == False
+    assert not should_translate_region(region_alpha)
 
 
 @patch("worker.services.translation.requests.post")

@@ -11,9 +11,7 @@ def _parse_polygon(mask_polygon):
         return None
     try:
         pts = (
-            json.loads(mask_polygon)
-            if isinstance(mask_polygon, str)
-            else mask_polygon
+            json.loads(mask_polygon) if isinstance(mask_polygon, str) else mask_polygon
         )
     except Exception:
         return None
@@ -62,9 +60,7 @@ def _convex_hull(points):
 def _merged_mask_polygon(regions, comp):
     polygons = [
         polygon
-        for polygon in (
-            _parse_polygon(regions[idx].get("maskPolygon")) for idx in comp
-        )
+        for polygon in (_parse_polygon(regions[idx].get("maskPolygon")) for idx in comp)
         if polygon
     ]
     if not polygons:
@@ -85,7 +81,9 @@ def _merged_mask_polygon(regions, comp):
     return json.dumps(largest)
 
 
-def merge_ocr_regions(regions: list, reading_direction: str = "rtl", threshold_ratio: float = None) -> list:
+def merge_ocr_regions(
+    regions: list, reading_direction: str = "rtl", threshold_ratio: float = None
+) -> list:
     """Merge OCR line-level detections into logical speech balloon groups.
 
     Args:

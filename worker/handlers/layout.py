@@ -90,7 +90,7 @@ def process_layout(job_data):
         )
 
     print(
-        f"[Layout] Region types: "
+        "[Layout] Region types: "
         + ", ".join(
             f"{t}: {sum(1 for rt in region_types if rt['regionType'] == t)}"
             for t in set(rt["regionType"] for rt in region_types)
@@ -120,7 +120,7 @@ def process_layout(job_data):
             f"panels={conv['panelIds']}" if conv.get("panelIds") else "unmapped"
         )
         print(
-            f"[Layout] Conversation #{idx+1} ({conv['sceneType']}, {panel_info}): "
+            f"[Layout] Conversation #{idx + 1} ({conv['sceneType']}, {panel_info}): "
             + " -> ".join(region_details),
             flush=True,
         )

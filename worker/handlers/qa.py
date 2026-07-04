@@ -65,6 +65,7 @@ QA_JSON_SCHEMA = {
 
 def process_qa(job_data):
     from worker.utils.rate_limit import reset_job_costs
+
     reset_job_costs()
     image_id = job_data["imageId"]
     page_num = job_data.get("pageNumber")
@@ -123,6 +124,7 @@ def _auto_pass_all(job_data):
     # Call backend
     callback_payload = {"imageId": image_id, "qaResults": results}
     from worker.utils.rate_limit import get_job_costs
+
     costs = get_job_costs()
     if costs:
         total_estimated_cost = sum(c["estimated_cost"] for c in costs)
@@ -133,7 +135,7 @@ def _auto_pass_all(job_data):
             "currency": "USD",
             "prompt_tokens": total_prompt_tokens,
             "completion_tokens": total_completion_tokens,
-            "breakdown": costs
+            "breakdown": costs,
         }
     try:
         res = requests.post(
@@ -327,6 +329,7 @@ You MUST return a JSON object containing a "results" key with an array of object
     # Call backend
     callback_payload = {"imageId": image_id, "qaResults": results}
     from worker.utils.rate_limit import get_job_costs
+
     costs = get_job_costs()
     if costs:
         total_estimated_cost = sum(c["estimated_cost"] for c in costs)
@@ -337,7 +340,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             "currency": "USD",
             "prompt_tokens": total_prompt_tokens,
             "completion_tokens": total_completion_tokens,
-            "breakdown": costs
+            "breakdown": costs,
         }
     try:
         res = requests.post(
@@ -598,6 +601,7 @@ You MUST return a JSON object containing a "results" key with an array of object
     # Call backend
     callback_payload = {"imageId": image_id, "qaResults": results}
     from worker.utils.rate_limit import get_job_costs
+
     costs = get_job_costs()
     if costs:
         total_estimated_cost = sum(c["estimated_cost"] for c in costs)
@@ -608,7 +612,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             "currency": "USD",
             "prompt_tokens": total_prompt_tokens,
             "completion_tokens": total_completion_tokens,
-            "breakdown": costs
+            "breakdown": costs,
         }
     try:
         res = requests.post(

@@ -2,7 +2,7 @@ import requests
 import cv2
 import numpy as np
 
-from worker.config import CALLBACK_URL, BACKEND_HEADERS, logger
+from worker.config import CALLBACK_URL, BACKEND_HEADERS
 from worker.utils.image import download_image
 from worker.utils.text import detect_language
 from worker.services.ocr import perform_redo_ocr

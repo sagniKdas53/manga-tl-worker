@@ -3,7 +3,6 @@ import gc
 import cv2
 import numpy as np
 import requests
-from PIL import Image
 
 from worker.model_manager import model_manager
 from worker.utils.image import downscale_for_ocr

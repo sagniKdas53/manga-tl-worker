@@ -36,7 +36,7 @@ def classify_region_type(region, panel, image_width, image_height):
     """
     text = region.get("text", "")
     confidence = region.get("confidence") or 1.0
-    rx = region.get("bboxX") or region.get("x", 0)
+    region.get("bboxX") or region.get("x", 0)
     ry = region.get("bboxY") or region.get("y", 0)
     rw = region.get("bboxW") or region.get("width", 1)
     rh = region.get("bboxH") or region.get("height", 1)
@@ -75,7 +75,7 @@ def classify_region_type(region, panel, image_width, image_height):
 
     # --- Narration: very wide region or at panel edge ---
     if panel is not None:
-        px = panel.get("bboxX", 0)
+        panel.get("bboxX", 0)
         py = panel.get("bboxY", 0)
         pw = panel.get("bboxW", 1)
         ph = panel.get("bboxH", 1)

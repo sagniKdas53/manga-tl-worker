@@ -1,10 +1,8 @@
 import io
 import json
 import os
-import base64
 from unittest.mock import patch, MagicMock
 from PIL import Image
-import numpy as np
 
 from worker.handlers.ocr import process_ocr
 

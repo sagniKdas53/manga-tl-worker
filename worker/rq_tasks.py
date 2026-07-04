@@ -7,7 +7,6 @@ from worker.handlers import (
     process_layout,
     process_translation,
     process_region_redo,
-    process_stub,
     process_render,
     process_qa,
     process_qa_re_ocr,

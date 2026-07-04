@@ -1,5 +1,4 @@
 import os
-import json
 import hashlib
 import cv2
 import numpy as np
@@ -9,7 +8,6 @@ from worker.config import (
     YOLO_INPUT_SIZE,
     YOLO_MASK_EROSION,
     YOLO_PINNED_CHECKSUM,
-    YOLO_FALLBACK_MODE,
     logger,
 )
 

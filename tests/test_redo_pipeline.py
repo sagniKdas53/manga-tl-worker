@@ -1,6 +1,4 @@
 import io
-import json
-import os
 from unittest.mock import patch, MagicMock
 from PIL import Image
 

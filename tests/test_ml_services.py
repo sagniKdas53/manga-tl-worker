@@ -1,9 +1,7 @@
-import pytest
 from unittest.mock import patch, MagicMock
 
 from worker.services.layout import (
     classify_region_type,
-    group_conversations,
     bubble_compare,
 )
 from worker.services.ocr import perform_redo_ocr
@@ -38,15 +36,16 @@ def test_perform_redo_ocr_paddleocr(mock_env, mock_model_manager):
     # Mock model manager to return PaddleOCR
     mock_paddle_reader = MagicMock()
     mock_paddle_reader.predict.return_value = {
-        "dt_polys": [[[0,0], [10,0], [10,10], [0,10]]],
+        "dt_polys": [[[0, 0], [10, 0], [10, 10], [0, 10]]],
         "rec_texts": ["Paddle OCR text"],
-        "rec_scores": [0.98]
+        "rec_scores": [0.98],
     }
     mock_model_manager.get_paddle_ocr_reader.return_value = mock_paddle_reader
 
     # Generate valid dummy PNG bytes dynamically using numpy and cv2
     import numpy as np
     import cv2
+
     img = np.zeros((10, 10, 3), dtype=np.uint8)
     _, buf = cv2.imencode(".png", img)
     tiny_png = buf.tobytes()

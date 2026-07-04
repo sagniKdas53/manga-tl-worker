@@ -13,9 +13,7 @@ logging.addLevelName(logging.TRACE, "TRACE")
 def trace(self, message, *args, **kws):
     """Log a message with TRACE level."""
     if self.isEnabledFor(logging.TRACE):
-        self._log(
-            logging.TRACE, message, args, **kws
-        )  # pylint: disable=protected-access
+        self._log(logging.TRACE, message, args, **kws)  # pylint: disable=protected-access
 
 
 logging.Logger.trace = trace
@@ -129,8 +127,12 @@ if QA_MODE == "auto":
 RENDER_CACHE_DIR = os.environ.get("RENDER_CACHE_DIR", "/app/rendered_cache")
 
 # Validate and fetch openrouter costs on startup
-if MODEL_PROVIDER == "openrouter" or os.environ.get("QA_MODEL_PROVIDER", "").strip().lower() == "openrouter":
+if (
+    MODEL_PROVIDER == "openrouter"
+    or os.environ.get("QA_MODEL_PROVIDER", "").strip().lower() == "openrouter"
+):
     from worker.utils.rate_limit import update_model_costs
+
     models_to_check = []
     if PREFERRED_LLM_MODEL:
         models_to_check.append(PREFERRED_LLM_MODEL)
@@ -142,11 +144,12 @@ if MODEL_PROVIDER == "openrouter" or os.environ.get("QA_MODEL_PROVIDER", "").str
     qa_vlm = os.environ.get("QA_VLM_MODEL", "").strip()
     if qa_vlm:
         models_to_check.append(qa_vlm)
-    
+
     if models_to_check:
         try:
             update_model_costs(list(set(models_to_check)))
         except ValueError as e:
             logger.critical(f"Startup failed: {e}")
             import sys
+
             sys.exit(1)

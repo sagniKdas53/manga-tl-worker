@@ -42,7 +42,7 @@ def process_region_redo(job_data):
                 )
             return
         image_info = res.json()
-        storage_path = image_info["storagePath"]
+        image_info["storagePath"]
         ocr_regions = image_info.get("ocrRegions", [])
     except Exception as e:
         if redo_type == "translation":

@@ -2,9 +2,7 @@ import gc
 import cv2
 import numpy as np
 import requests
-from PIL import Image
 import logging
-import re
 import json
 import os
 import base64
@@ -221,8 +219,8 @@ def detect_bubble_contour(img, ocr_x, ocr_y, ocr_w, ocr_h):
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     # OCR center in crop coordinates
-    cx = (ocr_x + ocr_w / 2) - x1
-    cy = (ocr_y + ocr_h / 2) - y1
+    (ocr_x + ocr_w / 2) - x1
+    (ocr_y + ocr_h / 2) - y1
 
     best_contour = None
     best_rect = None
@@ -247,9 +245,7 @@ def detect_bubble_contour(img, ocr_x, ocr_y, ocr_w, ocr_h):
         bx, by, bw, bh = best_rect
         epsilon = 0.002 * cv2.arcLength(best_contour, True)
         simplified = cv2.approxPolyDP(best_contour, epsilon, True)
-        polygon = [
-            [int(x1 + pt[0][0]), int(y1 + pt[0][1])] for pt in simplified
-        ]
+        polygon = [[int(x1 + pt[0][0]), int(y1 + pt[0][1])] for pt in simplified]
         return {
             "x": x1 + bx,
             "y": y1 + by,
@@ -331,8 +327,12 @@ def process_ocr(job_data):
 
             if paddle_ocr_reader is not None:
                 try:
-                    det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det").strip()
-                    rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
+                    det_model = os.environ.get(
+                        "PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det"
+                    ).strip()
+                    rec_model = os.environ.get(
+                        "PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec"
+                    ).strip()
                     print(
                         f"[OCR] Running PaddleOCR ({det_model}/{rec_model}, lang={source_language}).",
                         flush=True,
@@ -378,8 +378,6 @@ def process_ocr(job_data):
                         flush=True,
                     )
                     raise ocr_err
-
-
 
             if not results:
                 print("[OCR] No text regions detected", flush=True)
@@ -641,7 +639,8 @@ def process_ocr(job_data):
                             )
                             erosion_px = YOLO_MASK_EROSION
                             kernel_erode = cv2.getStructuringElement(
-                                cv2.MORPH_ELLIPSE, (2 * erosion_px + 1, 2 * erosion_px + 1)
+                                cv2.MORPH_ELLIPSE,
+                                (2 * erosion_px + 1, 2 * erosion_px + 1),
                             )
                             eroded_split_mask = cv2.erode(
                                 split_mask, kernel_erode, iterations=1
@@ -695,7 +694,12 @@ def process_ocr(job_data):
                     )
 
                     for idx, r_sub in enumerate(merged_unmatched):
-                        rx, ry, rw, rh = r_sub["x"], r_sub["y"], r_sub["width"], r_sub["height"]
+                        rx, ry, rw, rh = (
+                            r_sub["x"],
+                            r_sub["y"],
+                            r_sub["width"],
+                            r_sub["height"],
+                        )
 
                         final_text = r_sub["text"]
 
@@ -713,7 +717,9 @@ def process_ocr(job_data):
                             {
                                 "text": final_text,
                                 "detectedLanguage": (
-                                    detect_language(final_text) if final_text else r_sub["detectedLanguage"]
+                                    detect_language(final_text)
+                                    if final_text
+                                    else r_sub["detectedLanguage"]
                                 ),
                                 "confidence": r_sub["confidence"],
                                 "rotation": 0.0,
@@ -804,7 +810,6 @@ def process_ocr(job_data):
 
                 regions = merge_ocr_regions(regions, reading_direction)
 
-
             panel_regions_map = {}
             unmapped_regions = []
 
@@ -857,7 +862,9 @@ def process_ocr(job_data):
                 else 1.0
             )
 
-            rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
+            rec_model = os.environ.get(
+                "PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec"
+            ).strip()
             callback_payload = {
                 "imageId": image_id,
                 "modelIdentifier": f"MangaOCR/PaddleOCR({rec_model})",

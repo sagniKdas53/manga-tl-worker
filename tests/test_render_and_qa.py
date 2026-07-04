@@ -3,12 +3,11 @@ import json
 import os
 from unittest.mock import patch, MagicMock
 from PIL import Image
+from worker.handlers.render import process_render
+from worker.handlers.qa import process_qa
 
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_CACHE_DIR = os.path.join(TEST_DIR, "test_rendered_cache")
-
-from worker.handlers.render import process_render
-from worker.handlers.qa import process_qa
 
 
 def get_dummy_image_bytes():

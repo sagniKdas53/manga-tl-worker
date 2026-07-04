@@ -62,7 +62,14 @@ FONT_REGISTRY = {
         "bolditalic": "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
     },
 }
-DEFAULT_FONT_FALLBACK_ORDER = ["Comic Neue", "Luckiest Guy", "Bangers", "IPAGothic", "WenQuanYi Micro Hei", "NanumGothic"]
+DEFAULT_FONT_FALLBACK_ORDER = [
+    "Comic Neue",
+    "Luckiest Guy",
+    "Bangers",
+    "IPAGothic",
+    "WenQuanYi Micro Hei",
+    "NanumGothic",
+]
 
 
 def load_font(size, font_name="Comic Neue", bold=False, italic=False):
