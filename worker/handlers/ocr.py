@@ -924,39 +924,6 @@ def process_ocr(job_data):
 
                 regions = merge_ocr_regions(regions, reading_direction)
 
-            regions = merge_ocr_regions(regions, reading_direction)
-
-            if img is not None:
-                for r in regions:
-                    if r.get("maskPolygon"):
-                        continue
-
-                    bubble_box = detect_bubble_contour(
-                        img, r["x"], r["y"], r["width"], r["height"]
-                    )
-                    if not (
-                        bubble_box
-                        and bubble_box["width"] <= r["width"] * 2.5
-                        and bubble_box["height"] <= r["height"] * 2.5
-                    ):
-                        continue
-
-                    mask_polygon = bubble_box.get("maskPolygon")
-                    if not mask_polygon:
-                        continue
-
-                    r["bubbleX"] = bubble_box["x"]
-                    r["bubbleY"] = bubble_box["y"]
-                    r["bubbleWidth"] = bubble_box["width"]
-                    r["bubbleHeight"] = bubble_box["height"]
-                    r["safeTextX"] = bubble_box["x"]
-                    r["safeTextY"] = bubble_box["y"]
-                    r["safeTextW"] = bubble_box["width"]
-                    r["safeTextH"] = bubble_box["height"]
-                    r["maskPolygon"] = json.dumps(mask_polygon)
-                    r["backgroundColor"] = detect_background_color_poly(
-                        img, mask_polygon
-                    )
 
             panel_regions_map = {}
             unmapped_regions = []
