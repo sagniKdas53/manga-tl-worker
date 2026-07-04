@@ -85,12 +85,13 @@ def _merged_mask_polygon(regions, comp):
     return json.dumps(largest)
 
 
-def merge_ocr_regions(regions: list, reading_direction: str = "rtl") -> list:
+def merge_ocr_regions(regions: list, reading_direction: str = "rtl", threshold_ratio: float = None) -> list:
     """Merge OCR line-level detections into logical speech balloon groups.
 
     Args:
         regions: List of OCR region dicts with x, y, width, height, text keys
         reading_direction: 'rtl' or 'ltr'
+        threshold_ratio: Optional override for the merge proximity threshold multiplier
 
     Returns:
         Merged region list with concatenated text and union bounding boxes.
@@ -98,11 +99,12 @@ def merge_ocr_regions(regions: list, reading_direction: str = "rtl") -> list:
     if not regions:
         return []
 
-    # Get configuration threshold
-    try:
-        threshold_ratio = float(os.environ.get("OCR_MERGE_THRESHOLD", "0.50"))
-    except ValueError:
-        threshold_ratio = 0.50
+    # Get configuration threshold if not provided
+    if threshold_ratio is None:
+        try:
+            threshold_ratio = float(os.environ.get("OCR_MERGE_THRESHOLD", "0.50"))
+        except ValueError:
+            threshold_ratio = 0.50
 
     # Compute average height and width to establish relative proximity guidelines
     avg_height = sum(r["height"] for r in regions) / len(regions)

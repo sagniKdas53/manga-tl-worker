@@ -665,43 +665,48 @@ def process_ocr(job_data):
 
                     # Run proximity merging inside the bubble to separate multiple semantic bubbles
                     merged_bubble_regions = merge_ocr_regions(
-                        assigned_frags, reading_direction
+                        assigned_frags, reading_direction, threshold_ratio=2.0
                     )
 
                     for r_sub in merged_bubble_regions:
-                        # 1. Get split polygon for this merged region
-                        r_box = [
-                            r_sub["x"],
-                            r_sub["y"],
-                            r_sub["width"],
-                            r_sub["height"],
-                        ]
-                        poly_pts = get_split_polygon(
-                            bubble_mask, r_box, img_w, img_h, margin=20
-                        )
-                        if not poly_pts:
+                        if len(merged_bubble_regions) == 1:
                             poly_pts = bubble["mask_polygon"]
+                            sp_x, sp_y, sp_w, sp_h = bx, by, bw, bh
+                            sx, sy, sw, sh = bubble["safe_rect"]
+                        else:
+                            # 1. Get split polygon for this merged region
+                            r_box = [
+                                r_sub["x"],
+                                r_sub["y"],
+                                r_sub["width"],
+                                r_sub["height"],
+                            ]
+                            poly_pts = get_split_polygon(
+                                bubble_mask, r_box, img_w, img_h, margin=20
+                            )
+                            if not poly_pts:
+                                poly_pts = bubble["mask_polygon"]
 
-                        # 2. Bounding box of the split polygon
-                        sp_x, sp_y, sp_w, sp_h = cv2.boundingRect(
-                            np.array(poly_pts, dtype=np.int32)
-                        )
+                            # 2. Bounding box of the split polygon
+                            sp_x, sp_y, sp_w, sp_h = cv2.boundingRect(
+                                np.array(poly_pts, dtype=np.int32)
+                            )
 
-                        # 3. Bounding box of the eroded mask (safe area)
-                        split_mask = np.zeros((img_h, img_w), dtype=np.uint8)
-                        cv2.fillPoly(
-                            split_mask, [np.array(poly_pts, dtype=np.int32)], 255
-                        )
-                        erosion_px = YOLO_MASK_EROSION
-                        kernel_erode = cv2.getStructuringElement(
-                            cv2.MORPH_ELLIPSE, (2 * erosion_px + 1, 2 * erosion_px + 1)
-                        )
-                        eroded_split_mask = cv2.erode(
-                            split_mask, kernel_erode, iterations=1
-                        )
-                        if cv2.countNonZero(eroded_split_mask) == 0:
-                            eroded_split_mask = split_mask
-                        sx, sy, sw, sh = cv2.boundingRect(eroded_split_mask)
+                            # 3. Bounding box of the eroded mask (safe area)
+                            split_mask = np.zeros((img_h, img_w), dtype=np.uint8)
+                            cv2.fillPoly(
+                                split_mask, [np.array(poly_pts, dtype=np.int32)], 255
+                            )
+                            erosion_px = YOLO_MASK_EROSION
+                            kernel_erode = cv2.getStructuringElement(
+                                cv2.MORPH_ELLIPSE, (2 * erosion_px + 1, 2 * erosion_px + 1)
+                            )
+                            eroded_split_mask = cv2.erode(
+                                split_mask, kernel_erode, iterations=1
+                            )
+                            if cv2.countNonZero(eroded_split_mask) == 0:
+                                eroded_split_mask = split_mask
+                            sx, sy, sw, sh = cv2.boundingRect(eroded_split_mask)
 
                         # 4. Crop split bubble region and run MangaOCR
                         manga_text = None
