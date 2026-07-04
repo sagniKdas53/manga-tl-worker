@@ -143,51 +143,51 @@ def test_merge_preserves_shared_mask_polygon_and_safe_area():
     assert result[0]["detectionConfidence"] == 0.7
 
 
-def test_merge_v10_split_middle_sample_bubble():
+def test_merge_adjacent_vertical_fragments_without_merging_distant_bubbles():
     regions = [
         {
-            "text": "Bro... are you really gonna do it?",
+            "text": "top bubble",
             "detectedLanguage": "en",
             "confidence": 0.9,
-            "x": 642,
-            "y": 145,
-            "width": 74,
-            "height": 213,
+            "x": 300,
+            "y": 20,
+            "width": 60,
+            "height": 120,
         },
         {
-            "text": "Yep. Get changed and meet me at the rocks over there.",
+            "text": "middle upper",
             "detectedLanguage": "en",
             "confidence": 0.9,
-            "x": 586,
-            "y": 542,
-            "width": 111,
-            "height": 225,
-            "safeTextX": 586,
-            "safeTextY": 542,
-            "safeTextW": 111,
-            "safeTextH": 225,
+            "x": 240,
+            "y": 260,
+            "width": 80,
+            "height": 120,
+            "safeTextX": 240,
+            "safeTextY": 260,
+            "safeTextW": 80,
+            "safeTextH": 120,
         },
         {
-            "text": "We don't get a chance like this often... Fun, right?",
+            "text": "middle lower",
             "detectedLanguage": "en",
             "confidence": 0.9,
-            "x": 496,
-            "y": 798,
-            "width": 112,
-            "height": 198,
-            "safeTextX": 496,
-            "safeTextY": 798,
-            "safeTextW": 112,
-            "safeTextH": 198,
+            "x": 170,
+            "y": 395,
+            "width": 80,
+            "height": 115,
+            "safeTextX": 170,
+            "safeTextY": 395,
+            "safeTextW": 80,
+            "safeTextH": 115,
         },
         {
-            "text": "I'll just make something up for Mom and them.",
+            "text": "bottom bubble",
             "detectedLanguage": "en",
             "confidence": 0.9,
-            "x": 43,
-            "y": 972,
-            "width": 113,
-            "height": 178,
+            "x": 20,
+            "y": 620,
+            "width": 75,
+            "height": 120,
         },
     ]
 
@@ -195,15 +195,12 @@ def test_merge_v10_split_middle_sample_bubble():
 
     assert len(result) == 3
     middle = result[1]
-    assert (
-        middle["text"]
-        == "Yep. Get changed and meet me at the rocks over there. We don't get a chance like this often... Fun, right?"
-    )
-    assert middle["x"] == 496
-    assert middle["y"] == 542
-    assert middle["width"] == 201
-    assert middle["height"] == 454
-    assert middle["safeTextX"] == 496
-    assert middle["safeTextY"] == 542
-    assert middle["safeTextW"] == 201
-    assert middle["safeTextH"] == 454
+    assert middle["text"] == "middle upper middle lower"
+    assert middle["x"] == 170
+    assert middle["y"] == 260
+    assert middle["width"] == 150
+    assert middle["height"] == 250
+    assert middle["safeTextX"] == 170
+    assert middle["safeTextY"] == 260
+    assert middle["safeTextW"] == 150
+    assert middle["safeTextH"] == 250
