@@ -8,11 +8,11 @@ from manga_ocr import MangaOcr
 
 # Configure PaddleOCR environment variables
 try:
-    os.environ["PADDLEX_OFFLINE_MODE"] = "1"
-    os.environ["PADDLE_DISABLE_TELEMETRY"] = "1"
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    os.environ["FLAGS_use_mkldnn"] = "0"
-    os.environ["PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT"] = "0"
+    os.environ.setdefault("PADDLEX_OFFLINE_MODE", "0")
+    os.environ.setdefault("PADDLE_DISABLE_TELEMETRY", "1")
+    os.environ.setdefault("HF_HUB_OFFLINE", "0")
+    os.environ.setdefault("FLAGS_use_mkldnn", "0")
+    os.environ.setdefault("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", "0")
 except Exception as err_env:  # pylint: disable=broad-except
     print(
         f"[Unified Worker] Failed to set PaddleOCR environment: {err_env}", flush=True
