@@ -190,11 +190,11 @@ def perform_redo_ocr(img_crop_bytes, lang):
         except Exception as e:
             print(f"[OCR Redo] Cloud AI OCR failed: {e}", flush=True)
 
-    # Try PP-OCRv5 first — use the lazy-init reader for the region's language
+    # Try local PaddleOCR first — use the lazy-init reader for the region's language
     _redo_paddle_reader = model_manager.get_paddle_ocr_reader(lang)
     if _redo_paddle_reader is not None:
         try:
-            print("[OCR Redo] Trying local PP-OCRv5...", flush=True)
+            print("[OCR Redo] Trying local PaddleOCR...", flush=True)
             nparr = np.frombuffer(img_crop_bytes, np.uint8)
             img_crop = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             del nparr
@@ -210,46 +210,11 @@ def perform_redo_ocr(img_crop_bytes, lang):
                         np.mean([line[2] for line in parsed_crop_results])
                     )
                     print(
-                        f"[OCR Redo] PP-OCRv5 Success: '{text}' (conf={confidence})",
+                        f"[OCR Redo] PaddleOCR Success: '{text}' (conf={confidence})",
                         flush=True,
                     )
                     return text.strip(), confidence
         except Exception as e:
-            print(f"[OCR Redo] PP-OCRv5 failed: {e}", flush=True)
-
-    # Fallback to local MangaOCR if initialized
-    manga_reader = model_manager.get_manga_ocr_reader()
-    if manga_reader is not None:
-        try:
-            print("[OCR Redo] Trying local MangaOCR...", flush=True)
-            nparr = np.frombuffer(img_crop_bytes, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            del nparr
-
-            crop_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            pil_img = Image.fromarray(crop_rgb)
-            manga_text = manga_reader(pil_img)
-            if manga_text and len(manga_text.strip()) > 0:
-                print(f"[OCR Redo] Local MangaOCR Success: '{manga_text}'", flush=True)
-                return manga_text.strip(), 1.0
-        except Exception as e:
-            print(f"[OCR Redo] Local MangaOCR failed: {e}", flush=True)
-
-    # Fallback to EasyOCR
-    easy_reader = model_manager.get_easy_ocr_reader()
-    if easy_reader is not None:
-        try:
-            print("[OCR Redo] Trying local EasyOCR...", flush=True)
-            crop_results = easy_reader.readtext(img_crop_bytes)
-            if crop_results:
-                text = " ".join([res[1] for res in crop_results])
-                confidence = float(np.mean([res[2] for res in crop_results]))
-                print(
-                    f"[OCR Redo] Local EasyOCR Success: '{text}' (conf={confidence})",
-                    flush=True,
-                )
-                return text, confidence
-        except Exception as e:
-            print(f"[OCR Redo] Local EasyOCR failed: {e}", flush=True)
+            print(f"[OCR Redo] PaddleOCR failed: {e}", flush=True)
 
     return "", 0.0

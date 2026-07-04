@@ -331,8 +331,8 @@ def process_ocr(job_data):
 
             if paddle_ocr_reader is not None:
                 try:
-                    det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv5_mobile_det").strip()
-                    rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv5_mobile_rec").strip()
+                    det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det").strip()
+                    rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
                     print(
                         f"[OCR] Running PaddleOCR ({det_model}/{rec_model}, lang={source_language}).",
                         flush=True,
@@ -379,18 +379,7 @@ def process_ocr(job_data):
                     )
                     raise ocr_err
 
-            # Fallback to EasyOCR if results are empty and reader is available
-            easy_reader = (
-                None
-                if disable_local_ocr
-                else model_manager.get_easy_ocr_reader(source_language)
-            )
-            if not results and easy_reader is not None:
-                try:
-                    print("[OCR] Running EasyOCR fallback...", flush=True)
-                    results = easy_reader.readtext(img_bytes)
-                except Exception as ocr_err:
-                    print(f"[OCR] EasyOCR failed: {ocr_err}", flush=True)
+
 
             if not results:
                 print("[OCR] No text regions detected", flush=True)
@@ -399,18 +388,8 @@ def process_ocr(job_data):
             # Force GC to reclaim any large temporary tensors created during inference
             gc.collect()
 
-            # Use the full-resolution original image for MangaOCR crops
-            # (img_decoded may be downscaled, so we use img_original instead)
+            # Use the full-resolution original image
             img = img_original if img_original is not None else img_decoded
-            manga_ocr_reader = (
-                None if disable_local_ocr else model_manager.get_manga_ocr_reader()
-            )
-            if not disable_local_ocr and source_language.lower() in ("ja", "jp") and manga_ocr_reader is None:
-                print(
-                    "[OCR] Warning: Required local MangaOCR model failed to initialize for Japanese refinement. "
-                    "Proceeding without MangaOCR refinement.",
-                    flush=True,
-                )
 
             if img is None:
                 try:
@@ -624,54 +603,6 @@ def process_ocr(job_data):
                     ]
 
                     if not assigned_frags:
-                        # Attempt to run MangaOCR on the empty bubble crop to see if Paddle missed it!
-                        manga_text = None
-                        if manga_ocr_reader is not None:
-                            bx1 = max(0, bx)
-                            by1 = max(0, by)
-                            bx2 = min(img_w, bx + bw)
-                            by2 = min(img_h, by + bh)
-                            if (bx2 - bx1) > 0 and (by2 - by1) > 0:
-                                try:
-                                    crop = img[by1:by2, bx1:bx2]
-                                    crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-                                    pil_img = Image.fromarray(crop_rgb)
-                                    manga_text = manga_ocr_reader(pil_img)
-                                except Exception:
-                                    pass
-                        if manga_text and len(manga_text.strip()) > 0:
-                            print(
-                                f"[OCR] Found text '{manga_text}' in YOLO bubble {b_idx} that PaddleOCR missed!",
-                                flush=True,
-                            )
-                            regions.append(
-                                {
-                                    "text": manga_text,
-                                    "detectedLanguage": detect_language(manga_text),
-                                    "confidence": 0.8,
-                                    "rotation": 0.0,
-                                    "x": bx,
-                                    "y": by,
-                                    "width": bw,
-                                    "height": bh,
-                                    "panelId": None,
-                                    "bubbleReadingOrder": 0,
-                                    "backgroundColor": detect_background_color_poly(
-                                        img, bubble["mask_polygon"]
-                                    ),
-                                    "bubbleX": bx,
-                                    "bubbleY": by,
-                                    "bubbleWidth": bw,
-                                    "bubbleHeight": bh,
-                                    "bubbleId": f"bubble_{b_idx}",
-                                    "detectionConfidence": bubble["confidence"],
-                                    "maskPolygon": json.dumps(bubble["mask_polygon"]),
-                                    "safeTextX": bubble["safe_rect"][0],
-                                    "safeTextY": bubble["safe_rect"][1],
-                                    "safeTextW": bubble["safe_rect"][2],
-                                    "safeTextH": bubble["safe_rect"][3],
-                                }
-                            )
                         continue
 
                     # Run proximity merging inside the bubble to separate multiple semantic bubbles
@@ -719,29 +650,7 @@ def process_ocr(job_data):
                                 eroded_split_mask = split_mask
                             sx, sy, sw, sh = cv2.boundingRect(eroded_split_mask)
 
-                        # 4. Crop split bubble region and run MangaOCR
-                        manga_text = None
-                        is_manga_ocr = False
-                        if manga_ocr_reader is not None:
-                            bx1 = max(0, sp_x)
-                            by1 = max(0, sp_y)
-                            bx2 = min(img_w, sp_x + sp_w)
-                            by2 = min(img_h, sp_y + sp_h)
-                            if (bx2 - bx1) > 0 and (by2 - by1) > 0:
-                                try:
-                                    crop = img[by1:by2, bx1:bx2]
-                                    crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-                                    pil_img = Image.fromarray(crop_rgb)
-                                    manga_text = manga_ocr_reader(pil_img)
-                                    if manga_text and len(manga_text.strip()) > 0:
-                                        is_manga_ocr = True
-                                except Exception as e:
-                                    print(
-                                        f"[OCR] MangaOCR failed on split bubble {b_idx} crop: {e}",
-                                        flush=True,
-                                    )
-
-                        final_text = manga_text if is_manga_ocr else r_sub["text"]
+                        final_text = r_sub["text"]
 
                         # 5. Background color detection using split polygon
                         bg_color = detect_background_color_poly(img, poly_pts)
@@ -752,9 +661,7 @@ def process_ocr(job_data):
                                 "detectedLanguage": (
                                     detect_language(final_text) if final_text else "ja"
                                 ),
-                                "confidence": (
-                                    1.0 if is_manga_ocr else r_sub["confidence"]
-                                ),
+                                "confidence": r_sub["confidence"],
                                 "rotation": 0.0,
                                 "x": r_sub["x"],
                                 "y": r_sub["y"],
@@ -790,28 +697,7 @@ def process_ocr(job_data):
                     for idx, r_sub in enumerate(merged_unmatched):
                         rx, ry, rw, rh = r_sub["x"], r_sub["y"], r_sub["width"], r_sub["height"]
 
-                        # Crop and run MangaOCR for high accuracy vertical/horizontal Japanese OCR
                         final_text = r_sub["text"]
-                        is_manga_ocr = False
-                        if manga_ocr_reader is not None:
-                            rx1 = max(0, rx)
-                            ry1 = max(0, ry)
-                            rx2 = min(img_w, rx + rw)
-                            ry2 = min(img_h, ry + rh)
-                            if (rx2 - rx1) > 0 and (ry2 - ry1) > 0:
-                                try:
-                                    crop = img[ry1:ry2, rx1:rx2]
-                                    crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-                                    pil_img = Image.fromarray(crop_rgb)
-                                    manga_text = manga_ocr_reader(pil_img)
-                                    if manga_text and len(manga_text.strip()) > 0:
-                                        final_text = manga_text
-                                        is_manga_ocr = True
-                                except Exception as e:
-                                    print(
-                                        f"[OCR] MangaOCR failed on unmatched fragment crop: {e}",
-                                        flush=True,
-                                    )
 
                         # Generate tight padded "virtual bubble" mask to allow typesetter inpainting / background cleaning
                         pad = 6
@@ -829,9 +715,7 @@ def process_ocr(job_data):
                                 "detectedLanguage": (
                                     detect_language(final_text) if final_text else r_sub["detectedLanguage"]
                                 ),
-                                "confidence": (
-                                    1.0 if is_manga_ocr else r_sub["confidence"]
-                                ),
+                                "confidence": r_sub["confidence"],
                                 "rotation": 0.0,
                                 "x": rx,
                                 "y": ry,
@@ -863,26 +747,6 @@ def process_ocr(job_data):
                     width, height = int(max(xs) - x), int(max(ys) - y)
 
                     lang = detect_language(text)
-                    is_manga_ocr = False
-                    if (
-                        lang in ("ja", "zh-TW")
-                        and manga_ocr_reader is not None
-                        and img is not None
-                    ):
-                        try:
-                            x1, y1 = max(0, x), max(0, y)
-                            x2, y2 = min(img_w, x + width), min(img_h, y + height)
-                            if (x2 - x1) > 0 and (y2 - y1) > 0:
-                                crop = img[y1:y2, x1:x2]
-                                crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-                                pil_img = Image.fromarray(crop_rgb)
-                                manga_text = manga_ocr_reader(pil_img)
-                                if manga_text and len(manga_text.strip()) > 0:
-                                    text = manga_text
-                                    is_manga_ocr = True
-                        except Exception:
-                            pass
-
                     bubble_box = detect_bubble_contour(img, x, y, width, height)
 
                     use_bubble_contour = (
@@ -913,7 +777,7 @@ def process_ocr(job_data):
                         {
                             "text": text,
                             "detectedLanguage": lang,
-                            "confidence": 1.0 if is_manga_ocr else float(confidence),
+                            "confidence": float(confidence),
                             "rotation": 0.0,
                             "x": x,
                             "y": y,
@@ -993,7 +857,7 @@ def process_ocr(job_data):
                 else 1.0
             )
 
-            rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv5_mobile_rec").strip()
+            rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
             callback_payload = {
                 "imageId": image_id,
                 "modelIdentifier": f"MangaOCR/PaddleOCR({rec_model})",
@@ -1013,6 +877,7 @@ def process_ocr(job_data):
                 print(f"[OCR] Callback status code: {res.status_code}", flush=True)
             except Exception as e:
                 print(f"[OCR] Failed to post callback to backend: {e}", flush=True)
+                raise e
     except Exception as e:
         print(f"[OCR] Error during locked OCR process: {e}", flush=True)
-        return
+        raise e

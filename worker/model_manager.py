@@ -4,7 +4,7 @@ import os
 import gc
 import time
 import threading
-from manga_ocr import MangaOcr
+
 
 # Configure PaddleOCR environment variables
 try:
@@ -46,13 +46,9 @@ class ModelManager:
     def __init__(self):
         # Cached reader instances
         self.paddle_readers = {}
-        self.easy_readers = {}
-        self.manga_reader = None
 
         # Access timestamps
         self.paddle_last_used = {}
-        self.easy_last_used = {}
-        self.manga_last_used = 0.0
 
         self.lock = threading.Lock()
 
@@ -69,8 +65,8 @@ class ModelManager:
                 or self.paddle_readers[paddle_lang] is None
             ):
                 try:
-                    det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv5_mobile_det").strip()
-                    rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv5_mobile_rec").strip()
+                    det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det").strip()
+                    rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
                     ocr_device = os.environ.get("PADDLEOCR_DEVICE", "cpu").strip().lower()
 
                     print(
@@ -110,134 +106,6 @@ class ModelManager:
 
             return self.paddle_readers.get(paddle_lang)
 
-    def get_easy_ocr_reader(self, source_language: str):
-        """Return a cached EasyOCR reader for the given language."""
-        easy_lang = LANG_TO_EASY.get((source_language or "ja").lower(), "ja")
-
-        with self.lock:
-            if (
-                easy_lang not in self.easy_readers
-                or self.easy_readers[easy_lang] is None
-            ):
-                try:
-                    print("[Unified Worker] Importing EasyOCR...", flush=True)
-                    import easyocr  # pylint: disable=import-outside-toplevel
-
-                    langs = [easy_lang]
-                    if easy_lang != "en":
-                        langs.append("en")
-
-                    print(
-                        f"[Unified Worker] Initializing EasyOCR Reader ({', '.join(langs)})...",
-                        flush=True,
-                    )
-                    self.easy_readers[easy_lang] = easyocr.Reader(langs, gpu=False)
-                except Exception as err_init_easy:  # pylint: disable=broad-except
-                    print(
-                        f"[Unified Worker] Failed to initialize EasyOCR for lang '{easy_lang}': {err_init_easy}",
-                        flush=True,
-                    )
-                    self.easy_readers[easy_lang] = None
-
-            if self.easy_readers.get(easy_lang) is not None:
-                self.easy_last_used[easy_lang] = time.time()
-
-            return self.easy_readers.get(easy_lang)
-
-    def get_manga_ocr_reader(self):
-        """Return a cached MangaOCR reader."""
-        with self.lock:
-            if self.manga_reader is None:  # pylint: disable=too-many-nested-blocks
-                try:
-                    print(
-                        "[Unified Worker] Initializing MangaOCR Reader...", flush=True
-                    )
-                    force_cpu = os.environ.get(
-                        "MANGA_OCR_FORCE_CPU", "true"
-                    ).lower() in (
-                        "true",
-                        "1",
-                        "t",
-                    )
-                    use_local = os.environ.get(
-                        "MANGA_OCR_USE_LOCAL", "false"
-                    ).lower() in (
-                        "true",
-                        "1",
-                        "t",
-                    )
-                    model_path = os.environ.get(
-                        "MANGA_OCR_MODEL_PATH", "kha-white/manga-ocr-base"
-                    )
-
-                    pretrained_path = "kha-white/manga-ocr-base"
-                    if use_local:
-                        resolved_path = model_path
-                        if not os.path.exists(
-                            os.path.join(resolved_path, "config.json")
-                        ):
-                            hub_dir = os.path.join(
-                                model_path,
-                                "hub/models--kha-white--manga-ocr-base/snapshots",
-                            )
-                            if os.path.exists(hub_dir):
-                                snapshots = [
-                                    os.path.join(hub_dir, d)
-                                    for d in os.listdir(hub_dir)
-                                    if os.path.isdir(os.path.join(hub_dir, d))
-                                ]
-                                if snapshots:
-                                    for snap in snapshots:
-                                        if os.path.exists(
-                                            os.path.join(snap, "config.json")
-                                        ):
-                                            resolved_path = snap
-                                            break
-                        pretrained_path = resolved_path
-                        print(
-                            f"[Unified Worker] Using local cached MangaOCR model "
-                            f"resolved to: {pretrained_path}",
-                            flush=True,
-                        )
-
-                    if force_cpu:
-                        print(
-                            f"[Unified Worker] Forcing CPU for MangaOCR "
-                            f"(model={pretrained_path})...",
-                            flush=True,
-                        )
-                        self.manga_reader = MangaOcr(
-                            pretrained_model_name_or_path=pretrained_path,
-                            force_cpu=True,
-                        )
-                    else:
-                        try:
-                            self.manga_reader = MangaOcr(
-                                pretrained_model_name_or_path=pretrained_path
-                            )
-                        except Exception as init_err:  # pylint: disable=broad-except
-                            print(
-                                "[Unified Worker] Failed to initialize MangaOCR "
-                                f"with default settings: {init_err}. "
-                                "Retrying with force_cpu=True...",
-                                flush=True,
-                            )
-                            self.manga_reader = MangaOcr(
-                                pretrained_model_name_or_path=pretrained_path,
-                                force_cpu=True,
-                            )
-                except Exception as err_init_manga:  # pylint: disable=broad-except
-                    print(
-                        f"[Unified Worker] Failed to initialize MangaOCR: {err_init_manga}.",
-                        flush=True,
-                    )
-                    self.manga_reader = None
-
-            if self.manga_reader is not None:
-                self.manga_last_used = time.time()
-
-            return self.manga_reader
-
     def unload_expired_models(self, ttl_seconds: float):
         """Unload models that have been idle for longer than *ttl_seconds*."""
         now = time.time()
@@ -257,31 +125,6 @@ class ModelManager:
                         self.paddle_readers[paddle_lang] = None
                         gc.collect()
 
-            # Check EasyOCR readers
-            for easy_lang in list(self.easy_readers.keys()):
-                reader = self.easy_readers[easy_lang]
-                if reader is not None:
-                    last_used = self.easy_last_used.get(easy_lang, 0.0)
-                    if now - last_used > ttl_seconds:
-                        print(
-                            f"[Model Manager] Unloading EasyOCR ({easy_lang}) "
-                            f"due to inactivity (idle for {now - last_used:.1f}s).",
-                            flush=True,
-                        )
-                        self.easy_readers[easy_lang] = None
-                        gc.collect()
-
-            # Check MangaOCR reader
-            if self.manga_reader is not None:
-                if now - self.manga_last_used > ttl_seconds:
-                    print(
-                        f"[Model Manager] Unloading MangaOCR due to inactivity "
-                        f"(idle for {now - self.manga_last_used:.1f}s).",
-                        flush=True,
-                    )
-                    self.manga_reader = None
-                    gc.collect()
-
     def get_loaded_models_status(self, ttl_seconds: float):
         """Return the list of currently loaded models and their eviction timers."""
         now = time.time()
@@ -296,18 +139,6 @@ class ModelManager:
                     loaded.append(
                         f"PaddleOCR:{paddle_lang} (unloads in {int(remaining)}s)"
                     )
-
-            # EasyOCR readers
-            for easy_lang, reader in self.easy_readers.items():
-                if reader is not None:
-                    last_used = self.easy_last_used.get(easy_lang, 0.0)
-                    remaining = max(0.0, ttl_seconds - (now - last_used))
-                    loaded.append(f"EasyOCR:{easy_lang} (unloads in {int(remaining)}s)")
-
-            # MangaOCR
-            if self.manga_reader is not None:
-                remaining = max(0.0, ttl_seconds - (now - self.manga_last_used))
-                loaded.append(f"MangaOCR (unloads in {int(remaining)}s)")
 
             return loaded
 

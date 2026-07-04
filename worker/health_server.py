@@ -8,6 +8,14 @@ from worker.model_manager import model_manager
 # Global reference to start time
 START_TIME = time.time()
 
+# Seeding completion status
+SEEDING_COMPLETE = False
+
+
+def set_seeding_complete(complete: bool):
+    global SEEDING_COMPLETE
+    SEEDING_COMPLETE = complete
+
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -16,6 +24,18 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path in ("/health", "/ping"):
+            global SEEDING_COMPLETE
+            if not SEEDING_COMPLETE:
+                response_data = {
+                    "status": "seeding",
+                    "uptime_seconds": int(time.time() - START_TIME),
+                }
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(response_data).encode("utf-8"))
+                return
+
             # Check Redis connection
             redis_status = "connected"
             try:

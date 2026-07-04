@@ -31,24 +31,31 @@ def test_classify_region_type():
 
 @patch("worker.services.ocr.model_manager")
 @patch("worker.services.ocr.os.environ")
-def test_perform_redo_ocr_easyocr(mock_env, mock_model_manager):
+def test_perform_redo_ocr_paddleocr(mock_env, mock_model_manager):
     # Mock environment to skip cloud
     mock_env.get.side_effect = lambda k, d="": ""
 
-    # Mock model manager to return EasyOCR
-    mock_model_manager.get_paddle_ocr_reader.return_value = None
-    mock_model_manager.get_manga_ocr_reader.return_value = None
+    # Mock model manager to return PaddleOCR
+    mock_paddle_reader = MagicMock()
+    mock_paddle_reader.predict.return_value = {
+        "dt_polys": [[[0,0], [10,0], [10,10], [0,10]]],
+        "rec_texts": ["Paddle OCR text"],
+        "rec_scores": [0.98]
+    }
+    mock_model_manager.get_paddle_ocr_reader.return_value = mock_paddle_reader
 
-    mock_easy_reader = MagicMock()
-    # EasyOCR readtext returns [(bbox, text, conf)]
-    mock_easy_reader.readtext.return_value = [([], "Test OCR text", 0.95)]
-    mock_model_manager.get_easy_ocr_reader.return_value = mock_easy_reader
+    # Generate valid dummy PNG bytes dynamically using numpy and cv2
+    import numpy as np
+    import cv2
+    img = np.zeros((10, 10, 3), dtype=np.uint8)
+    _, buf = cv2.imencode(".png", img)
+    tiny_png = buf.tobytes()
 
-    text, conf = perform_redo_ocr(b"dummy_image_bytes", "en")
+    text, conf = perform_redo_ocr(tiny_png, "ja")
 
-    assert text == "Test OCR text"
-    assert conf == 0.95
-    mock_easy_reader.readtext.assert_called_once_with(b"dummy_image_bytes")
+    assert text == "Paddle OCR text"
+    assert conf == 0.98
+    mock_paddle_reader.predict.assert_called_once()
 
 
 @patch("worker.services.ocr.requests.post")

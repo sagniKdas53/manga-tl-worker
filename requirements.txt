@@ -4,12 +4,8 @@ paddleocr
 paddlepaddle
 numpy
 requests
-torch
-torchvision
 opencv-python-headless
-manga-ocr
 psutil
-easyocr
 onnxruntime
 rq
 pytest
