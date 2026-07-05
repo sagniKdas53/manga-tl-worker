@@ -88,85 +88,124 @@ def update_model_costs(models=None):
     now = time.time()
     one_week = 7 * 24 * 3600
 
-    for model in models:
-        try:
-            model_key = model.lower()
-            cached_data = persisted_costs.get(model_key)
-            if cached_data and (now - cached_data.get("timestamp", 0) < one_week):
-                # Still fresh, just push to Redis
-                redis_client.set(
-                    f"model_cost:{model_key}",
-                    json.dumps(
-                        {
-                            "prompt": cached_data["prompt"],
-                            "completion": cached_data["completion"],
-                        }
-                    ),
+    try:
+        for model in models:
+            try:
+                model_key = model.lower()
+
+                # For free models, initialize price to zero directly
+                is_free = (
+                    ":free" in model_key
+                    or "-free" in model_key
+                    or "free" in model_key
                 )
-                continue
-
-            # Need to fetch
-            base_model = model.split(":")[0]  # Strip any :free suffix for API query
-            url = f"https://openrouter.ai/api/v1/models/{base_model}/endpoints"
-            res = requests.get(url, timeout=10)
-            if res.status_code == 200:
-                data = res.json()
-                endpoints = data.get("data", {}).get("endpoints", [])
-                if not endpoints:
-                    raise ValueError(
-                        f"Model {model} is not available on OpenRouter (no endpoints returned)."
-                    )
-
-                prompt_costs = []
-                completion_costs = []
-                for ep in endpoints:
-                    pricing = ep.get("pricing")
-                    if pricing:
-                        prompt_cost = float(pricing.get("prompt") or 0)
-                        comp_cost = float(pricing.get("completion") or 0)
-                        prompt_costs.append(prompt_cost)
-                        completion_costs.append(comp_cost)
-
-                if prompt_costs and completion_costs:
-                    avg_prompt = sum(prompt_costs) / len(prompt_costs)
-                    avg_comp = sum(completion_costs) / len(completion_costs)
-
+                if is_free:
                     cost_data = {
-                        "prompt": avg_prompt,
-                        "completion": avg_comp,
-                        "prompt_per_million": avg_prompt * 1e6,
-                        "completion_per_million": avg_comp * 1e6,
-                        "prompt_display": f"${(avg_prompt * 1e6):.4f}/M tokens",
-                        "completion_display": f"${(avg_comp * 1e6):.4f}/M tokens",
+                        "prompt": 0.0,
+                        "completion": 0.0,
+                        "prompt_per_million": 0.0,
+                        "completion_per_million": 0.0,
+                        "prompt_display": "$0.0000/M tokens",
+                        "completion_display": "$0.0000/M tokens",
                         "timestamp": now,
                     }
                     persisted_costs[model_key] = cost_data
                     redis_client.set(
                         f"model_cost:{model_key}",
-                        json.dumps({"prompt": avg_prompt, "completion": avg_comp}),
+                        json.dumps({"prompt": 0.0, "completion": 0.0}),
                     )
-                    logger.info(
-                        f"Updated average cost for {model}: Prompt=${(avg_prompt * 1e6):.4f}/M, Completion=${(avg_comp * 1e6):.4f}/M"
-                    )
-            elif res.status_code == 404:
-                raise ValueError(
-                    f"Model {model} is not available on OpenRouter (404 Not Found)."
-                )
-            else:
-                logger.warning(
-                    f"Failed to fetch endpoints for {model}: {res.status_code}"
-                )
-        except ValueError as ve:
-            raise ve
-        except Exception as e:
-            logger.error(f"Error fetching cost for {model}: {e}")
+                    logger.info(f"Initialized cost for free model {model}: $0.00")
+                    continue
 
-    # Save persisted costs
-    try:
-        with open(COSTS_FILE, "w") as f:
-            json.dump(persisted_costs, f, indent=2)
-    except Exception as e:
-        logger.warning(f"Failed to write {COSTS_FILE}: {e}")
+                cached_data = persisted_costs.get(model_key)
+                if cached_data and (now - cached_data.get("timestamp", 0) < one_week):
+                    # Still fresh, just push to Redis
+                    redis_client.set(
+                        f"model_cost:{model_key}",
+                        json.dumps(
+                            {
+                                "prompt": cached_data["prompt"],
+                                "completion": cached_data["completion"],
+                            }
+                        ),
+                    )
+                    continue
+
+                # Need to fetch
+                # Try fetching with full name first (especially for models with no paid/base version)
+                url = f"https://openrouter.ai/api/v1/models/{model}/endpoints"
+                res = requests.get(url, timeout=10)
+                endpoints = []
+                if res.status_code == 200:
+                    endpoints = res.json().get("data", {}).get("endpoints", [])
+
+                # Fall back to stripping :free suffix if no endpoints found
+                if not endpoints and ":" in model:
+                    base_model = model.split(":")[0]
+                    url = f"https://openrouter.ai/api/v1/models/{base_model}/endpoints"
+                    res_fallback = requests.get(url, timeout=10)
+                    if res_fallback.status_code == 200:
+                        res = res_fallback
+                        endpoints = res.json().get("data", {}).get("endpoints", [])
+                    else:
+                        res = res_fallback
+
+                if res.status_code == 200:
+                    if not endpoints:
+                        raise ValueError(
+                            f"Model {model} is not available on OpenRouter (no endpoints returned)."
+                        )
+
+                    prompt_costs = []
+                    completion_costs = []
+                    for ep in endpoints:
+                        pricing = ep.get("pricing")
+                        if pricing:
+                            prompt_cost = float(pricing.get("prompt") or 0)
+                            comp_cost = float(pricing.get("completion") or 0)
+                            prompt_costs.append(prompt_cost)
+                            completion_costs.append(comp_cost)
+
+                    if prompt_costs and completion_costs:
+                        avg_prompt = sum(prompt_costs) / len(prompt_costs)
+                        avg_comp = sum(completion_costs) / len(completion_costs)
+
+                        cost_data = {
+                            "prompt": avg_prompt,
+                            "completion": avg_comp,
+                            "prompt_per_million": avg_prompt * 1e6,
+                            "completion_per_million": avg_comp * 1e6,
+                            "prompt_display": f"${(avg_prompt * 1e6):.4f}/M tokens",
+                            "completion_display": f"${(avg_comp * 1e6):.4f}/M tokens",
+                            "timestamp": now,
+                        }
+                        persisted_costs[model_key] = cost_data
+                        redis_client.set(
+                            f"model_cost:{model_key}",
+                            json.dumps({"prompt": avg_prompt, "completion": avg_comp}),
+                        )
+                        logger.info(
+                            f"Updated average cost for {model}: Prompt=${(avg_prompt * 1e6):.4f}/M, Completion=${(avg_comp * 1e6):.4f}/M"
+                        )
+                elif res.status_code == 404:
+                    raise ValueError(
+                        f"Model {model} is not available on OpenRouter (404 Not Found)."
+                    )
+                else:
+                    logger.warning(
+                        f"Failed to fetch endpoints for {model}: {res.status_code}"
+                    )
+            except ValueError as ve:
+                raise ve
+            except Exception as e:
+                logger.error(f"Error fetching cost for {model}: {e}")
+    finally:
+        # Save persisted costs
+        try:
+            with open(COSTS_FILE, "w") as f:
+                json.dump(persisted_costs, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to write {COSTS_FILE}: {e}")
 
 
 def get_job_costs():
