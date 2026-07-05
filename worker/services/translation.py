@@ -411,6 +411,8 @@ def try_cloud_ai(
                         "strict": True,
                     },
                 }
+                if provider == "openrouter":
+                    payload["plugins"] = [{"id": "response-healing"}]
 
     max_retries = 3
     base_backoff = 2.0
@@ -566,6 +568,8 @@ def try_cloud_ai_vision(
                         "strict": True,
                     },
                 }
+                if provider == "openrouter":
+                    payload["plugins"] = [{"id": "response-healing"}]
 
     max_retries = 3
     base_backoff = 2.0
