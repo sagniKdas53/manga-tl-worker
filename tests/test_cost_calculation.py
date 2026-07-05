@@ -105,5 +105,5 @@ def test_update_model_costs(mock_open, mock_exists, mock_get, mock_redis):
         # Check redis set call
         mock_redis.set.assert_called_with(
             "model_cost:google/gemini-3.1-flash-lite",
-            json.dumps({"prompt": 0.25, "completion": 1.50}),
+            json.dumps({"prompt": 0.00000025, "completion": 0.00000150}),
         )

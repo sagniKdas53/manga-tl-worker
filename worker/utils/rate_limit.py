@@ -52,6 +52,22 @@ def reset_job_costs():
     _local_data.costs = []
 
 
+def format_cost(cost):
+    """
+    Format cost in a human-friendly format.
+    e.g. $0.00, $0.0045, $0.000001, <$0.000001 ($2.30e-07)
+    """
+    if cost is None:
+        return "N/A"
+    if cost == 0.0:
+        return "$0.00"
+    if cost >= 0.01:
+        return f"${cost:.4f}"
+    if cost >= 0.0001:
+        return f"${cost:.6f}"
+    return f"${cost:.2e}"
+
+
 def update_model_costs(models=None):
     """
     Fetch average cost per token from OpenRouter for given models.
@@ -106,8 +122,8 @@ def update_model_costs(models=None):
                 for ep in endpoints:
                     pricing = ep.get("pricing")
                     if pricing:
-                        prompt_cost = float(pricing.get("prompt") or 0) * 1e6
-                        comp_cost = float(pricing.get("completion") or 0) * 1e6
+                        prompt_cost = float(pricing.get("prompt") or 0)
+                        comp_cost = float(pricing.get("completion") or 0)
                         prompt_costs.append(prompt_cost)
                         completion_costs.append(comp_cost)
 
@@ -118,6 +134,10 @@ def update_model_costs(models=None):
                     cost_data = {
                         "prompt": avg_prompt,
                         "completion": avg_comp,
+                        "prompt_per_million": avg_prompt * 1e6,
+                        "completion_per_million": avg_comp * 1e6,
+                        "prompt_display": f"${(avg_prompt * 1e6):.4f}/M tokens",
+                        "completion_display": f"${(avg_comp * 1e6):.4f}/M tokens",
                         "timestamp": now,
                     }
                     persisted_costs[model_key] = cost_data
@@ -126,7 +146,7 @@ def update_model_costs(models=None):
                         json.dumps({"prompt": avg_prompt, "completion": avg_comp}),
                     )
                     logger.info(
-                        f"Updated average cost for {model}: Prompt=${avg_prompt:.2f}/M, Completion=${avg_comp:.2f}/M"
+                        f"Updated average cost for {model}: Prompt=${(avg_prompt * 1e6):.4f}/M, Completion=${(avg_comp * 1e6):.4f}/M"
                     )
             elif res.status_code == 404:
                 raise ValueError(
@@ -235,18 +255,18 @@ def estimate_cost(model, prompt_tokens, completion_tokens, provider=None):
 
     if in_rate == 0.0 and out_rate == 0.0:
         if "deepseek-v4-pro" in model_lower:
-            in_rate = 0.435
-            out_rate = 0.87
+            in_rate = 0.435 / 1_000_000.0
+            out_rate = 0.87 / 1_000_000.0
         elif "gemini-2.5-flash" in model_lower:
             if provider_lower == "gemini":
-                in_rate = 0.075
-                out_rate = 0.30
+                in_rate = 0.075 / 1_000_000.0
+                out_rate = 0.30 / 1_000_000.0
             else:  # OpenRouter
-                in_rate = 0.30
-                out_rate = 2.50
+                in_rate = 0.30 / 1_000_000.0
+                out_rate = 2.50 / 1_000_000.0
         elif "claude-3-5-sonnet" in model_lower:
-            in_rate = 3.0
-            out_rate = 15.0
+            in_rate = 3.0 / 1_000_000.0
+            out_rate = 15.0 / 1_000_000.0
         else:
             # Pricing not available or calculatable
             cost_info = {
@@ -262,9 +282,7 @@ def estimate_cost(model, prompt_tokens, completion_tokens, provider=None):
             _local_data.costs.append(cost_info)
             return None
 
-    cost = (prompt_tokens * in_rate / 1_000_000.0) + (
-        completion_tokens * out_rate / 1_000_000.0
-    )
+    cost = (prompt_tokens * in_rate) + (completion_tokens * out_rate)
 
     cost_info = {
         "estimated_cost": cost,

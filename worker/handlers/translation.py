@@ -319,7 +319,7 @@ def process_translation(job_data):
         )
 
     callback_payload = {"imageId": image_id, "translations": translations}
-    from worker.utils.rate_limit import get_job_costs
+    from worker.utils.rate_limit import get_job_costs, format_cost
 
     costs = get_job_costs()
     if costs:
@@ -343,12 +343,7 @@ def process_translation(job_data):
             cost_payload["estimated_cost"] = total_estimated_cost
         callback_payload["cost"] = cost_payload
 
-        if total_estimated_cost is None:
-            cost_str = "N/A"
-        elif total_estimated_cost == 0.0:
-            cost_str = "$0.000"
-        else:
-            cost_str = f"${total_estimated_cost:.5f}"
+        cost_str = format_cost(total_estimated_cost)
 
         logger.info(
             f"{req_prefix}Translation job estimated cost: {cost_str} "

@@ -124,7 +124,7 @@ def _auto_pass_all(job_data):
 
     # Call backend
     callback_payload = {"imageId": image_id, "qaResults": results}
-    from worker.utils.rate_limit import get_job_costs
+    from worker.utils.rate_limit import get_job_costs, format_cost
 
     costs = get_job_costs()
     if costs:
@@ -148,12 +148,7 @@ def _auto_pass_all(job_data):
             cost_payload["estimated_cost"] = total_estimated_cost
         callback_payload["cost"] = cost_payload
 
-        if total_estimated_cost is None:
-            cost_str = "N/A"
-        elif total_estimated_cost == 0.0:
-            cost_str = "$0.000"
-        else:
-            cost_str = f"${total_estimated_cost:.5f}"
+        cost_str = format_cost(total_estimated_cost)
 
         logger.info(
             f"[QA] Auto-pass QA job estimated cost: {cost_str} "
@@ -333,7 +328,7 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     # Call backend
     callback_payload = {"imageId": image_id, "qaResults": results}
-    from worker.utils.rate_limit import get_job_costs
+    from worker.utils.rate_limit import get_job_costs, format_cost
 
     costs = get_job_costs()
     if costs:
@@ -357,12 +352,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             cost_payload["estimated_cost"] = total_estimated_cost
         callback_payload["cost"] = cost_payload
 
-        if total_estimated_cost is None:
-            cost_str = "N/A"
-        elif total_estimated_cost == 0.0:
-            cost_str = "$0.000"
-        else:
-            cost_str = f"${total_estimated_cost:.5f}"
+        cost_str = format_cost(total_estimated_cost)
 
         logger.info(
             f"[QA] LLM QA job estimated cost: {cost_str} "
@@ -609,7 +599,7 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     # Call backend
     callback_payload = {"imageId": image_id, "qaResults": results}
-    from worker.utils.rate_limit import get_job_costs
+    from worker.utils.rate_limit import get_job_costs, format_cost
 
     costs = get_job_costs()
     if costs:
@@ -633,12 +623,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             cost_payload["estimated_cost"] = total_estimated_cost
         callback_payload["cost"] = cost_payload
 
-        if total_estimated_cost is None:
-            cost_str = "N/A"
-        elif total_estimated_cost == 0.0:
-            cost_str = "$0.000"
-        else:
-            cost_str = f"${total_estimated_cost:.5f}"
+        cost_str = format_cost(total_estimated_cost)
 
         logger.info(
             f"[QA] VLM QA job estimated cost: {cost_str} "
