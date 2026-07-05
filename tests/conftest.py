@@ -3,7 +3,7 @@ import unittest.mock as mock
 
 # Try to import cv2, if it fails due to the gapi text error, mock it
 try:
-    import cv2
+    pass
 except Exception:
     pass
 
