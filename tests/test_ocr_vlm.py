@@ -19,18 +19,20 @@ def get_dummy_image_bytes():
 @patch("worker.handlers.ocr.try_cloud_ai_vision")
 @patch("worker.handlers.ocr.requests.get")
 @patch("worker.handlers.ocr.requests.post")
+@patch("worker.handlers.ocr.OCR_CONFIG")
 @patch.dict(
     os.environ,
     {
         "DISABLE_LOCAL_OCR": "true",
-        "MODEL_PROVIDER": "gemini",
-        "GEMINI_API_KEY": "fake-gemini-key",
-        "PREFERRED_VLM_MODEL": "gemini-1.5-flash",
     },
 )
 def test_process_ocr_vlm_gemini(
-    mock_post, mock_get, mock_try_cloud_vlm, mock_detect_yolo, mock_download
+    mock_ocr_config, mock_post, mock_get, mock_try_cloud_vlm, mock_detect_yolo, mock_download
 ):
+    mock_ocr_config.provider = "gemini"
+    mock_ocr_config.resolve_key.return_value = "fake-gemini-key"
+    mock_ocr_config.vlm_model = "gemini-1.5-flash"
+
     # Setup mocks
     mock_download.return_value = get_dummy_image_bytes()
     mock_detect_yolo.return_value = [
@@ -85,18 +87,20 @@ def test_process_ocr_vlm_gemini(
 @patch("worker.handlers.ocr.try_cloud_ai_vision")
 @patch("worker.handlers.ocr.requests.get")
 @patch("worker.handlers.ocr.requests.post")
+@patch("worker.handlers.ocr.OCR_CONFIG")
 @patch.dict(
     os.environ,
     {
         "DISABLE_LOCAL_OCR": "true",
-        "MODEL_PROVIDER": "openrouter",
-        "OPENROUTER_API_KEY": "fake-openrouter-key",
-        "PREFERRED_VLM_MODEL": "qwen/qwen3-vl-8b-instruct",
     },
 )
 def test_process_ocr_vlm_openrouter(
-    mock_post, mock_get, mock_try_cloud_vlm, mock_detect_yolo, mock_download
+    mock_ocr_config, mock_post, mock_get, mock_try_cloud_vlm, mock_detect_yolo, mock_download
 ):
+    mock_ocr_config.provider = "openrouter"
+    mock_ocr_config.resolve_key.return_value = "fake-openrouter-key"
+    mock_ocr_config.vlm_model = "qwen/qwen3-vl-8b-instruct"
+
     mock_download.return_value = get_dummy_image_bytes()
     mock_detect_yolo.return_value = [
         {
@@ -139,18 +143,20 @@ def test_process_ocr_vlm_openrouter(
 @patch("worker.handlers.ocr.try_cloud_ai_vision")
 @patch("worker.handlers.ocr.requests.get")
 @patch("worker.handlers.ocr.requests.post")
+@patch("worker.handlers.ocr.OCR_CONFIG")
 @patch.dict(
     os.environ,
     {
         "DISABLE_LOCAL_OCR": "true",
-        "MODEL_PROVIDER": "nvidia",
-        "NVIDIA_API_KEY": "fake-nvidia-key",
-        "PREFERRED_VLM_MODEL": "nvidia/nemotron-nano-12b-v2-vl",
     },
 )
 def test_process_ocr_vlm_nvidia(
-    mock_post, mock_get, mock_try_cloud_vlm, mock_detect_yolo, mock_download
+    mock_ocr_config, mock_post, mock_get, mock_try_cloud_vlm, mock_detect_yolo, mock_download
 ):
+    mock_ocr_config.provider = "nvidia"
+    mock_ocr_config.resolve_key.return_value = "fake-nvidia-key"
+    mock_ocr_config.vlm_model = "nvidia/nemotron-nano-12b-v2-vl"
+
     mock_download.return_value = get_dummy_image_bytes()
     mock_detect_yolo.return_value = [
         {
@@ -192,19 +198,16 @@ def test_process_ocr_vlm_nvidia(
 @patch("worker.handlers.ocr.try_cloud_ai_vision")
 @patch("worker.handlers.ocr.requests.get")
 @patch("worker.handlers.ocr.requests.post")
+@patch("worker.handlers.ocr.OCR_CONFIG")
 @patch.dict(
     os.environ,
     {
         "DISABLE_LOCAL_OCR": "true",
-        "MODEL_PROVIDER": "",
-        "API_KEY": "",
-        "OPENROUTER_API_KEY": "",
-        "GEMINI_API_KEY": "",
-        "NVIDIA_API_KEY": "",
         "LOCAL_VLM_MODEL": "local-vlm-model",
     },
 )
 def test_process_ocr_vlm_local_fallback(
+    mock_ocr_config,
     mock_post,
     mock_get,
     mock_try_cloud_vlm,
@@ -212,6 +215,10 @@ def test_process_ocr_vlm_local_fallback(
     mock_detect_yolo,
     mock_download,
 ):
+    mock_ocr_config.provider = ""
+    mock_ocr_config.resolve_key.return_value = ""
+    mock_ocr_config.vlm_model = ""
+
     mock_download.return_value = get_dummy_image_bytes()
     mock_detect_yolo.return_value = [
         {

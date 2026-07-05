@@ -81,10 +81,56 @@ YOLO_PINNED_CHECKSUM = (
 YOLO_FALLBACK_MODE = os.environ.get("YOLO_FALLBACK_MODE", "opencv").lower()
 
 # Model Configuration
-MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "").lower().strip()
-API_KEY = os.environ.get("API_KEY", "").strip()
-PREFERRED_LLM_MODEL = os.environ.get("PREFERRED_LLM_MODEL", "").strip()
-PREFERRED_VLM_MODEL = os.environ.get("PREFERRED_VLM_MODEL", "").strip()
+class ModelConfig:
+    def __init__(self, provider_env: str, llm_env: str = "", vlm_env: str = "", llm_list_env: str = "", vlm_list_env: str = ""):
+        self.provider = os.environ.get(provider_env, "").lower().strip()
+        self.llm_model = os.environ.get(llm_env, "").strip()
+        self.vlm_model = os.environ.get(vlm_env, "").strip()
+        
+        llm_list_raw = os.environ.get(llm_list_env, "").strip() if llm_list_env else ""
+        self.llm_model_list = [x.strip() for x in llm_list_raw.split(",") if x.strip()] if llm_list_raw else []
+        
+        vlm_list_raw = os.environ.get(vlm_list_env, "").strip() if vlm_list_env else ""
+        self.vlm_model_list = [x.strip() for x in vlm_list_raw.split(",") if x.strip()] if vlm_list_raw else []
+
+    def resolve_key(self, provider: str = None) -> str:
+        prov = (provider or self.provider or "").lower().strip()
+        if not prov:
+            return ""
+        env_var_map = {
+            "openrouter": ["OPENROUTER_API_KEY", "API_KEY"],
+            "gemini": ["GEMINI_API_KEY", "API_KEY"],
+            "nvidia": ["NVIDIA_API_KEY", "API_KEY"],
+            "anthropic": ["ANTHROPIC_API_KEY", "API_KEY"],
+            "openai": ["OPENAI_API_KEY", "API_KEY"],
+        }
+        candidates = env_var_map.get(prov, ["API_KEY"])
+        for var in candidates:
+            val = os.environ.get(var, "").strip()
+            if val:
+                return val
+        return ""
+
+OCR_CONFIG = ModelConfig(
+    provider_env="OCR_MODEL_PROVIDER",
+    vlm_env="OCR_VLM_MODEL",
+    vlm_list_env="OCR_VLM_MODEL_LIST"
+)
+
+TL_CONFIG = ModelConfig(
+    provider_env="TL_MODEL_PROVIDER",
+    llm_env="TL_LLM_MODEL",
+    llm_list_env="TL_LLM_MODEL_LIST"
+)
+
+QA_CONFIG = ModelConfig(
+    provider_env="QA_MODEL_PROVIDER",
+    llm_env="QA_LLM_MODEL",
+    vlm_env="QA_VLM_MODEL",
+    llm_list_env="QA_LLM_MODEL_LIST",
+    vlm_list_env="QA_VLM_MODEL_LIST"
+)
+
 LOCAL_LLM_PROVIDER = os.environ.get("LOCAL_LLM_PROVIDER", "").strip()
 LOCAL_LLM_ENDPOINT = os.environ.get("LOCAL_LLM_ENDPOINT", "").strip()
 LOCAL_LLM_MODEL = os.environ.get("LOCAL_LLM_MODEL", "").strip()
@@ -110,15 +156,15 @@ if QA_MODE == "auto":
 
     # Detect VLM capability (Cloud VLM or effective local VLM)
     has_vlm = bool(
-        os.environ.get("QA_VLM_MODEL", "").strip()
-        or PREFERRED_VLM_MODEL
+        QA_CONFIG.vlm_model
+        or OCR_CONFIG.vlm_model
         or effective_local_vlm
     )
 
     # Detect LLM capability (Cloud provider or effective local LLM)
     if has_vlm:
         QA_MODE = "vlm"
-    elif MODEL_PROVIDER or effective_local_llm:
+    elif QA_CONFIG.provider or effective_local_llm:
         QA_MODE = "llm"
     else:
         QA_MODE = "none"
@@ -128,22 +174,21 @@ RENDER_CACHE_DIR = os.environ.get("RENDER_CACHE_DIR", "/app/rendered_cache")
 
 # Validate and fetch openrouter costs on startup
 if (
-    MODEL_PROVIDER == "openrouter"
-    or os.environ.get("QA_MODEL_PROVIDER", "").strip().lower() == "openrouter"
+    OCR_CONFIG.provider == "openrouter"
+    or TL_CONFIG.provider == "openrouter"
+    or QA_CONFIG.provider == "openrouter"
 ):
     from worker.utils.rate_limit import update_model_costs
 
     models_to_check = []
-    if PREFERRED_LLM_MODEL:
-        models_to_check.append(PREFERRED_LLM_MODEL)
-    if PREFERRED_VLM_MODEL:
-        models_to_check.append(PREFERRED_VLM_MODEL)
-    qa_llm = os.environ.get("QA_LLM_MODEL", "").strip()
-    if qa_llm:
-        models_to_check.append(qa_llm)
-    qa_vlm = os.environ.get("QA_VLM_MODEL", "").strip()
-    if qa_vlm:
-        models_to_check.append(qa_vlm)
+    if TL_CONFIG.llm_model:
+        models_to_check.append(TL_CONFIG.llm_model)
+    if OCR_CONFIG.vlm_model:
+        models_to_check.append(OCR_CONFIG.vlm_model)
+    if QA_CONFIG.llm_model:
+        models_to_check.append(QA_CONFIG.llm_model)
+    if QA_CONFIG.vlm_model:
+        models_to_check.append(QA_CONFIG.vlm_model)
 
     if models_to_check:
         try:

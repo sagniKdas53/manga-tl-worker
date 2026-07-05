@@ -5,7 +5,12 @@ from worker.services.translation import translate_batch_llm
 
 
 @patch("worker.services.translation.try_cloud_ai")
-def test_translate_batch_llm_handles_qa_feedback(mock_try_cloud_ai):
+@patch("worker.config.TL_CONFIG")
+def test_translate_batch_llm_handles_qa_feedback(mock_tl_config, mock_try_cloud_ai):
+    mock_tl_config.provider = "openrouter"
+    mock_tl_config.resolve_key.return_value = "fake-key"
+    mock_tl_config.llm_model = ""
+
     # Set up mock response
     mock_try_cloud_ai.return_value = json.dumps(
         {
@@ -31,10 +36,6 @@ def test_translate_batch_llm_handles_qa_feedback(mock_try_cloud_ai):
             "qaFeedback": "It should be more polite.",
         }
     ]
-
-    # Set up environment variables to trigger try_cloud_ai
-    os.environ["MODEL_PROVIDER"] = "openrouter"
-    os.environ["API_KEY"] = "fake-key"
 
     res = translate_batch_llm(unmatched_regions, context_str="", response_schema=None)
     assert res is not None

@@ -14,6 +14,7 @@ from worker.config import (
     logger,
     YOLO_MASK_EROSION,
     redis_client,
+    OCR_CONFIG,
 )
 from worker.model_manager import model_manager
 from worker.utils.image import downscale_for_ocr, calculate_overlap_area, download_image
@@ -410,17 +411,8 @@ def process_ocr(job_data):
                     f"[OCR] VLM OCR Mode active for {len(detected_bubbles)} bubbles.",
                     flush=True,
                 )
-                provider = os.environ.get("MODEL_PROVIDER", "").lower().strip()
-                api_key = os.environ.get("API_KEY", "").strip()
-                openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip() or (
-                    api_key if provider == "openrouter" else ""
-                )
-                gemini_key = os.environ.get("GEMINI_API_KEY", "").strip() or (
-                    api_key if provider == "gemini" else ""
-                )
-                nvidia_key = os.environ.get("NVIDIA_API_KEY", "").strip() or (
-                    api_key if provider == "nvidia" else ""
-                )
+                provider = OCR_CONFIG.provider
+                api_key = OCR_CONFIG.resolve_key()
 
                 for b_idx, bubble in enumerate(detected_bubbles):
                     bx, by, bw, bh = bubble["bbox"]
@@ -450,42 +442,42 @@ def process_ocr(job_data):
                     }
 
                     res_text = None
-                    if provider == "openrouter" and openrouter_key:
+                    if provider == "openrouter" and api_key:
                         vlm_model = (
-                            os.environ.get("PREFERRED_VLM_MODEL", "").strip()
+                            OCR_CONFIG.vlm_model
                             or "qwen/qwen3-vl-8b-instruct"
                         )
                         res_text = try_cloud_ai_vision(
                             "openrouter",
-                            openrouter_key,
+                            api_key,
                             vlm_model,
                             user_prompt,
                             base64_image,
                             schema,
                             system_prompt=sys_prompt,
                         )
-                    elif provider == "gemini" and gemini_key:
+                    elif provider == "gemini" and api_key:
                         vlm_model = (
-                            os.environ.get("PREFERRED_VLM_MODEL", "").strip()
+                            OCR_CONFIG.vlm_model
                             or "gemini-1.5-flash"
                         )
                         res_text = try_cloud_ai_vision(
                             "gemini",
-                            gemini_key,
+                            api_key,
                             vlm_model,
                             user_prompt,
                             base64_image,
                             schema,
                             system_prompt=sys_prompt,
                         )
-                    elif provider == "nvidia" and nvidia_key:
+                    elif provider == "nvidia" and api_key:
                         vlm_model = (
-                            os.environ.get("PREFERRED_VLM_MODEL", "").strip()
+                            OCR_CONFIG.vlm_model
                             or "nvidia/nemotron-nano-12b-v2-vl"
                         )
                         res_text = try_cloud_ai_vision(
                             "nvidia",
-                            nvidia_key,
+                            api_key,
                             vlm_model,
                             user_prompt,
                             base64_image,

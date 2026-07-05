@@ -12,6 +12,7 @@ from worker.config import (
     logger,
     QA_MODE,
     redis_client,
+    QA_CONFIG,
 )
 from worker.utils.image import download_image
 from worker.services.translation import (
@@ -208,31 +209,14 @@ Region Metadata:
 
 You MUST return a JSON object containing a "results" key with an array of objects conforming to the requested schema. No other text."""
 
-    provider = (
-        os.environ.get("QA_MODEL_PROVIDER", "").strip()
-        or os.environ.get("MODEL_PROVIDER", "").strip()
-    )
-    provider = provider.lower()
-    api_key = os.environ.get("API_KEY", "").strip()
-
-    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip() or (
-        api_key if provider == "openrouter" else ""
-    )
-    gemini_key = os.environ.get("GEMINI_API_KEY", "").strip() or (
-        api_key if provider == "gemini" else ""
-    )
-    nvidia_key = os.environ.get("NVIDIA_API_KEY", "").strip() or (
-        api_key if provider == "nvidia" else ""
-    )
+    provider = QA_CONFIG.provider
+    api_key = QA_CONFIG.resolve_key()
 
     qa_response = None
 
     def attempt_llm(prov):
-        user_model = (
-            os.environ.get("QA_LLM_MODEL", "").strip()
-            or os.environ.get("PREFERRED_LLM_MODEL", "").strip()
-        )
-        if prov == "openrouter" and openrouter_key:
+        user_model = QA_CONFIG.llm_model
+        if prov == "openrouter" and api_key:
             llm_model = (
                 user_model
                 if prov == provider and user_model
@@ -240,21 +224,21 @@ You MUST return a JSON object containing a "results" key with an array of object
             )
             try:
                 return try_cloud_ai(
-                    "openrouter", openrouter_key, llm_model, prompt, QA_JSON_SCHEMA
+                    "openrouter", api_key, llm_model, prompt, QA_JSON_SCHEMA
                 )
             except Exception as e:
                 print(f"[QA] LLM QA via OpenRouter failed: {e}", flush=True)
-        elif prov == "gemini" and gemini_key:
+        elif prov == "gemini" and api_key:
             llm_model = (
                 user_model if prov == provider and user_model else "gemini-1.5-pro"
             )
             try:
                 return try_cloud_ai(
-                    "gemini", gemini_key, llm_model, prompt, QA_JSON_SCHEMA
+                    "gemini", api_key, llm_model, prompt, QA_JSON_SCHEMA
                 )
             except Exception as e:
                 print(f"[QA] LLM QA via Gemini failed: {e}", flush=True)
-        elif prov == "nvidia" and nvidia_key:
+        elif prov == "nvidia" and api_key:
             llm_model = (
                 user_model
                 if prov == provider and user_model
@@ -262,7 +246,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             )
             try:
                 return try_cloud_ai(
-                    "nvidia", nvidia_key, llm_model, prompt, QA_JSON_SCHEMA
+                    "nvidia", api_key, llm_model, prompt, QA_JSON_SCHEMA
                 )
             except Exception as e:
                 print(f"[QA] LLM QA via Nvidia failed: {e}", flush=True)
@@ -458,31 +442,14 @@ Region Metadata:
 
 You MUST return a JSON object containing a "results" key with an array of objects conforming to the requested schema. No other text."""
 
-    provider = (
-        os.environ.get("QA_MODEL_PROVIDER", "").strip()
-        or os.environ.get("MODEL_PROVIDER", "").strip()
-    )
-    provider = provider.lower()
-    api_key = os.environ.get("API_KEY", "").strip()
-
-    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip() or (
-        api_key if provider == "openrouter" else ""
-    )
-    gemini_key = os.environ.get("GEMINI_API_KEY", "").strip() or (
-        api_key if provider == "gemini" else ""
-    )
-    nvidia_key = os.environ.get("NVIDIA_API_KEY", "").strip() or (
-        api_key if provider == "nvidia" else ""
-    )
+    provider = QA_CONFIG.provider
+    api_key = QA_CONFIG.resolve_key()
 
     qa_response = None
 
     def attempt_vlm(prov):
-        user_model = (
-            os.environ.get("QA_VLM_MODEL", "").strip()
-            or os.environ.get("PREFERRED_VLM_MODEL", "").strip()
-        )
-        if prov == "openrouter" and openrouter_key:
+        user_model = QA_CONFIG.vlm_model
+        if prov == "openrouter" and api_key:
             vlm_model = (
                 user_model
                 if prov == provider and user_model
@@ -491,7 +458,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             try:
                 return try_cloud_ai_vision(
                     "openrouter",
-                    openrouter_key,
+                    api_key,
                     vlm_model,
                     prompt,
                     combined_base64,
@@ -499,14 +466,14 @@ You MUST return a JSON object containing a "results" key with an array of object
                 )
             except Exception as e:
                 print(f"[QA] VLM QA via OpenRouter failed: {e}", flush=True)
-        elif prov == "gemini" and gemini_key:
+        elif prov == "gemini" and api_key:
             vlm_model = (
                 user_model if prov == provider and user_model else "gemini-1.5-pro"
             )
             try:
                 return try_cloud_ai_vision(
                     "gemini",
-                    gemini_key,
+                    api_key,
                     vlm_model,
                     prompt,
                     combined_base64,
@@ -514,7 +481,7 @@ You MUST return a JSON object containing a "results" key with an array of object
                 )
             except Exception as e:
                 print(f"[QA] VLM QA via Gemini failed: {e}", flush=True)
-        elif prov == "nvidia" and nvidia_key:
+        elif prov == "nvidia" and api_key:
             vlm_model = (
                 user_model
                 if prov == provider and user_model
@@ -523,7 +490,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             try:
                 return try_cloud_ai_vision(
                     "nvidia",
-                    nvidia_key,
+                    api_key,
                     vlm_model,
                     prompt,
                     combined_base64,

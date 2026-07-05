@@ -5,7 +5,7 @@ from worker.config import (
     logger,
     CALLBACK_URL,
     BACKEND_HEADERS,
-    MODEL_PROVIDER,
+    TL_CONFIG,
     redis_client,
 )
 from worker.services.translation import (
@@ -77,7 +77,7 @@ def process_translation(job_data):
     if unmatched_regions:
         batch_mapping = {}
 
-        provider = MODEL_PROVIDER
+        provider = TL_CONFIG.provider
         local_only = provider in ("ollama", "lmstudio")
         max_batch_size = 5 if local_only else 8
 
@@ -301,8 +301,6 @@ def process_translation(job_data):
         elif isinstance(translated, str):
             translated_text = translated
 
-        from worker.config import PREFERRED_LLM_MODEL
-
         translations.append(
             {
                 "regionId": rid,
@@ -312,7 +310,7 @@ def process_translation(job_data):
                 "emotion": emotion,
                 "tone": tone,
                 "translationScore": translation_score,
-                "modelIdentifier": f"{MODEL_PROVIDER}/{PREFERRED_LLM_MODEL}",
+                "modelIdentifier": f"{TL_CONFIG.provider}/{TL_CONFIG.llm_model}",
                 "confidence": translation_score,
             }
         )

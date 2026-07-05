@@ -8,15 +8,12 @@ from worker.handlers.translation import process_translation
 @patch("worker.services.translation.try_cloud_ai")
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
-@patch.dict(
-    os.environ,
-    {
-        "MODEL_PROVIDER": "gemini",
-        "GEMINI_API_KEY": "fake-gemini-key",
-        "PREFERRED_LLM_MODEL": "gemini-1.5-pro",
-    },
-)
-def test_process_translation_gemini(mock_post, mock_get, mock_try_cloud_ai):
+@patch("worker.config.TL_CONFIG")
+def test_process_translation_gemini(mock_tl_config, mock_post, mock_get, mock_try_cloud_ai):
+    mock_tl_config.provider = "gemini"
+    mock_tl_config.resolve_key.return_value = "fake-gemini-key"
+    mock_tl_config.llm_model = "gemini-1.5-pro"
+
     # Setup mock backend image details response
     mock_image_info = {
         "id": "image-uuid-1",
@@ -88,15 +85,12 @@ def test_process_translation_gemini(mock_post, mock_get, mock_try_cloud_ai):
 @patch("worker.services.translation.try_cloud_ai")
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
-@patch.dict(
-    os.environ,
-    {
-        "MODEL_PROVIDER": "openrouter",
-        "OPENROUTER_API_KEY": "fake-openrouter-key",
-        "PREFERRED_LLM_MODEL": "meta-llama/llama-3-8b-instruct:free",
-    },
-)
-def test_process_translation_openrouter(mock_post, mock_get, mock_try_cloud_ai):
+@patch("worker.config.TL_CONFIG")
+def test_process_translation_openrouter(mock_tl_config, mock_post, mock_get, mock_try_cloud_ai):
+    mock_tl_config.provider = "openrouter"
+    mock_tl_config.resolve_key.return_value = "fake-openrouter-key"
+    mock_tl_config.llm_model = "meta-llama/llama-3-8b-instruct:free"
+
     mock_image_info = {
         "id": "image-uuid-1",
         "ocrRegions": [
@@ -157,15 +151,12 @@ def test_process_translation_openrouter(mock_post, mock_get, mock_try_cloud_ai):
 @patch("worker.services.translation.try_cloud_ai")
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
-@patch.dict(
-    os.environ,
-    {
-        "MODEL_PROVIDER": "openai",
-        "API_KEY": "fake-openai-key",
-        "PREFERRED_LLM_MODEL": "gpt-4o-mini",
-    },
-)
-def test_process_translation_openai(mock_post, mock_get, mock_try_cloud_ai):
+@patch("worker.config.TL_CONFIG")
+def test_process_translation_openai(mock_tl_config, mock_post, mock_get, mock_try_cloud_ai):
+    mock_tl_config.provider = "openai"
+    mock_tl_config.resolve_key.return_value = "fake-openai-key"
+    mock_tl_config.llm_model = "gpt-4o-mini"
+
     mock_image_info = {
         "id": "image-uuid-1",
         "ocrRegions": [
@@ -226,15 +217,12 @@ def test_process_translation_openai(mock_post, mock_get, mock_try_cloud_ai):
 @patch("worker.services.translation.try_cloud_ai")
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
-@patch.dict(
-    os.environ,
-    {
-        "MODEL_PROVIDER": "anthropic",
-        "API_KEY": "fake-anthropic-key",
-        "PREFERRED_LLM_MODEL": "claude-3-5-sonnet-20241022",
-    },
-)
-def test_process_translation_anthropic(mock_post, mock_get, mock_try_cloud_ai):
+@patch("worker.config.TL_CONFIG")
+def test_process_translation_anthropic(mock_tl_config, mock_post, mock_get, mock_try_cloud_ai):
+    mock_tl_config.provider = "anthropic"
+    mock_tl_config.resolve_key.return_value = "fake-anthropic-key"
+    mock_tl_config.llm_model = "claude-3-5-sonnet-20241022"
+
     mock_image_info = {
         "id": "image-uuid-1",
         "ocrRegions": [
@@ -295,15 +283,12 @@ def test_process_translation_anthropic(mock_post, mock_get, mock_try_cloud_ai):
 @patch("worker.services.translation.try_cloud_ai")
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
-@patch.dict(
-    os.environ,
-    {
-        "MODEL_PROVIDER": "nvidia",
-        "NVIDIA_API_KEY": "fake-nvidia-key",
-        "PREFERRED_LLM_MODEL": "google/gemma-3n-e4b-it",
-    },
-)
-def test_process_translation_nvidia(mock_post, mock_get, mock_try_cloud_ai):
+@patch("worker.config.TL_CONFIG")
+def test_process_translation_nvidia(mock_tl_config, mock_post, mock_get, mock_try_cloud_ai):
+    mock_tl_config.provider = "nvidia"
+    mock_tl_config.resolve_key.return_value = "fake-nvidia-key"
+    mock_tl_config.llm_model = "google/gemma-3n-e4b-it"
+
     mock_image_info = {
         "id": "image-uuid-1",
         "ocrRegions": [
@@ -364,19 +349,12 @@ def test_process_translation_nvidia(mock_post, mock_get, mock_try_cloud_ai):
 @patch("worker.services.translation.try_local_ai")
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
-@patch.dict(
-    os.environ,
-    {
-        "MODEL_PROVIDER": "ollama",
-        "API_KEY": "",
-        "OPENROUTER_API_KEY": "",
-        "GEMINI_API_KEY": "",
-        "NVIDIA_API_KEY": "",
-        "LOCAL_LLM_PROVIDER": "ollama",
-        "LOCAL_LLM_MODEL": "gemma4:e4b",
-    },
-)
-def test_process_translation_local_fallback(mock_post, mock_get, mock_try_local_ai):
+@patch("worker.config.TL_CONFIG")
+def test_process_translation_local_fallback(mock_tl_config, mock_post, mock_get, mock_try_local_ai):
+    mock_tl_config.provider = "ollama"
+    mock_tl_config.resolve_key.return_value = ""
+    mock_tl_config.llm_model = "gemma4:e4b"
+
     mock_image_info = {
         "id": "image-uuid-1",
         "ocrRegions": [
@@ -434,17 +412,14 @@ def test_process_translation_local_fallback(mock_post, mock_get, mock_try_local_
 @patch("worker.handlers.translation.translate_text")
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
-@patch.dict(
-    os.environ,
-    {
-        "MODEL_PROVIDER": "gemini",
-        "GEMINI_API_KEY": "fake-gemini-key",
-        "PREFERRED_LLM_MODEL": "gemini-1.5-pro",
-    },
-)
+@patch("worker.config.TL_CONFIG")
 def test_process_translation_retry_individual_fallback(
-    mock_post, mock_get, mock_translate_text, mock_try_cloud_ai, mock_try_local_ai
+    mock_tl_config, mock_post, mock_get, mock_translate_text, mock_try_cloud_ai, mock_try_local_ai
 ):
+    mock_tl_config.provider = "gemini"
+    mock_tl_config.resolve_key.return_value = "fake-gemini-key"
+    mock_tl_config.llm_model = "gemini-1.5-pro"
+
     mock_image_info = {
         "id": "image-uuid-1",
         "ocrRegions": [

@@ -81,7 +81,12 @@ def test_process_render_success(mock_post, mock_get, mock_minio, mock_download):
 @patch("worker.handlers.qa.requests.get")
 @patch("worker.handlers.qa.requests.post")
 @patch("worker.handlers.qa.QA_MODE", "llm")
-def test_process_qa_llm_success(mock_post, mock_get, mock_try_cloud_ai):
+@patch("worker.handlers.qa.QA_CONFIG")
+def test_process_qa_llm_success(mock_qa_config, mock_post, mock_get, mock_try_cloud_ai):
+    mock_qa_config.provider = "openrouter"
+    mock_qa_config.resolve_key.return_value = "fake-key"
+    mock_qa_config.llm_model = ""
+
     # Setup mocks
     mock_image_info = {
         "id": "image-uuid-1",
@@ -118,9 +123,6 @@ def test_process_qa_llm_success(mock_post, mock_get, mock_try_cloud_ai):
     mock_post_res.status_code = 200
     mock_post.return_value = mock_post_res
 
-    os.environ["QA_MODEL_PROVIDER"] = "openrouter"
-    os.environ["OPENROUTER_API_KEY"] = "fake-key"
-
     # Invoke process_qa
     job_data = {"imageId": "image-uuid-1"}
     process_qa(job_data)
@@ -143,9 +145,14 @@ def test_process_qa_llm_success(mock_post, mock_get, mock_try_cloud_ai):
 @patch("worker.handlers.qa.requests.get")
 @patch("worker.handlers.qa.requests.post")
 @patch("worker.handlers.qa.QA_MODE", "vlm")
+@patch("worker.handlers.qa.QA_CONFIG")
 def test_process_qa_vlm_cloud_success(
-    mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm
+    mock_qa_config, mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm
 ):
+    mock_qa_config.provider = "gemini"
+    mock_qa_config.resolve_key.return_value = "fake-key"
+    mock_qa_config.vlm_model = ""
+
     # Setup mocks
     mock_image_info = {
         "id": "image-uuid-1",
@@ -190,9 +197,6 @@ def test_process_qa_vlm_cloud_success(
     mock_post_res.status_code = 200
     mock_post.return_value = mock_post_res
 
-    os.environ["QA_MODEL_PROVIDER"] = "gemini"
-    os.environ["GEMINI_API_KEY"] = "fake-key"
-
     # Invoke process_qa
     job_data = {"imageId": "image-uuid-1"}
     process_qa(job_data)
@@ -217,7 +221,15 @@ def test_process_qa_vlm_cloud_success(
 @patch("worker.handlers.qa.requests.get")
 @patch("worker.handlers.qa.requests.post")
 @patch("worker.handlers.qa.QA_MODE", "vlm")
+@patch("worker.handlers.qa.QA_CONFIG")
+@patch.dict(
+    os.environ,
+    {
+        "LOCAL_VLM_MODEL": "qwen2.5-vl-3b-instruct",
+    },
+)
 def test_process_qa_vlm_local_fallback(
+    mock_qa_config,
     mock_post,
     mock_get,
     mock_minio,
@@ -225,6 +237,10 @@ def test_process_qa_vlm_local_fallback(
     mock_try_cloud_vlm,
     mock_try_local_vlm,
 ):
+    mock_qa_config.provider = "gemini"
+    mock_qa_config.resolve_key.return_value = "fake-key"
+    mock_qa_config.vlm_model = ""
+
     # Setup mocks
     mock_image_info = {
         "id": "image-uuid-1",
@@ -274,9 +290,6 @@ def test_process_qa_vlm_local_fallback(
     mock_post_res.status_code = 200
     mock_post.return_value = mock_post_res
 
-    os.environ["QA_MODEL_PROVIDER"] = "gemini"
-    os.environ["GEMINI_API_KEY"] = "fake-key"
-    os.environ["LOCAL_VLM_MODEL"] = "qwen2.5-vl-3b-instruct"
     if "DISABLE_LOCAL_LLM" in os.environ:
         del os.environ["DISABLE_LOCAL_LLM"]
 

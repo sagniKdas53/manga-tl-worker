@@ -28,10 +28,12 @@ def test_classify_region_type():
 
 
 @patch("worker.services.ocr.model_manager")
-@patch("worker.services.ocr.os.environ")
-def test_perform_redo_ocr_paddleocr(mock_env, mock_model_manager):
-    # Mock environment to skip cloud
-    mock_env.get.side_effect = lambda k, d="": ""
+@patch("worker.config.OCR_CONFIG")
+def test_perform_redo_ocr_paddleocr(mock_ocr_config, mock_model_manager):
+    # Mock OCR_CONFIG to skip cloud
+    mock_ocr_config.provider = ""
+    mock_ocr_config.resolve_key.return_value = ""
+    mock_ocr_config.vlm_model = ""
 
     # Mock model manager to return PaddleOCR
     mock_paddle_reader = MagicMock()
@@ -58,17 +60,11 @@ def test_perform_redo_ocr_paddleocr(mock_env, mock_model_manager):
 
 
 @patch("worker.services.ocr.requests.post")
-@patch("worker.services.ocr.os.environ")
-def test_perform_redo_ocr_cloud(mock_env, mock_post):
-    # Mock env for Cloud
-    def env_get(k, default=""):
-        if k in ("MODEL_PROVIDER", "LLM_PROVIDER"):
-            return "openai"
-        if k in ("API_KEY", "LLM_API_KEY"):
-            return "dummy_key"
-        return default
-
-    mock_env.get.side_effect = env_get
+@patch("worker.config.OCR_CONFIG")
+def test_perform_redo_ocr_cloud(mock_ocr_config, mock_post):
+    mock_ocr_config.provider = "openai"
+    mock_ocr_config.resolve_key.return_value = "dummy_key"
+    mock_ocr_config.vlm_model = ""
 
     mock_response = MagicMock()
     mock_response.status_code = 200

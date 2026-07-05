@@ -18,15 +18,12 @@ def get_dummy_image_bytes():
 @patch("worker.handlers.qa.requests.get")
 @patch("worker.handlers.qa.requests.post")
 @patch("worker.handlers.qa.QA_MODE", "llm")
-@patch.dict(
-    os.environ,
-    {
-        "QA_MODEL_PROVIDER": "gemini",
-        "GEMINI_API_KEY": "fake-gemini-key",
-        "QA_LLM_MODEL": "gemini-1.5-pro",
-    },
-)
-def test_process_qa_llm_gemini(mock_post, mock_get, mock_try_cloud_ai):
+@patch("worker.handlers.qa.QA_CONFIG")
+def test_process_qa_llm_gemini(mock_qa_config, mock_post, mock_get, mock_try_cloud_ai):
+    mock_qa_config.provider = "gemini"
+    mock_qa_config.resolve_key.return_value = "fake-gemini-key"
+    mock_qa_config.llm_model = "gemini-1.5-pro"
+
     mock_image_info = {
         "id": "image-uuid-1",
         "ocrRegions": [
@@ -79,15 +76,12 @@ def test_process_qa_llm_gemini(mock_post, mock_get, mock_try_cloud_ai):
 @patch("worker.handlers.qa.requests.get")
 @patch("worker.handlers.qa.requests.post")
 @patch("worker.handlers.qa.QA_MODE", "llm")
-@patch.dict(
-    os.environ,
-    {
-        "QA_MODEL_PROVIDER": "nvidia",
-        "NVIDIA_API_KEY": "fake-nvidia-key",
-        "QA_LLM_MODEL": "google/gemma-3n-e4b-it",
-    },
-)
-def test_process_qa_llm_nvidia(mock_post, mock_get, mock_try_cloud_ai):
+@patch("worker.handlers.qa.QA_CONFIG")
+def test_process_qa_llm_nvidia(mock_qa_config, mock_post, mock_get, mock_try_cloud_ai):
+    mock_qa_config.provider = "nvidia"
+    mock_qa_config.resolve_key.return_value = "fake-nvidia-key"
+    mock_qa_config.llm_model = "google/gemma-3n-e4b-it"
+
     mock_image_info = {
         "id": "image-uuid-1",
         "ocrRegions": [
@@ -138,17 +132,14 @@ def test_process_qa_llm_nvidia(mock_post, mock_get, mock_try_cloud_ai):
 @patch("worker.handlers.qa.requests.get")
 @patch("worker.handlers.qa.requests.post")
 @patch("worker.handlers.qa.QA_MODE", "vlm")
-@patch.dict(
-    os.environ,
-    {
-        "QA_MODEL_PROVIDER": "openrouter",
-        "OPENROUTER_API_KEY": "fake-openrouter-key",
-        "QA_VLM_MODEL": "google/gemini-1.5-pro",
-    },
-)
+@patch("worker.handlers.qa.QA_CONFIG")
 def test_process_qa_vlm_openrouter(
-    mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm
+    mock_qa_config, mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm
 ):
+    mock_qa_config.provider = "openrouter"
+    mock_qa_config.resolve_key.return_value = "fake-openrouter-key"
+    mock_qa_config.vlm_model = "google/gemini-1.5-pro"
+
     mock_image_info = {
         "id": "image-uuid-1",
         "ocrRegions": [
@@ -206,17 +197,14 @@ def test_process_qa_vlm_openrouter(
 @patch("worker.handlers.qa.requests.get")
 @patch("worker.handlers.qa.requests.post")
 @patch("worker.handlers.qa.QA_MODE", "vlm")
-@patch.dict(
-    os.environ,
-    {
-        "QA_MODEL_PROVIDER": "nvidia",
-        "NVIDIA_API_KEY": "fake-nvidia-key",
-        "QA_VLM_MODEL": "nvidia/nemotron-nano-12b-v2-vl",
-    },
-)
+@patch("worker.handlers.qa.QA_CONFIG")
 def test_process_qa_vlm_nvidia(
-    mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm
+    mock_qa_config, mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm
 ):
+    mock_qa_config.provider = "nvidia"
+    mock_qa_config.resolve_key.return_value = "fake-nvidia-key"
+    mock_qa_config.vlm_model = "nvidia/nemotron-nano-12b-v2-vl"
+
     mock_image_info = {
         "id": "image-uuid-1",
         "ocrRegions": [
