@@ -1,6 +1,5 @@
 from unittest.mock import patch
 import json
-import os
 from worker.services.translation import translate_batch_llm
 
 

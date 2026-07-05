@@ -811,6 +811,7 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
     req_prefix = f"[{request_id}] "
 
     from worker.config import TL_CONFIG
+
     provider = TL_CONFIG.provider
     api_key = TL_CONFIG.resolve_key()
 
@@ -828,27 +829,19 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
     strategy_idx = 1
     if not local_only:
         if provider == "openrouter":
-            preferred = (
-                TL_CONFIG.llm_model
-                or "meta-llama/llama-3-8b-instruct:free"
-            )
+            preferred = TL_CONFIG.llm_model or "meta-llama/llama-3-8b-instruct:free"
             logger.info(f"{req_prefix}{strategy_idx}. {preferred} (OpenRouter)")
             strategy_idx += 1
         elif provider == "gemini":
             logger.info(f"{req_prefix}{strategy_idx}. Gemini 2.5 Flash (Direct)")
             strategy_idx += 1
         elif provider == "openai":
-            openai_model = (
-                TL_CONFIG.llm_model or "gpt-4o-mini"
-            )
+            openai_model = TL_CONFIG.llm_model or "gpt-4o-mini"
             logger.info(f"{req_prefix}{strategy_idx}. {openai_model} (Direct OpenAI)")
             strategy_idx += 1
 
         if provider == "nvidia":
-            nvidia_model = (
-                TL_CONFIG.llm_model
-                or "google/gemma-3n-e4b-it"
-            )
+            nvidia_model = TL_CONFIG.llm_model or "google/gemma-3n-e4b-it"
             logger.info(f"{req_prefix}{strategy_idx}. {nvidia_model} (Nvidia)")
             strategy_idx += 1
         if provider == "anthropic":
@@ -888,10 +881,7 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
     else:
         # 1. Cloud LLM Layer
         if provider == "openrouter" and api_key:
-            preferred = (
-                TL_CONFIG.llm_model
-                or "meta-llama/llama-3-8b-instruct:free"
-            )
+            preferred = TL_CONFIG.llm_model or "meta-llama/llama-3-8b-instruct:free"
             translated = try_cloud_ai(
                 "openrouter",
                 api_key,
@@ -906,9 +896,7 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
 
         elif provider == "gemini" and api_key:
             # Direct Gemini API fallback
-            preferred = (
-                TL_CONFIG.llm_model or "gemini-1.5-pro"
-            )
+            preferred = TL_CONFIG.llm_model or "gemini-1.5-pro"
             translated = try_cloud_ai(
                 "gemini", api_key, preferred, prompt, request_id=request_id
             )
@@ -917,9 +905,7 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
                 if is_valid_translation(text, cleaned, request_id=request_id):
                     return cleaned
         elif provider == "openai" and api_key:
-            openai_model = (
-                TL_CONFIG.llm_model or "gpt-4o-mini"
-            )
+            openai_model = TL_CONFIG.llm_model or "gpt-4o-mini"
             translated = try_cloud_ai(
                 "openai",
                 api_key,
@@ -932,10 +918,7 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
                 if is_valid_translation(text, cleaned, request_id=request_id):
                     return cleaned
         if provider == "nvidia" and api_key:
-            nvidia_model = (
-                TL_CONFIG.llm_model
-                or "google/gemma-3n-e4b-it"
-            )
+            nvidia_model = TL_CONFIG.llm_model or "google/gemma-3n-e4b-it"
             translated = try_cloud_ai(
                 "nvidia",
                 api_key,
@@ -949,10 +932,7 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
                     return cleaned
 
         if provider == "anthropic" and api_key:
-            anthropic_model = (
-                TL_CONFIG.llm_model
-                or "claude-3-5-sonnet-20241022"
-            )
+            anthropic_model = TL_CONFIG.llm_model or "claude-3-5-sonnet-20241022"
             translated = try_cloud_ai(
                 "anthropic",
                 api_key,
@@ -1111,6 +1091,7 @@ Input:
 {bubbles_json}
 """
     from worker.config import TL_CONFIG
+
     provider = TL_CONFIG.provider
     api_key = TL_CONFIG.resolve_key()
 
@@ -1123,10 +1104,7 @@ Input:
         )
     else:
         if provider == "openrouter" and api_key:
-            preferred = (
-                TL_CONFIG.llm_model
-                or "meta-llama/llama-3-8b-instruct:free"
-            )
+            preferred = TL_CONFIG.llm_model or "meta-llama/llama-3-8b-instruct:free"
             logger.info(f"{req_prefix}Batch: Trying OpenRouter ({preferred})...")
             try:
                 res = try_cloud_ai(
@@ -1144,9 +1122,7 @@ Input:
 
         elif provider == "gemini" and api_key:
             # Try Direct Gemini API
-            preferred = (
-                TL_CONFIG.llm_model or "gemini-1.5-pro"
-            )
+            preferred = TL_CONFIG.llm_model or "gemini-1.5-pro"
             logger.info(f"{req_prefix}Batch: Trying Gemini ({preferred}) Direct...")
             try:
                 res = try_cloud_ai(
@@ -1163,9 +1139,7 @@ Input:
                 logger.error(f"{req_prefix}Gemini Direct batch translation failed: {e}")
 
         elif provider == "openai" and api_key:
-            preferred = (
-                TL_CONFIG.llm_model or "gpt-4o-mini"
-            )
+            preferred = TL_CONFIG.llm_model or "gpt-4o-mini"
             logger.info(f"{req_prefix}Batch: Trying OpenAI ({preferred}) Direct...")
             try:
                 res = try_cloud_ai(
@@ -1182,10 +1156,7 @@ Input:
                 logger.error(f"{req_prefix}OpenAI Direct batch translation failed: {e}")
 
         elif provider == "anthropic" and api_key:
-            preferred = (
-                TL_CONFIG.llm_model
-                or "claude-3-5-sonnet-20241022"
-            )
+            preferred = TL_CONFIG.llm_model or "claude-3-5-sonnet-20241022"
             logger.info(f"{req_prefix}Batch: Trying Anthropic ({preferred}) Direct...")
             try:
                 res = try_cloud_ai(
@@ -1205,10 +1176,7 @@ Input:
 
         # Try Nvidia NIM
         if provider == "nvidia" and api_key:
-            nvidia_model = (
-                TL_CONFIG.llm_model
-                or "google/gemma-3n-e4b-it"
-            )
+            nvidia_model = TL_CONFIG.llm_model or "google/gemma-3n-e4b-it"
             logger.info(f"{req_prefix}Batch: Trying Nvidia model {nvidia_model}...")
             try:
                 res = try_cloud_ai(

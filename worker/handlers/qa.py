@@ -128,16 +128,37 @@ def _auto_pass_all(job_data):
 
     costs = get_job_costs()
     if costs:
-        total_estimated_cost = sum(c["estimated_cost"] for c in costs)
-        total_prompt_tokens = sum(c["prompt_tokens"] for c in costs)
-        total_completion_tokens = sum(c["completion_tokens"] for c in costs)
-        callback_payload["cost"] = {
-            "estimated_cost": total_estimated_cost,
+        has_na = any(c.get("estimated_cost") is None for c in costs)
+        if has_na:
+            total_estimated_cost = None
+        else:
+            total_estimated_cost = sum(
+                c.get("estimated_cost", 0.0) or 0.0 for c in costs
+            )
+        total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
+        total_completion_tokens = sum(c.get("completion_tokens", 0) or 0 for c in costs)
+
+        cost_payload = {
             "currency": "USD",
             "prompt_tokens": total_prompt_tokens,
             "completion_tokens": total_completion_tokens,
             "breakdown": costs,
         }
+        if total_estimated_cost is not None:
+            cost_payload["estimated_cost"] = total_estimated_cost
+        callback_payload["cost"] = cost_payload
+
+        if total_estimated_cost is None:
+            cost_str = "N/A"
+        elif total_estimated_cost == 0.0:
+            cost_str = "$0.000"
+        else:
+            cost_str = f"${total_estimated_cost:.5f}"
+
+        logger.info(
+            f"[QA] Auto-pass QA job estimated cost: {cost_str} "
+            f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
+        )
     try:
         res = requests.post(
             f"{CALLBACK_URL}/qa", json=callback_payload, headers=BACKEND_HEADERS
@@ -316,16 +337,37 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     costs = get_job_costs()
     if costs:
-        total_estimated_cost = sum(c["estimated_cost"] for c in costs)
-        total_prompt_tokens = sum(c["prompt_tokens"] for c in costs)
-        total_completion_tokens = sum(c["completion_tokens"] for c in costs)
-        callback_payload["cost"] = {
-            "estimated_cost": total_estimated_cost,
+        has_na = any(c.get("estimated_cost") is None for c in costs)
+        if has_na:
+            total_estimated_cost = None
+        else:
+            total_estimated_cost = sum(
+                c.get("estimated_cost", 0.0) or 0.0 for c in costs
+            )
+        total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
+        total_completion_tokens = sum(c.get("completion_tokens", 0) or 0 for c in costs)
+
+        cost_payload = {
             "currency": "USD",
             "prompt_tokens": total_prompt_tokens,
             "completion_tokens": total_completion_tokens,
             "breakdown": costs,
         }
+        if total_estimated_cost is not None:
+            cost_payload["estimated_cost"] = total_estimated_cost
+        callback_payload["cost"] = cost_payload
+
+        if total_estimated_cost is None:
+            cost_str = "N/A"
+        elif total_estimated_cost == 0.0:
+            cost_str = "$0.000"
+        else:
+            cost_str = f"${total_estimated_cost:.5f}"
+
+        logger.info(
+            f"[QA] LLM QA job estimated cost: {cost_str} "
+            f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
+        )
     try:
         res = requests.post(
             f"{CALLBACK_URL}/qa", json=callback_payload, headers=BACKEND_HEADERS
@@ -571,16 +613,37 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     costs = get_job_costs()
     if costs:
-        total_estimated_cost = sum(c["estimated_cost"] for c in costs)
-        total_prompt_tokens = sum(c["prompt_tokens"] for c in costs)
-        total_completion_tokens = sum(c["completion_tokens"] for c in costs)
-        callback_payload["cost"] = {
-            "estimated_cost": total_estimated_cost,
+        has_na = any(c.get("estimated_cost") is None for c in costs)
+        if has_na:
+            total_estimated_cost = None
+        else:
+            total_estimated_cost = sum(
+                c.get("estimated_cost", 0.0) or 0.0 for c in costs
+            )
+        total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
+        total_completion_tokens = sum(c.get("completion_tokens", 0) or 0 for c in costs)
+
+        cost_payload = {
             "currency": "USD",
             "prompt_tokens": total_prompt_tokens,
             "completion_tokens": total_completion_tokens,
             "breakdown": costs,
         }
+        if total_estimated_cost is not None:
+            cost_payload["estimated_cost"] = total_estimated_cost
+        callback_payload["cost"] = cost_payload
+
+        if total_estimated_cost is None:
+            cost_str = "N/A"
+        elif total_estimated_cost == 0.0:
+            cost_str = "$0.000"
+        else:
+            cost_str = f"${total_estimated_cost:.5f}"
+
+        logger.info(
+            f"[QA] VLM QA job estimated cost: {cost_str} "
+            f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
+        )
     try:
         res = requests.post(
             f"{CALLBACK_URL}/qa", json=callback_payload, headers=BACKEND_HEADERS

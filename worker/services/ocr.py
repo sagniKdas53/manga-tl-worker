@@ -1,4 +1,3 @@
-import os
 import gc
 import cv2
 import numpy as np
@@ -164,6 +163,7 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model):
 
 def perform_redo_ocr(img_crop_bytes, lang):
     from worker.config import OCR_CONFIG
+
     provider = OCR_CONFIG.provider
     api_key = OCR_CONFIG.resolve_key()
     model = OCR_CONFIG.vlm_model

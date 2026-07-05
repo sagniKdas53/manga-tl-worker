@@ -106,8 +106,8 @@ def update_model_costs(models=None):
                 for ep in endpoints:
                     pricing = ep.get("pricing")
                     if pricing:
-                        prompt_cost = float(pricing.get("prompt") or 0)
-                        comp_cost = float(pricing.get("completion") or 0)
+                        prompt_cost = float(pricing.get("prompt") or 0) * 1e6
+                        comp_cost = float(pricing.get("completion") or 0) * 1e6
                         prompt_costs.append(prompt_cost)
                         completion_costs.append(comp_cost)
 
@@ -126,7 +126,7 @@ def update_model_costs(models=None):
                         json.dumps({"prompt": avg_prompt, "completion": avg_comp}),
                     )
                     logger.info(
-                        f"Updated average cost for {model}: Prompt=${avg_prompt * 1e6:.2f}/M, Completion=${avg_comp * 1e6:.2f}/M"
+                        f"Updated average cost for {model}: Prompt=${avg_prompt:.2f}/M, Completion=${avg_comp:.2f}/M"
                     )
             elif res.status_code == 404:
                 raise ValueError(
@@ -156,11 +156,65 @@ def get_job_costs():
 
 
 def estimate_cost(model, prompt_tokens, completion_tokens, provider=None):
-    if not prompt_tokens or not completion_tokens:
+    prompt_tokens = prompt_tokens or 0
+    completion_tokens = completion_tokens or 0
+
+    if os.environ.get("DISABLE_COST_CALCULATION", "").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    ):
+        cost_info = {
+            "estimated_cost": None,
+            "currency": "USD",
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "model": model,
+            "provider": provider or "unknown",
+        }
+        if not hasattr(_local_data, "costs"):
+            _local_data.costs = []
+        _local_data.costs.append(cost_info)
+        return None
+
+    model_lower = (model or "").lower()
+    provider_lower = (provider or "").lower()
+
+    # Determine if local or free
+    is_local = provider_lower in (
+        "ollama",
+        "lmstudio",
+        "local",
+        "deepl",
+        "google_translate",
+        "free_api",
+    )
+    is_free = (
+        ":free" in model_lower
+        or "-free" in model_lower
+        or "free" in model_lower
+        or "free" in provider_lower
+    )
+
+    if is_local or is_free:
+        cost_info = {
+            "estimated_cost": 0.0,
+            "currency": "USD",
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "model": model,
+            "provider": provider or "unknown",
+        }
+        if not hasattr(_local_data, "costs"):
+            _local_data.costs = []
+        _local_data.costs.append(cost_info)
         return 0.0
+
+    if prompt_tokens == 0 and completion_tokens == 0:
+        return 0.0
+
     in_rate = 0.0
     out_rate = 0.0
-    model_lower = (model or "").lower()
 
     try:
         cached = redis_client.get(f"model_cost:{model_lower}")
@@ -181,20 +235,36 @@ def estimate_cost(model, prompt_tokens, completion_tokens, provider=None):
 
     if in_rate == 0.0 and out_rate == 0.0:
         if "deepseek-v4-pro" in model_lower:
-            in_rate = 0.435 / 1_000_000
-            out_rate = 0.87 / 1_000_000
+            in_rate = 0.435
+            out_rate = 0.87
         elif "gemini-2.5-flash" in model_lower:
-            if provider == "gemini":
-                in_rate = 0.075 / 1_000_000
-                out_rate = 0.30 / 1_000_000
+            if provider_lower == "gemini":
+                in_rate = 0.075
+                out_rate = 0.30
             else:  # OpenRouter
-                in_rate = 0.30 / 1_000_000
-                out_rate = 2.50 / 1_000_000
+                in_rate = 0.30
+                out_rate = 2.50
         elif "claude-3-5-sonnet" in model_lower:
-            in_rate = 3.0 / 1_000_000
-            out_rate = 15.0 / 1_000_000
+            in_rate = 3.0
+            out_rate = 15.0
+        else:
+            # Pricing not available or calculatable
+            cost_info = {
+                "estimated_cost": None,
+                "currency": "USD",
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "model": model,
+                "provider": provider or "unknown",
+            }
+            if not hasattr(_local_data, "costs"):
+                _local_data.costs = []
+            _local_data.costs.append(cost_info)
+            return None
 
-    cost = (prompt_tokens * in_rate) + (completion_tokens * out_rate)
+    cost = (prompt_tokens * in_rate / 1_000_000.0) + (
+        completion_tokens * out_rate / 1_000_000.0
+    )
 
     cost_info = {
         "estimated_cost": cost,

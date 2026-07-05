@@ -27,7 +27,12 @@ def get_dummy_image_bytes():
     },
 )
 def test_process_ocr_vlm_gemini(
-    mock_ocr_config, mock_post, mock_get, mock_try_cloud_vlm, mock_detect_yolo, mock_download
+    mock_ocr_config,
+    mock_post,
+    mock_get,
+    mock_try_cloud_vlm,
+    mock_detect_yolo,
+    mock_download,
 ):
     mock_ocr_config.provider = "gemini"
     mock_ocr_config.resolve_key.return_value = "fake-gemini-key"
@@ -95,7 +100,12 @@ def test_process_ocr_vlm_gemini(
     },
 )
 def test_process_ocr_vlm_openrouter(
-    mock_ocr_config, mock_post, mock_get, mock_try_cloud_vlm, mock_detect_yolo, mock_download
+    mock_ocr_config,
+    mock_post,
+    mock_get,
+    mock_try_cloud_vlm,
+    mock_detect_yolo,
+    mock_download,
 ):
     mock_ocr_config.provider = "openrouter"
     mock_ocr_config.resolve_key.return_value = "fake-openrouter-key"
@@ -151,7 +161,12 @@ def test_process_ocr_vlm_openrouter(
     },
 )
 def test_process_ocr_vlm_nvidia(
-    mock_ocr_config, mock_post, mock_get, mock_try_cloud_vlm, mock_detect_yolo, mock_download
+    mock_ocr_config,
+    mock_post,
+    mock_get,
+    mock_try_cloud_vlm,
+    mock_detect_yolo,
+    mock_download,
 ):
     mock_ocr_config.provider = "nvidia"
     mock_ocr_config.resolve_key.return_value = "fake-nvidia-key"

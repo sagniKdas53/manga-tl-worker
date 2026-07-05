@@ -3,11 +3,13 @@ from unittest.mock import patch, MagicMock
 from PIL import Image
 from worker.handlers.render import process_render
 
+
 def get_dummy_image_bytes():
     img = Image.new("RGB", (200, 200), (255, 255, 255))
     out = io.BytesIO()
     img.save(out, format="PNG")
     return out.getvalue()
+
 
 @patch("worker.handlers.render.download_image")
 @patch("worker.handlers.render.minio_client")
@@ -100,7 +102,7 @@ def test_render_filters_correctly(mock_post, mock_get, mock_minio, mock_download
                 "maxHeight": 50,
                 "visible": True,
                 "font": "Comic Neue",
-            }
+            },
         ],
     }
 
@@ -114,15 +116,17 @@ def test_render_filters_correctly(mock_post, mock_get, mock_minio, mock_download
     mock_post.return_value = mock_post_res
 
     # Patch load_font to avoid looking up system fonts and fit_text_in_box_py to capture texts
-    with patch("worker.handlers.render.fit_text_in_box_py") as mock_fit, \
-         patch("worker.handlers.render.load_font") as mock_font:
-
+    with (
+        patch("worker.handlers.render.fit_text_in_box_py") as mock_fit,
+        patch("worker.handlers.render.load_font") as mock_font,
+    ):
         from PIL import ImageFont
+
         mock_fit.return_value = {
             "fontSize": 12,
             "lines": ["test"],
             "lineCenters": [50.0],
-            "overflow": False
+            "overflow": False,
         }
         mock_font.return_value = ImageFont.load_default()
 

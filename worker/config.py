@@ -80,18 +80,34 @@ YOLO_PINNED_CHECKSUM = (
 )
 YOLO_FALLBACK_MODE = os.environ.get("YOLO_FALLBACK_MODE", "opencv").lower()
 
+
 # Model Configuration
 class ModelConfig:
-    def __init__(self, provider_env: str, llm_env: str = "", vlm_env: str = "", llm_list_env: str = "", vlm_list_env: str = ""):
+    def __init__(
+        self,
+        provider_env: str,
+        llm_env: str = "",
+        vlm_env: str = "",
+        llm_list_env: str = "",
+        vlm_list_env: str = "",
+    ):
         self.provider = os.environ.get(provider_env, "").lower().strip()
         self.llm_model = os.environ.get(llm_env, "").strip()
         self.vlm_model = os.environ.get(vlm_env, "").strip()
-        
+
         llm_list_raw = os.environ.get(llm_list_env, "").strip() if llm_list_env else ""
-        self.llm_model_list = [x.strip() for x in llm_list_raw.split(",") if x.strip()] if llm_list_raw else []
-        
+        self.llm_model_list = (
+            [x.strip() for x in llm_list_raw.split(",") if x.strip()]
+            if llm_list_raw
+            else []
+        )
+
         vlm_list_raw = os.environ.get(vlm_list_env, "").strip() if vlm_list_env else ""
-        self.vlm_model_list = [x.strip() for x in vlm_list_raw.split(",") if x.strip()] if vlm_list_raw else []
+        self.vlm_model_list = (
+            [x.strip() for x in vlm_list_raw.split(",") if x.strip()]
+            if vlm_list_raw
+            else []
+        )
 
     def resolve_key(self, provider: str = None) -> str:
         prov = (provider or self.provider or "").lower().strip()
@@ -111,16 +127,17 @@ class ModelConfig:
                 return val
         return ""
 
+
 OCR_CONFIG = ModelConfig(
     provider_env="OCR_MODEL_PROVIDER",
     vlm_env="OCR_VLM_MODEL",
-    vlm_list_env="OCR_VLM_MODEL_LIST"
+    vlm_list_env="OCR_VLM_MODEL_LIST",
 )
 
 TL_CONFIG = ModelConfig(
     provider_env="TL_MODEL_PROVIDER",
     llm_env="TL_LLM_MODEL",
-    llm_list_env="TL_LLM_MODEL_LIST"
+    llm_list_env="TL_LLM_MODEL_LIST",
 )
 
 QA_CONFIG = ModelConfig(
@@ -128,7 +145,7 @@ QA_CONFIG = ModelConfig(
     llm_env="QA_LLM_MODEL",
     vlm_env="QA_VLM_MODEL",
     llm_list_env="QA_LLM_MODEL_LIST",
-    vlm_list_env="QA_VLM_MODEL_LIST"
+    vlm_list_env="QA_VLM_MODEL_LIST",
 )
 
 LOCAL_LLM_PROVIDER = os.environ.get("LOCAL_LLM_PROVIDER", "").strip()
@@ -155,11 +172,7 @@ if QA_MODE == "auto":
     effective_local_llm = "" if disable_local else LOCAL_LLM_MODEL
 
     # Detect VLM capability (Cloud VLM or effective local VLM)
-    has_vlm = bool(
-        QA_CONFIG.vlm_model
-        or OCR_CONFIG.vlm_model
-        or effective_local_vlm
-    )
+    has_vlm = bool(QA_CONFIG.vlm_model or OCR_CONFIG.vlm_model or effective_local_vlm)
 
     # Detect LLM capability (Cloud provider or effective local LLM)
     if has_vlm:

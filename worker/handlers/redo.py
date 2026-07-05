@@ -11,6 +11,9 @@ from worker.services.translation import translate_text
 
 
 def process_region_redo(job_data):
+    from worker.utils.rate_limit import reset_job_costs
+
+    reset_job_costs()
     image_id = job_data["imageId"]
     region_id = job_data["regionId"]
     redo_type = job_data["redoType"]  # 'ocr' or 'translation'
@@ -123,6 +126,33 @@ def process_region_redo(job_data):
             logger.info(
                 f"{req_prefix}Redo Translation result: '{translated}' (failed={translated is None})"
             )
+            from worker.utils.rate_limit import get_job_costs
+
+            costs = get_job_costs()
+            if costs:
+                has_na = any(c.get("estimated_cost") is None for c in costs)
+                if has_na:
+                    total_estimated_cost = None
+                else:
+                    total_estimated_cost = sum(
+                        c.get("estimated_cost", 0.0) or 0.0 for c in costs
+                    )
+                total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
+                total_completion_tokens = sum(
+                    c.get("completion_tokens", 0) or 0 for c in costs
+                )
+
+                if total_estimated_cost is None:
+                    cost_str = "N/A"
+                elif total_estimated_cost == 0.0:
+                    cost_str = "$0.000"
+                else:
+                    cost_str = f"${total_estimated_cost:.5f}"
+
+                logger.info(
+                    f"{req_prefix}Redo translation estimated cost: {cost_str} "
+                    f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
+                )
         except Exception as e:
             logger.error(f"{req_prefix}Redo Translation failed: {e}")
             return

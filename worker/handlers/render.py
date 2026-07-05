@@ -670,10 +670,14 @@ def process_render(job_data):
 
         # Render only visible elements from visible translation/sfx layers
         translation_elements = [
-            el for el in layer_elements
+            el
+            for el in layer_elements
             if el.get("visible", True)
             and el.get("layerVisible", True)
-            and (el.get("layerType") in ("translation", "sfx") or el.get("layerType") is None)
+            and (
+                el.get("layerType") in ("translation", "sfx")
+                or el.get("layerType") is None
+            )
         ]
 
         for el in translation_elements:
