@@ -279,7 +279,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         "yes",
     )
     is_explicit_local = provider in ("ollama", "lmstudio")
-    
+
     if not qa_response and local_llm_model and (is_explicit_local or not disable_local):
         try:
             qa_response = try_local_ai(
@@ -287,7 +287,9 @@ You MUST return a JSON object containing a "results" key with an array of object
             )
         except Exception as e:
             print(f"[QA] LLM QA via Local LLM failed: {e}", flush=True)
-    elif not qa_response and local_llm_model and disable_local and not is_explicit_local:
+    elif (
+        not qa_response and local_llm_model and disable_local and not is_explicit_local
+    ):
         print("[QA] Local LLM QA skipped (disabled via environment).", flush=True)
 
     results = []
@@ -548,7 +550,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         "yes",
     )
     is_explicit_local = provider in ("ollama", "lmstudio")
-    
+
     if not qa_response and local_vlm_model and (is_explicit_local or not disable_local):
         try:
             qa_response = try_local_vlm_vision(
@@ -556,7 +558,9 @@ You MUST return a JSON object containing a "results" key with an array of object
             )
         except Exception as e:
             print(f"[QA] VLM QA via Local VLM failed: {e}", flush=True)
-    elif not qa_response and local_vlm_model and disable_local and not is_explicit_local:
+    elif (
+        not qa_response and local_vlm_model and disable_local and not is_explicit_local
+    ):
         print("[QA] Local VLM QA skipped (disabled via environment).", flush=True)
 
     # VLM Evaluation Fail-Safe Fallback:

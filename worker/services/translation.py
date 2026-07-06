@@ -672,14 +672,16 @@ def try_cloud_ai_vision_batch(
         content_parts = [{"type": "text", "text": prompt}]
         for crop in crops:
             content_parts.append({"type": "text", "text": f"Region ID: {crop['id']}"})
-            content_parts.append({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": "image/jpeg",
-                    "data": crop["base64"],
+            content_parts.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": crop["base64"],
+                    },
                 }
-            })
+            )
         payload = {
             "model": actual_model,
             "max_tokens": 4096,
@@ -693,16 +695,22 @@ def try_cloud_ai_vision_batch(
         if system_prompt:
             payload["system"] = system_prompt
         elif response_schema:
-            payload["system"] = "Respond with a valid JSON object matching the requested schema."
+            payload["system"] = (
+                "Respond with a valid JSON object matching the requested schema."
+            )
     else:
         # openai, openrouter, gemini, nvidia, etc.
         user_message_content = [{"type": "text", "text": prompt}]
         for crop in crops:
-            user_message_content.append({"type": "text", "text": f"Region ID: {crop['id']}"})
-            user_message_content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{crop['base64']}"},
-            })
+            user_message_content.append(
+                {"type": "text", "text": f"Region ID: {crop['id']}"}
+            )
+            user_message_content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{crop['base64']}"},
+                }
+            )
 
         payload = {
             "model": actual_model,

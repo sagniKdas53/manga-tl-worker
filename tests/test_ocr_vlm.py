@@ -53,11 +53,9 @@ def test_process_ocr_vlm_gemini(
             "safe_rect": [15, 25, 90, 70],
         }
     ]
-    mock_try_cloud_vlm.return_value = json.dumps({
-        "results": [
-            {"id": "region_0", "text": "Hello from Gemini VLM OCR"}
-        ]
-    })
+    mock_try_cloud_vlm.return_value = json.dumps(
+        {"results": [{"id": "region_0", "text": "Hello from Gemini VLM OCR"}]}
+    )
 
     mock_image_info = {"id": "image-uuid-1", "panels": []}
     mock_get_res = MagicMock()
@@ -134,11 +132,9 @@ def test_process_ocr_vlm_openrouter(
             "safe_rect": [15, 25, 90, 70],
         }
     ]
-    mock_try_cloud_vlm.return_value = json.dumps({
-        "results": [
-            {"id": "region_0", "text": "Hello from OpenRouter VLM OCR"}
-        ]
-    })
+    mock_try_cloud_vlm.return_value = json.dumps(
+        {"results": [{"id": "region_0", "text": "Hello from OpenRouter VLM OCR"}]}
+    )
 
     mock_image_info = {"id": "image-uuid-1", "panels": []}
     mock_get_res = MagicMock()
@@ -203,11 +199,9 @@ def test_process_ocr_vlm_nvidia(
             "safe_rect": [15, 25, 90, 70],
         }
     ]
-    mock_try_cloud_vlm.return_value = json.dumps({
-        "results": [
-            {"id": "region_0", "text": "Hello from Nvidia VLM OCR"}
-        ]
-    })
+    mock_try_cloud_vlm.return_value = json.dumps(
+        {"results": [{"id": "region_0", "text": "Hello from Nvidia VLM OCR"}]}
+    )
 
     mock_image_info = {"id": "image-uuid-1", "panels": []}
     mock_get_res = MagicMock()
@@ -331,17 +325,17 @@ def test_process_ocr_vlm_batched_multiple_regions(
     mock_detector.predict.return_value = [
         {
             "dt_polys": [
-                [[15, 25], [70, 25], [70, 60], [15, 60]], # inside bubble 0
-                [[105, 115], [165, 115], [165, 155], [105, 155]], # inside bubble 1
-                [[10, 150], [50, 150], [50, 180], [10, 180]], # outside (free-floating)
+                [[15, 25], [70, 25], [70, 60], [15, 60]],  # inside bubble 0
+                [[105, 115], [165, 115], [165, 155], [105, 155]],  # inside bubble 1
+                [[10, 150], [50, 150], [50, 180], [10, 180]],  # outside (free-floating)
             ],
             "rec_texts": [],
-            "rec_scores": []
+            "rec_scores": [],
         }
     ]
 
     mock_download.return_value = get_dummy_image_bytes()
-    
+
     # 2 speech bubbles
     mock_detect_yolo.return_value = [
         {
@@ -355,17 +349,19 @@ def test_process_ocr_vlm_batched_multiple_regions(
             "confidence": 0.90,
             "mask_polygon": [[100, 100], [190, 100], [190, 190], [100, 190]],
             "safe_rect": [105, 105, 80, 80],
-        }
+        },
     ]
-    
+
     # Mock VLM response for 3 regions
-    mock_try_cloud_vlm.return_value = json.dumps({
-        "results": [
-            {"id": "region_0", "text": "Hello from Bubble 0"},
-            {"id": "region_1", "text": "Hello from Bubble 1"},
-            {"id": "region_2", "text": "Hello from Free Text"},
-        ]
-    })
+    mock_try_cloud_vlm.return_value = json.dumps(
+        {
+            "results": [
+                {"id": "region_0", "text": "Hello from Bubble 0"},
+                {"id": "region_1", "text": "Hello from Bubble 1"},
+                {"id": "region_2", "text": "Hello from Free Text"},
+            ]
+        }
+    )
 
     mock_image_info = {"id": "image-uuid-1", "panels": []}
     mock_get_res = MagicMock()
@@ -393,7 +389,7 @@ def test_process_ocr_vlm_batched_multiple_regions(
     mock_post.assert_called_once()
     payload = mock_post.call_args[1]["json"]
     assert len(payload["regions"]) == 3
-    
+
     # Map by bubbleId to check texts
     mapped_regions = {r["bubbleId"]: r["text"] for r in payload["regions"]}
     assert mapped_regions["bubble_0"] == "Hello from Bubble 0"
