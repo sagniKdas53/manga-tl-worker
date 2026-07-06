@@ -295,3 +295,107 @@ def test_process_ocr_vlm_local_fallback(
     mock_post.assert_called_once()
     payload = mock_post.call_args[1]["json"]
     assert payload["regions"][0]["text"] == "Hello from Local VLM OCR"
+
+
+@patch("worker.handlers.ocr.download_image")
+@patch("worker.handlers.ocr.detect_bubbles_yolo")
+@patch("worker.handlers.ocr.try_cloud_ai_vision_batch")
+@patch("worker.handlers.ocr.model_manager")
+@patch("worker.handlers.ocr.requests.get")
+@patch("worker.handlers.ocr.requests.post")
+@patch("worker.handlers.ocr.OCR_CONFIG")
+@patch.dict(
+    os.environ,
+    {
+        "DISABLE_LOCAL_OCR": "true",
+    },
+)
+def test_process_ocr_vlm_batched_multiple_regions(
+    mock_ocr_config,
+    mock_post,
+    mock_get,
+    mock_model_manager,
+    mock_try_cloud_vlm,
+    mock_detect_yolo,
+    mock_download,
+):
+    mock_ocr_config.provider = "gemini"
+    mock_ocr_config.resolve_key.return_value = "fake-gemini-key"
+    mock_ocr_config.vlm_model = "gemini-1.5-flash"
+
+    # Mock PaddleOCR detector to return 3 fragments (2 inside bubbles, 1 outside)
+    mock_detector = MagicMock()
+    mock_model_manager.get_paddle_ocr_detector.return_value = mock_detector
+    # Each fragment returns: (bbox, text, confidence)
+    # The detector doesn't return text in detection-only mode, but parse_paddle_ocr_results handles it.
+    mock_detector.predict.return_value = [
+        {
+            "dt_polys": [
+                [[15, 25], [70, 25], [70, 60], [15, 60]], # inside bubble 0
+                [[105, 115], [165, 115], [165, 155], [105, 155]], # inside bubble 1
+                [[10, 150], [50, 150], [50, 180], [10, 180]], # outside (free-floating)
+            ],
+            "rec_texts": [],
+            "rec_scores": []
+        }
+    ]
+
+    mock_download.return_value = get_dummy_image_bytes()
+    
+    # 2 speech bubbles
+    mock_detect_yolo.return_value = [
+        {
+            "bbox": [10, 20, 80, 70],
+            "confidence": 0.95,
+            "mask_polygon": [[10, 20], [90, 20], [90, 90], [10, 90]],
+            "safe_rect": [15, 25, 70, 60],
+        },
+        {
+            "bbox": [100, 100, 90, 90],
+            "confidence": 0.90,
+            "mask_polygon": [[100, 100], [190, 100], [190, 190], [100, 190]],
+            "safe_rect": [105, 105, 80, 80],
+        }
+    ]
+    
+    # Mock VLM response for 3 regions
+    mock_try_cloud_vlm.return_value = json.dumps({
+        "results": [
+            {"id": "region_0", "text": "Hello from Bubble 0"},
+            {"id": "region_1", "text": "Hello from Bubble 1"},
+            {"id": "region_2", "text": "Hello from Free Text"},
+        ]
+    })
+
+    mock_image_info = {"id": "image-uuid-1", "panels": []}
+    mock_get_res = MagicMock()
+    mock_get_res.status_code = 200
+    mock_get_res.json.return_value = mock_image_info
+    mock_get.return_value = mock_get_res
+
+    mock_post_res = MagicMock()
+    mock_post_res.status_code = 200
+    mock_post.return_value = mock_post_res
+
+    # Invoke process_ocr
+    job_data = {"imageId": "image-uuid-1"}
+    process_ocr(job_data)
+
+    # Check cloud VLM called with 3 crops
+    mock_try_cloud_vlm.assert_called_once()
+    args, kwargs = mock_try_cloud_vlm.call_args
+    assert len(args[3]) == 3  # 3 crops: 2 bubbles, 1 direct text
+    assert args[3][0]["id"] == "region_0"
+    assert args[3][1]["id"] == "region_1"
+    assert args[3][2]["id"] == "region_2"
+
+    # Check callback post payload contains all 3 regions mapped correctly
+    mock_post.assert_called_once()
+    payload = mock_post.call_args[1]["json"]
+    assert len(payload["regions"]) == 3
+    
+    # Map by bubbleId to check texts
+    mapped_regions = {r["bubbleId"]: r["text"] for r in payload["regions"]}
+    assert mapped_regions["bubble_0"] == "Hello from Bubble 0"
+    assert mapped_regions["bubble_1"] == "Hello from Bubble 1"
+    assert mapped_regions["direct_text_0"] == "Hello from Free Text"
