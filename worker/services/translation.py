@@ -1010,12 +1010,14 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
 
 
 def translate_batch_llm(
-    unmatched_regions,
-    context_str="",
-    response_schema=None,
+    regions,
+    context_str,
+    response_schema,
     request_id=None,
     source_lang="ja",
     target_lang="en",
+    provider=None,
+    llm_model=None,
 ):
     if not request_id:
         request_id = str(uuid.uuid4())[:8]
@@ -1096,8 +1098,9 @@ Input:
 """
     from worker.config import TL_CONFIG
 
-    provider = TL_CONFIG.provider
-    api_key = TL_CONFIG.resolve_key()
+    provider = provider or TL_CONFIG.provider
+    api_key = TL_CONFIG.resolve_key(provider)
+    user_model = llm_model or TL_CONFIG.llm_model
 
     # LOCAL_ONLY mode: when provider is a local runtime, skip all cloud tiers
     local_only = provider in ("ollama", "lmstudio")
@@ -1108,7 +1111,7 @@ Input:
         )
     else:
         if provider == "openrouter" and api_key:
-            preferred = TL_CONFIG.llm_model or "meta-llama/llama-3-8b-instruct:free"
+            preferred = user_model or "meta-llama/llama-3-8b-instruct:free"
             logger.info(f"{req_prefix}Batch: Trying OpenRouter ({preferred})...")
             try:
                 res = try_cloud_ai(
@@ -1126,7 +1129,7 @@ Input:
 
         elif provider == "gemini" and api_key:
             # Try Direct Gemini API
-            preferred = TL_CONFIG.llm_model or "gemini-1.5-pro"
+            preferred = user_model or "gemini-1.5-pro"
             logger.info(f"{req_prefix}Batch: Trying Gemini ({preferred}) Direct...")
             try:
                 res = try_cloud_ai(
@@ -1143,7 +1146,7 @@ Input:
                 logger.error(f"{req_prefix}Gemini Direct batch translation failed: {e}")
 
         elif provider == "openai" and api_key:
-            preferred = TL_CONFIG.llm_model or "gpt-4o-mini"
+            preferred = user_model or "gpt-4o-mini"
             logger.info(f"{req_prefix}Batch: Trying OpenAI ({preferred}) Direct...")
             try:
                 res = try_cloud_ai(
@@ -1160,7 +1163,7 @@ Input:
                 logger.error(f"{req_prefix}OpenAI Direct batch translation failed: {e}")
 
         elif provider == "anthropic" and api_key:
-            preferred = TL_CONFIG.llm_model or "claude-3-5-sonnet-20241022"
+            preferred = user_model or "claude-3-5-sonnet-20241022"
             logger.info(f"{req_prefix}Batch: Trying Anthropic ({preferred}) Direct...")
             try:
                 res = try_cloud_ai(
@@ -1180,7 +1183,7 @@ Input:
 
         # Try Nvidia NIM
         if provider == "nvidia" and api_key:
-            nvidia_model = TL_CONFIG.llm_model or "google/gemma-3n-e4b-it"
+            nvidia_model = user_model or "google/gemma-3n-e4b-it"
             logger.info(f"{req_prefix}Batch: Trying Nvidia model {nvidia_model}...")
             try:
                 res = try_cloud_ai(

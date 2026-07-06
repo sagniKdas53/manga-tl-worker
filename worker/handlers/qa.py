@@ -225,13 +225,13 @@ Region Metadata:
 
 You MUST return a JSON object containing a "results" key with an array of objects conforming to the requested schema. No other text."""
 
-    provider = QA_CONFIG.provider
-    api_key = QA_CONFIG.resolve_key()
+    provider = job_data.get("qaProvider") or QA_CONFIG.provider
+    api_key = QA_CONFIG.resolve_key(provider)
 
     qa_response = None
 
     def attempt_llm(prov):
-        user_model = QA_CONFIG.llm_model
+        user_model = job_data.get("qaLlmModel") or QA_CONFIG.llm_model
         if prov == "openrouter" and api_key:
             llm_model = (
                 user_model
@@ -474,13 +474,13 @@ Region Metadata:
 
 You MUST return a JSON object containing a "results" key with an array of objects conforming to the requested schema. No other text."""
 
-    provider = QA_CONFIG.provider
-    api_key = QA_CONFIG.resolve_key()
+    provider = job_data.get("qaProvider") or QA_CONFIG.provider
+    api_key = QA_CONFIG.resolve_key(provider)
 
     qa_response = None
 
     def attempt_vlm(prov):
-        user_model = QA_CONFIG.vlm_model
+        user_model = job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
         if prov == "openrouter" and api_key:
             vlm_model = (
                 user_model

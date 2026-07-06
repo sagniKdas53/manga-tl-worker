@@ -77,7 +77,8 @@ def process_translation(job_data):
     if unmatched_regions:
         batch_mapping = {}
 
-        provider = TL_CONFIG.provider
+        provider = job_data.get("tlProvider") or TL_CONFIG.provider
+        tl_model = job_data.get("tlModel") or TL_CONFIG.llm_model
         local_only = provider in ("ollama", "lmstudio")
         max_batch_size = 5 if local_only else 8
 
@@ -141,6 +142,8 @@ def process_translation(job_data):
                     request_id=request_id,
                     source_lang=source_lang,
                     target_lang=target_lang,
+                    provider=provider,
+                    llm_model=tl_model,
                 )
 
                 if logger.isEnabledFor(logging.DEBUG):
@@ -209,6 +212,8 @@ def process_translation(job_data):
                         request_id=request_id,
                         source_lang=source_lang,
                         target_lang=target_lang,
+                        provider=provider,
+                        llm_model=tl_model,
                     )
 
                     if logger.isEnabledFor(logging.DEBUG):
