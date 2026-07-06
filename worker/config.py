@@ -21,6 +21,9 @@ logging.Logger.trace = trace
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 level = logging.TRACE if LOG_LEVEL == "TRACE" else getattr(logging, LOG_LEVEL)
 logging.basicConfig(level=level, format="%(asctime)s [%(levelname)s] %(message)s")
+# Suppress noisy third-party loggers that flood output at DEBUG level
+for _noisy_logger in ("PIL", "PIL.PngImagePlugin"):
+    logging.getLogger(_noisy_logger).setLevel(logging.WARNING)
 logger = logging.getLogger("translation")
 
 
