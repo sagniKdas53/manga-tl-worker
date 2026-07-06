@@ -314,25 +314,28 @@ def process_ocr(job_data):
             disable_local_ocr = os.environ.get(
                 "DISABLE_LOCAL_OCR", ""
             ).strip().lower() in ("true", "1", "yes")
+            
+            provider = job_data.get("ocrProvider") or OCR_CONFIG.provider
+            use_paddle_ocr = (provider == "local") and not disable_local_ocr
 
             # Try PaddleOCR (PP-OCRv5) first — reader is lazily created per language
             paddle_ocr_reader = (
-                None
-                if disable_local_ocr
-                else model_manager.get_paddle_ocr_reader(source_language)
+                model_manager.get_paddle_ocr_reader(source_language)
+                if use_paddle_ocr
+                else None
             )
             paddle_ocr_detector = (
                 model_manager.get_paddle_ocr_detector(source_language)
-                if disable_local_ocr
+                if use_paddle_ocr
                 else None
             )
 
-            if not disable_local_ocr and paddle_ocr_reader is None:
+            if use_paddle_ocr and paddle_ocr_reader is None:
                 raise RuntimeError(
                     f"Required local PaddleOCR model failed to initialize for language: {source_language}. "
                     "Cannot proceed in offline mode without the required model."
                 )
-            if disable_local_ocr and paddle_ocr_detector is None:
+            if use_paddle_ocr and paddle_ocr_detector is None:
                 raise RuntimeError(
                     f"Required local PaddleOCR detector failed to initialize for language: {source_language}."
                 )
@@ -506,7 +509,7 @@ def process_ocr(job_data):
 
                     if not assigned_frags:
                         # If Cloud VLM is active, we STILL want to crop and VLM-OCR empty bubbles to be safe!
-                        if disable_local_ocr:
+                        if not use_paddle_ocr:
                             candidate_regions.append({
                                 "type": "bubble",
                                 "bubble_idx": b_idx,
@@ -626,7 +629,7 @@ def process_ocr(job_data):
                         })
 
                 # 6. Now, recognize candidates
-                if disable_local_ocr:
+                if not use_paddle_ocr:
                     # CLOUD OCR MODE (VLM Batching)
                     if candidate_regions:
                         print(
