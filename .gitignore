@@ -9,3 +9,4 @@ ENV/
 .idea/
 .coverage
 costs.json
+coverage.xml

@@ -95,9 +95,7 @@ def update_model_costs(models=None):
 
                 # For free models, initialize price to zero directly
                 is_free = (
-                    ":free" in model_key
-                    or "-free" in model_key
-                    or "free" in model_key
+                    ":free" in model_key or "-free" in model_key or "free" in model_key
                 )
                 if is_free:
                     cost_data = {

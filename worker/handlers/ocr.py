@@ -443,7 +443,11 @@ def process_ocr(job_data):
 
                     res_text = None
                     if provider == "openrouter" and api_key:
-                        vlm_model = job_data.get("ocrModel") or OCR_CONFIG.vlm_model or "qwen/qwen3-vl-8b-instruct"
+                        vlm_model = (
+                            job_data.get("ocrModel")
+                            or OCR_CONFIG.vlm_model
+                            or "qwen/qwen3-vl-8b-instruct"
+                        )
                         res_text = try_cloud_ai_vision(
                             "openrouter",
                             api_key,
@@ -454,7 +458,11 @@ def process_ocr(job_data):
                             system_prompt=sys_prompt,
                         )
                     elif provider == "gemini" and api_key:
-                        vlm_model = job_data.get("ocrModel") or OCR_CONFIG.vlm_model or "gemini-1.5-flash"
+                        vlm_model = (
+                            job_data.get("ocrModel")
+                            or OCR_CONFIG.vlm_model
+                            or "gemini-1.5-flash"
+                        )
                         res_text = try_cloud_ai_vision(
                             "gemini",
                             api_key,
@@ -466,7 +474,9 @@ def process_ocr(job_data):
                         )
                     elif provider == "nvidia" and api_key:
                         vlm_model = (
-                            job_data.get("ocrModel") or OCR_CONFIG.vlm_model or "nvidia/nemotron-nano-12b-v2-vl"
+                            job_data.get("ocrModel")
+                            or OCR_CONFIG.vlm_model
+                            or "nvidia/nemotron-nano-12b-v2-vl"
                         )
                         res_text = try_cloud_ai_vision(
                             "nvidia",
@@ -478,7 +488,10 @@ def process_ocr(job_data):
                             system_prompt=sys_prompt,
                         )
                     else:
-                        local_model = job_data.get("ocrModel") or os.environ.get("LOCAL_VLM_MODEL", "").strip()
+                        local_model = (
+                            job_data.get("ocrModel")
+                            or os.environ.get("LOCAL_VLM_MODEL", "").strip()
+                        )
                         if local_model:
                             res_text = try_local_vlm_vision(
                                 local_model,

@@ -1011,8 +1011,8 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
 
 def translate_batch_llm(
     regions,
-    context_str,
-    response_schema,
+    context_str="",
+    response_schema=None,
     request_id=None,
     source_lang="ja",
     target_lang="en",
@@ -1024,7 +1024,7 @@ def translate_batch_llm(
     req_prefix = f"[{request_id}] "
 
     bubbles_input = []
-    for r in unmatched_regions:
+    for r in regions:
         entry = {
             "id": r["id"],
             "panel": r.get("panelReadingOrder") or r.get("panelId") or 0,
