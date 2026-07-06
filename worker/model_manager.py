@@ -146,7 +146,6 @@ class ModelManager:
                         lang=paddle_lang,
                         device=ocr_device,
                         text_detection_model_name=det_model,
-                        rec=False,  # No recognition model loaded
                         use_textline_orientation=False,
                         use_doc_unwarping=False,
                         use_doc_orientation_classify=False,

@@ -401,9 +401,9 @@ def process_ocr(job_data):
                         flush=True,
                     )
                     nparr = np.frombuffer(img_bytes, np.uint8)
-                    img_decoded = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    img_original = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                     img_decoded, ocr_upscale = downscale_for_ocr(
-                        img_decoded, max_dim=1024
+                        img_original, max_dim=1024
                     )
                     del nparr
                     if img_decoded is not None:
