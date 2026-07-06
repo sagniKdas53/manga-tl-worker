@@ -1110,7 +1110,8 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
         "1",
         "yes",
     )
-    if not disable_local:
+    is_explicit_local = provider in ("ollama", "lmstudio")
+    if is_explicit_local or not disable_local:
         translated = try_local_ai(prompt, text, request_id=request_id)
         if translated:
             cleaned = clean_translated_text(translated)
@@ -1360,7 +1361,8 @@ Input:
         "1",
         "yes",
     )
-    if not disable_local:
+    is_explicit_local = provider in ("ollama", "lmstudio")
+    if is_explicit_local or not disable_local:
         local_provider = (
             os.environ.get(
                 "LOCAL_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "lmstudio")
