@@ -16,7 +16,8 @@ def get_dummy_image_bytes():
 
 @patch("worker.handlers.ocr.download_image")
 @patch("worker.handlers.ocr.detect_bubbles_yolo")
-@patch("worker.handlers.ocr.try_cloud_ai_vision")
+@patch("worker.handlers.ocr.try_cloud_ai_vision_batch")
+@patch("worker.handlers.ocr.model_manager")
 @patch("worker.handlers.ocr.requests.get")
 @patch("worker.handlers.ocr.requests.post")
 @patch("worker.handlers.ocr.OCR_CONFIG")
@@ -30,6 +31,7 @@ def test_process_ocr_vlm_gemini(
     mock_ocr_config,
     mock_post,
     mock_get,
+    mock_model_manager,
     mock_try_cloud_vlm,
     mock_detect_yolo,
     mock_download,
@@ -37,6 +39,9 @@ def test_process_ocr_vlm_gemini(
     mock_ocr_config.provider = "gemini"
     mock_ocr_config.resolve_key.return_value = "fake-gemini-key"
     mock_ocr_config.vlm_model = "gemini-1.5-flash"
+
+    # Mock detector-only PaddleOCR to avoid real initialization
+    mock_model_manager.get_paddle_ocr_detector.return_value = MagicMock()
 
     # Setup mocks
     mock_download.return_value = get_dummy_image_bytes()
@@ -48,7 +53,11 @@ def test_process_ocr_vlm_gemini(
             "safe_rect": [15, 25, 90, 70],
         }
     ]
-    mock_try_cloud_vlm.return_value = json.dumps({"text": "Hello from Gemini VLM OCR"})
+    mock_try_cloud_vlm.return_value = json.dumps({
+        "results": [
+            {"id": "region_0", "text": "Hello from Gemini VLM OCR"}
+        ]
+    })
 
     mock_image_info = {"id": "image-uuid-1", "panels": []}
     mock_get_res = MagicMock()
@@ -74,7 +83,8 @@ def test_process_ocr_vlm_gemini(
     assert args[0] == "gemini"
     assert args[1] == "fake-gemini-key"
     assert args[2] == "gemini-1.5-flash"
-    assert args[3] == "Extract the text from this speech bubble."
+    assert len(args[3]) == 1
+    assert args[3][0]["id"] == "region_0"
 
     # Check callback post payload
     mock_post.assert_called_once()
@@ -89,7 +99,8 @@ def test_process_ocr_vlm_gemini(
 
 @patch("worker.handlers.ocr.download_image")
 @patch("worker.handlers.ocr.detect_bubbles_yolo")
-@patch("worker.handlers.ocr.try_cloud_ai_vision")
+@patch("worker.handlers.ocr.try_cloud_ai_vision_batch")
+@patch("worker.handlers.ocr.model_manager")
 @patch("worker.handlers.ocr.requests.get")
 @patch("worker.handlers.ocr.requests.post")
 @patch("worker.handlers.ocr.OCR_CONFIG")
@@ -103,6 +114,7 @@ def test_process_ocr_vlm_openrouter(
     mock_ocr_config,
     mock_post,
     mock_get,
+    mock_model_manager,
     mock_try_cloud_vlm,
     mock_detect_yolo,
     mock_download,
@@ -110,6 +122,8 @@ def test_process_ocr_vlm_openrouter(
     mock_ocr_config.provider = "openrouter"
     mock_ocr_config.resolve_key.return_value = "fake-openrouter-key"
     mock_ocr_config.vlm_model = "qwen/qwen3-vl-8b-instruct"
+
+    mock_model_manager.get_paddle_ocr_detector.return_value = MagicMock()
 
     mock_download.return_value = get_dummy_image_bytes()
     mock_detect_yolo.return_value = [
@@ -120,9 +134,11 @@ def test_process_ocr_vlm_openrouter(
             "safe_rect": [15, 25, 90, 70],
         }
     ]
-    mock_try_cloud_vlm.return_value = (
-        '```json\n{"text": "Hello from OpenRouter VLM OCR"}\n```'
-    )
+    mock_try_cloud_vlm.return_value = json.dumps({
+        "results": [
+            {"id": "region_0", "text": "Hello from OpenRouter VLM OCR"}
+        ]
+    })
 
     mock_image_info = {"id": "image-uuid-1", "panels": []}
     mock_get_res = MagicMock()
@@ -142,6 +158,8 @@ def test_process_ocr_vlm_openrouter(
     assert args[0] == "openrouter"
     assert args[1] == "fake-openrouter-key"
     assert args[2] == "qwen/qwen3-vl-8b-instruct"
+    assert len(args[3]) == 1
+    assert args[3][0]["id"] == "region_0"
 
     mock_post.assert_called_once()
     payload = mock_post.call_args[1]["json"]
@@ -150,7 +168,8 @@ def test_process_ocr_vlm_openrouter(
 
 @patch("worker.handlers.ocr.download_image")
 @patch("worker.handlers.ocr.detect_bubbles_yolo")
-@patch("worker.handlers.ocr.try_cloud_ai_vision")
+@patch("worker.handlers.ocr.try_cloud_ai_vision_batch")
+@patch("worker.handlers.ocr.model_manager")
 @patch("worker.handlers.ocr.requests.get")
 @patch("worker.handlers.ocr.requests.post")
 @patch("worker.handlers.ocr.OCR_CONFIG")
@@ -164,6 +183,7 @@ def test_process_ocr_vlm_nvidia(
     mock_ocr_config,
     mock_post,
     mock_get,
+    mock_model_manager,
     mock_try_cloud_vlm,
     mock_detect_yolo,
     mock_download,
@@ -171,6 +191,8 @@ def test_process_ocr_vlm_nvidia(
     mock_ocr_config.provider = "nvidia"
     mock_ocr_config.resolve_key.return_value = "fake-nvidia-key"
     mock_ocr_config.vlm_model = "nvidia/nemotron-nano-12b-v2-vl"
+
+    mock_model_manager.get_paddle_ocr_detector.return_value = MagicMock()
 
     mock_download.return_value = get_dummy_image_bytes()
     mock_detect_yolo.return_value = [
@@ -181,7 +203,11 @@ def test_process_ocr_vlm_nvidia(
             "safe_rect": [15, 25, 90, 70],
         }
     ]
-    mock_try_cloud_vlm.return_value = json.dumps({"text": "Hello from Nvidia VLM OCR"})
+    mock_try_cloud_vlm.return_value = json.dumps({
+        "results": [
+            {"id": "region_0", "text": "Hello from Nvidia VLM OCR"}
+        ]
+    })
 
     mock_image_info = {"id": "image-uuid-1", "panels": []}
     mock_get_res = MagicMock()
@@ -201,6 +227,8 @@ def test_process_ocr_vlm_nvidia(
     assert args[0] == "nvidia"
     assert args[1] == "fake-nvidia-key"
     assert args[2] == "nvidia/nemotron-nano-12b-v2-vl"
+    assert len(args[3]) == 1
+    assert args[3][0]["id"] == "region_0"
 
     mock_post.assert_called_once()
     payload = mock_post.call_args[1]["json"]
@@ -210,7 +238,7 @@ def test_process_ocr_vlm_nvidia(
 @patch("worker.handlers.ocr.download_image")
 @patch("worker.handlers.ocr.detect_bubbles_yolo")
 @patch("worker.handlers.ocr.try_local_vlm_vision")
-@patch("worker.handlers.ocr.try_cloud_ai_vision")
+@patch("worker.handlers.ocr.model_manager")
 @patch("worker.handlers.ocr.requests.get")
 @patch("worker.handlers.ocr.requests.post")
 @patch("worker.handlers.ocr.OCR_CONFIG")
@@ -225,7 +253,7 @@ def test_process_ocr_vlm_local_fallback(
     mock_ocr_config,
     mock_post,
     mock_get,
-    mock_try_cloud_vlm,
+    mock_model_manager,
     mock_try_local_vlm,
     mock_detect_yolo,
     mock_download,
@@ -233,6 +261,8 @@ def test_process_ocr_vlm_local_fallback(
     mock_ocr_config.provider = ""
     mock_ocr_config.resolve_key.return_value = ""
     mock_ocr_config.vlm_model = ""
+
+    mock_model_manager.get_paddle_ocr_detector.return_value = MagicMock()
 
     mock_download.return_value = get_dummy_image_bytes()
     mock_detect_yolo.return_value = [
@@ -258,7 +288,6 @@ def test_process_ocr_vlm_local_fallback(
     job_data = {"imageId": "image-uuid-1"}
     process_ocr(job_data)
 
-    mock_try_cloud_vlm.assert_not_called()
     mock_try_local_vlm.assert_called_once()
     args, kwargs = mock_try_local_vlm.call_args
     assert args[0] == "local-vlm-model"

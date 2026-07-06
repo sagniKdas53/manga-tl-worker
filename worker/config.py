@@ -76,7 +76,7 @@ YOLO_CONF_THRESHOLD = float(os.environ.get("YOLO_CONF_THRESHOLD", "0.25"))
 YOLO_INPUT_SIZE = int(os.environ.get("YOLO_INPUT_SIZE", "1280"))
 YOLO_MASK_EROSION = int(os.environ.get("YOLO_MASK_EROSION", "3"))
 YOLO_PINNED_CHECKSUM = (
-    "f081f02a40601e3a1d4f5bf4e1a5a1a84340a0e52212d170e3bc5b679df97dcf"
+    "c9208cb610aa35b8f8dc7ef0890182322992a43399a853093ad5d04a3764af4f"
 )
 YOLO_FALLBACK_MODE = os.environ.get("YOLO_FALLBACK_MODE", "opencv").lower()
 

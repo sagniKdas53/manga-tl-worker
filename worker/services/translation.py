@@ -638,6 +638,161 @@ def try_cloud_ai_vision(
             return None
 
 
+def try_cloud_ai_vision_batch(
+    provider,
+    api_key,
+    model,
+    crops,  # list of dicts: [{"id": str, "base64": str}]
+    response_schema,
+    system_prompt=None,
+    request_id=None,
+):
+    req_prefix = f"[{request_id}] " if request_id else ""
+    global PROVIDER_COOLDOWNS
+    cooldown_until = PROVIDER_COOLDOWNS.get(provider, 0.0)
+    if time.time() < cooldown_until:
+        logger.warning(
+            f"{req_prefix}Skipping vision batch request for provider '{provider}' because it is in cooldown for another {int(cooldown_until - time.time())} seconds."
+        )
+        return None
+
+    enforce_rate_limit()
+
+    url, headers, actual_model = _get_api_url_and_headers(provider, api_key, model)
+    if not url:
+        return None
+
+    prompt = (
+        "You are an expert manga OCR system. Perform OCR on each of the provided image crops. "
+        "Each crop is labeled with a Region ID header (e.g., 'Region ID: crop_0'). "
+        "Extract the text and map it back to the ID exactly as specified in the JSON schema."
+    )
+
+    if provider == "anthropic":
+        content_parts = [{"type": "text", "text": prompt}]
+        for crop in crops:
+            content_parts.append({"type": "text", "text": f"Region ID: {crop['id']}"})
+            content_parts.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": crop["base64"],
+                }
+            })
+        payload = {
+            "model": actual_model,
+            "max_tokens": 4096,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": content_parts,
+                }
+            ],
+        }
+        if system_prompt:
+            payload["system"] = system_prompt
+        elif response_schema:
+            payload["system"] = "Respond with a valid JSON object matching the requested schema."
+    else:
+        # openai, openrouter, gemini, nvidia, etc.
+        user_message_content = [{"type": "text", "text": prompt}]
+        for crop in crops:
+            user_message_content.append({"type": "text", "text": f"Region ID: {crop['id']}"})
+            user_message_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{crop['base64']}"},
+            })
+
+        payload = {
+            "model": actual_model,
+            "messages": [{"role": "user", "content": user_message_content}],
+        }
+        if system_prompt:
+            payload["messages"].insert(0, {"role": "system", "content": system_prompt})
+
+        if response_schema:
+            if provider == "nvidia":
+                payload["response_format"] = {"type": "json_object"}
+            else:
+                payload["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "vision_schema",
+                        "schema": response_schema,
+                        "strict": True,
+                    },
+                }
+                if provider == "openrouter":
+                    payload["plugins"] = [{"id": "response-healing"}]
+
+    max_retries = 3
+    base_backoff = 2.0
+
+    for attempt in range(max_retries + 1):
+        try:
+            logger.info(
+                f"{req_prefix}Sending batched vision request to '{provider}' using model '{actual_model}' with {len(crops)} crops (attempt {attempt + 1}/{max_retries + 1})...."
+            )
+            start = time.perf_counter()
+
+            response = requests.post(url, headers=headers, json=payload, timeout=120)
+
+            if response.status_code == 429:
+                if attempt < max_retries:
+                    sleep_time = base_backoff * (2**attempt)
+                    logger.warning(
+                        f"{req_prefix}Vision batch provider '{provider}' returned 429. Retrying in {sleep_time:.2f}s..."
+                    )
+                    time.sleep(sleep_time)
+                    continue
+                else:
+                    logger.warning(
+                        f"{req_prefix}Vision batch provider '{provider}' returned 429. Initiating 60s cooldown."
+                    )
+                    PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
+                    return None
+
+            response.raise_for_status()
+            data = response.json()
+
+            elapsed = time.perf_counter() - start
+            logger.info(
+                f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s"
+            )
+
+            if provider == "anthropic":
+                content = data.get("content", [{}])[0].get("text", "")
+                usage = data.get("usage", {})
+                prompt_tokens = usage.get("input_tokens", 0)
+                completion_tokens = usage.get("output_tokens", 0)
+                total_tokens = prompt_tokens + completion_tokens
+            else:
+                content = (
+                    data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                )
+                usage = data.get("usage", {})
+                prompt_tokens = usage.get("prompt_tokens", 0)
+                completion_tokens = usage.get("completion_tokens", 0)
+                total_tokens = usage.get("total_tokens", 0)
+
+            logger.info(
+                f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}"
+            )
+            cost = estimate_cost(
+                actual_model, prompt_tokens, completion_tokens, provider
+            )
+            logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
+
+            return content
+
+        except Exception as e:
+            logger.error(f"{req_prefix}Vision Batch OCR failed: {e}")
+            if "response" in locals() and hasattr(response, "text"):
+                logger.error(f"Response text: {response.text}")
+            return None
+
+
 def try_local_ai(prompt, text, response_schema=None, request_id=None):
     req_prefix = f"[{request_id}] " if request_id else ""
     enforce_rate_limit()

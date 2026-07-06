@@ -21,6 +21,11 @@ def parse_paddle_ocr_results(raw_results):
             rec_texts = result.get("rec_texts", [])
             rec_scores = result.get("rec_scores", [])
 
+            # Support detection-only mode
+            if dt_polys and not rec_texts:
+                rec_texts = [""] * len(dt_polys)
+                rec_scores = [1.0] * len(dt_polys)
+
             count = min(len(dt_polys), len(rec_texts), len(rec_scores))
             for i in range(count):
                 bbox = dt_polys[i]
