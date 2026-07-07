@@ -1,12 +1,14 @@
 import uuid
 import logging
 import requests
+import concurrent.futures
 from worker.config import (
     logger,
     CALLBACK_URL,
     BACKEND_HEADERS,
     TL_CONFIG,
     redis_client,
+    CLOUD_CONCURRENCY,
 )
 from worker.services.translation import (
     should_translate_region,
@@ -116,24 +118,14 @@ def process_translation(job_data):
             unmatched_regions, conversations, max_batch_size
         )
 
-        for idx, chunk in enumerate(unmatched_chunks):
+        def process_chunk(idx, chunk):
             logger.info(
                 f"{req_prefix}Processing batch chunk {idx + 1}/{len(unmatched_chunks)} ({len(chunk)} regions)..."
             )
-            chunk_mapping = None
-
-            # 1. Standard LLM batch translation
-            logger.info(
-                f"{req_prefix}Running standard batch translation for chunk {idx + 1}..."
-            )
             try:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        f"{req_prefix}translate_batch_llm input chunk: {chunk}"
-                    )
-                    logger.debug(
-                        f"{req_prefix}translate_batch_llm prompt context: {context_str}"
-                    )
+                    logger.debug(f"{req_prefix}translate_batch_llm input chunk: {chunk}")
+                    logger.debug(f"{req_prefix}translate_batch_llm prompt context: {context_str}")
 
                 batch_res = translate_batch_llm(
                     chunk,
@@ -145,19 +137,24 @@ def process_translation(job_data):
                     provider=provider,
                     llm_model=tl_model,
                 )
-
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(f"{req_prefix}translate_batch_llm output: {batch_res}")
 
-                chunk_mapping = parse_and_validate_batch(batch_res, chunk)
+                return parse_and_validate_batch(batch_res, chunk)
             except Exception as e:
-                logger.error(
-                    f"{req_prefix}Standard batch translation failed for chunk {idx + 1}: {e}"
-                )
+                logger.error(f"{req_prefix}Standard batch translation failed for chunk {idx + 1}: {e}")
+                return None
 
-            if chunk_mapping:
-                for rid, trans in chunk_mapping.items():
-                    batch_mapping[rid] = trans
+        with concurrent.futures.ThreadPoolExecutor(max_workers=CLOUD_CONCURRENCY) as executor:
+            futures = {
+                executor.submit(process_chunk, idx, chunk): chunk
+                for idx, chunk in enumerate(unmatched_chunks)
+            }
+            for future in concurrent.futures.as_completed(futures):
+                chunk_mapping = future.result()
+                if chunk_mapping:
+                    for rid, trans in chunk_mapping.items():
+                        batch_mapping[rid] = trans
 
         failed_batch_regions = []
         # Validate output for each unmatched region
@@ -193,17 +190,13 @@ def process_translation(job_data):
                 failed_batch_regions, conversations, max_batch_size
             )
 
-            retry_mapping = {}
-            for idx, r_chunk in enumerate(retry_chunks):
+            def process_retry_chunk(idx, r_chunk):
                 logger.info(
                     f"{req_prefix}Processing retry batch chunk {idx + 1}/{len(retry_chunks)} ({len(r_chunk)} regions)..."
                 )
-                r_chunk_mapping = None
                 try:
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            f"{req_prefix}Retry translate_batch_llm input chunk: {r_chunk}"
-                        )
+                        logger.debug(f"{req_prefix}Retry translate_batch_llm input chunk: {r_chunk}")
 
                     retry_res = translate_batch_llm(
                         r_chunk,
@@ -215,20 +208,25 @@ def process_translation(job_data):
                         provider=provider,
                         llm_model=tl_model,
                     )
-
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            f"{req_prefix}Retry translate_batch_llm output: {retry_res}"
-                        )
+                        logger.debug(f"{req_prefix}Retry translate_batch_llm output: {retry_res}")
 
-                    r_chunk_mapping = parse_and_validate_batch(retry_res, r_chunk)
+                    return parse_and_validate_batch(retry_res, r_chunk)
                 except Exception as e:
-                    logger.error(
-                        f"{req_prefix}Retry batch chunk {idx + 1} translation failed: {e}"
-                    )
-                if r_chunk_mapping:
-                    for rid, trans in r_chunk_mapping.items():
-                        retry_mapping[rid] = trans
+                    logger.error(f"{req_prefix}Retry batch chunk {idx + 1} translation failed: {e}")
+                    return None
+
+            retry_mapping = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=CLOUD_CONCURRENCY) as executor:
+                futures = {
+                    executor.submit(process_retry_chunk, idx, r_chunk): r_chunk
+                    for idx, r_chunk in enumerate(retry_chunks)
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    r_chunk_mapping = future.result()
+                    if r_chunk_mapping:
+                        for rid, trans in r_chunk_mapping.items():
+                            retry_mapping[rid] = trans
 
             still_failed_regions = []
             for r in failed_batch_regions:

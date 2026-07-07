@@ -6,6 +6,7 @@ import logging
 import json
 import os
 import base64
+import concurrent.futures
 from functools import cmp_to_key
 
 from worker.config import (
@@ -15,6 +16,7 @@ from worker.config import (
     YOLO_MASK_EROSION,
     redis_client,
     OCR_CONFIG,
+    CLOUD_CONCURRENCY,
 )
 from worker.model_manager import model_manager
 from worker.utils.image import downscale_for_ocr, calculate_overlap_area, download_image

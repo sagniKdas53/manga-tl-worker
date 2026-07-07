@@ -71,6 +71,7 @@ BACKEND_HEADERS = {"X-Internal-Token": INTERNAL_API_TOKEN} if INTERNAL_API_TOKEN
 RATE_LIMIT = os.environ.get("RATE_LIMIT", "").strip()
 MODEL_TTL = int(os.environ.get("MODEL_TTL", "3600"))  # Default: 1 hour in seconds
 HEALTH_PORT = int(os.environ.get("HEALTH_PORT", "8000"))
+CLOUD_CONCURRENCY = int(os.environ.get("CLOUD_CONCURRENCY", "1"))
 
 # Clients
 redis_client = redis.Redis(
