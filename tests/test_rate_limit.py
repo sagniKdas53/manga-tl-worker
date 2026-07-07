@@ -67,3 +67,60 @@ def test_job_costs():
     costs = get_job_costs()
     assert len(costs) == 1
     assert costs[0]["model"] == "model:free"
+
+
+def test_concurrent_cost_tracking():
+    from concurrent.futures import ThreadPoolExecutor
+    reset_job_costs()
+
+    def worker(idx):
+        estimate_cost(f"model_{idx}", 100, 50)
+
+    num_threads = 10
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        executor.map(worker, range(num_threads))
+
+    costs = get_job_costs()
+    assert len(costs) == num_threads
+
+    models = {c["model"] for c in costs}
+    assert len(models) == num_threads
+    for idx in range(num_threads):
+        assert f"model_{idx}" in models
+
+
+@patch("worker.utils.rate_limit.time")
+def test_concurrent_rate_limiting(mock_time):
+    mock_time.time.return_value = 100.0
+    os.environ["RATE_LIMIT"] = "60"  # 1s delay
+
+    import worker.utils.rate_limit as rlimit
+    rlimit.LAST_REQUEST_TIME = 99.5
+
+    current_time = 100.0
+
+    def mock_sleep(seconds):
+        nonlocal current_time
+        current_time += seconds
+        mock_time.time.return_value = current_time
+
+    mock_time.sleep.side_effect = mock_sleep
+
+    def worker():
+        enforce_rate_limit()
+
+    from concurrent.futures import ThreadPoolExecutor
+    num_threads = 3
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = [executor.submit(worker) for _ in range(num_threads)]
+        for f in futures:
+            f.result()
+
+    assert mock_time.sleep.call_count == 3
+    sleep_args = [call[0][0] for call in mock_time.sleep.call_args_list]
+    assert sleep_args[0] == pytest.approx(0.5)
+    assert sleep_args[1] == pytest.approx(1.0)
+    assert sleep_args[2] == pytest.approx(1.0)
+
+    del os.environ["RATE_LIMIT"]
+

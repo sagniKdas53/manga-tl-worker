@@ -305,24 +305,30 @@ def process_ocr(job_data):
         return
 
     try:
+        results = []
+        ocr_upscale = 1.0
+        img_decoded = None
+        img_original = None
+        detected_bubbles = None
+        img = None
+
+        disable_local_ocr = os.environ.get(
+            "DISABLE_LOCAL_OCR", ""
+        ).strip().lower() in ("true", "1", "yes")
+
+        provider = (
+            (job_data.get("ocrProvider") or OCR_CONFIG.provider or "local")
+            .lower()
+            .strip()
+        )
+        use_paddle_ocr = (provider == "local") and not disable_local_ocr
+
+        # WARNING: Even when using Cloud VLM OCR (where transcription is offloaded), local models
+        # (PP-OCR-Det for text detection and YOLO for bubble detection) still execute locally on
+        # this host. We must serialize these local predictions using the "ocr" lock to avoid CPU/GPU
+        # overload and OOM crashes. This local bottleneck will be resolved when remote workers on
+        # dedicated machines are supported, allowing parallel detection and full OCR job queues.
         with acquire_lock("ocr"):
-            results = []
-            ocr_upscale = 1.0  # multiplier to map OCR coords back to original image
-            img_decoded = None  # decoded image reused by both PaddleOCR and MangaOCR
-            img_original = None  # full-resolution image for MangaOCR crops
-
-            # Check if we should disable local OCR
-            disable_local_ocr = os.environ.get(
-                "DISABLE_LOCAL_OCR", ""
-            ).strip().lower() in ("true", "1", "yes")
-
-            provider = (
-                (job_data.get("ocrProvider") or OCR_CONFIG.provider or "local")
-                .lower()
-                .strip()
-            )
-            use_paddle_ocr = (provider == "local") and not disable_local_ocr
-
             # Try PaddleOCR (PP-OCRv5) first — reader is lazily created per language
             paddle_ocr_reader = (
                 model_manager.get_paddle_ocr_reader(source_language)
@@ -433,7 +439,6 @@ def process_ocr(job_data):
 
             if not results:
                 print("[OCR] No text regions detected", flush=True)
-                results = []
 
             # Force GC to reclaim any large temporary tensors created during inference
             gc.collect()
@@ -454,256 +459,268 @@ def process_ocr(job_data):
             if img is not None:
                 detected_bubbles = detect_bubbles_yolo(img)
 
-            regions = []
-            is_yolo_active = detected_bubbles is not None
+        regions = []
+        is_yolo_active = detected_bubbles is not None
 
-            if is_yolo_active:
-                # 1. Map raw PaddleOCR fragments to original image dimensions
-                raw_fragments = []
-                for bbox, text, confidence in results:
-                    xs = [pt[0] * ocr_upscale for pt in bbox]
-                    ys = [pt[1] * ocr_upscale for pt in bbox]
-                    x, y = int(min(xs)), int(min(ys))
-                    width, height = int(max(xs) - x), int(max(ys) - y)
-                    raw_fragments.append(
-                        {
-                            "text": text,
-                            "detectedLanguage": detect_language(text),
-                            "confidence": float(confidence),
-                            "x": x,
-                            "y": y,
-                            "width": width,
-                            "height": height,
-                        }
-                    )
+        if is_yolo_active:
+            # 1. Map raw PaddleOCR fragments to original image dimensions
+            raw_fragments = []
+            for bbox, text, confidence in results:
+                xs = [pt[0] * ocr_upscale for pt in bbox]
+                ys = [pt[1] * ocr_upscale for pt in bbox]
+                x, y = int(min(xs)), int(min(ys))
+                width, height = int(max(xs) - x), int(max(ys) - y)
+                raw_fragments.append(
+                    {
+                        "text": text,
+                        "detectedLanguage": detect_language(text),
+                        "confidence": float(confidence),
+                        "x": x,
+                        "y": y,
+                        "width": width,
+                        "height": height,
+                    }
+                )
 
-                # 2. Pre-generate binary masks for bubbles to compute exact pixel overlap
-                bubble_masks = []
-                for bubble in detected_bubbles:
-                    poly = np.array(bubble["mask_polygon"], dtype=np.int32)
-                    mask = np.zeros((img_h, img_w), dtype=np.uint8)
-                    cv2.fillPoly(mask, [poly], 255)
-                    bubble_masks.append(mask)
+            # 2. Pre-generate binary masks for bubbles to compute exact pixel overlap
+            bubble_masks = []
+            for bubble in detected_bubbles:
+                poly = np.array(bubble["mask_polygon"], dtype=np.int32)
+                mask = np.zeros((img_h, img_w), dtype=np.uint8)
+                cv2.fillPoly(mask, [poly], 255)
+                bubble_masks.append(mask)
 
-                # 3. Assign each raw fragment to exactly one bubble by mask overlap
-                for frag in raw_fragments:
-                    best_b_idx = -1
-                    max_overlap = 0
-                    fx1 = max(0, min(img_w - 1, frag["x"]))
-                    fy1 = max(0, min(img_h - 1, frag["y"]))
-                    fx2 = max(0, min(img_w, frag["x"] + frag["width"]))
-                    fy2 = max(0, min(img_h, frag["y"] + frag["height"]))
+            # 3. Assign each raw fragment to exactly one bubble by mask overlap
+            for frag in raw_fragments:
+                best_b_idx = -1
+                max_overlap = 0
+                fx1 = max(0, min(img_w - 1, frag["x"]))
+                fy1 = max(0, min(img_h - 1, frag["y"]))
+                fx2 = max(0, min(img_w, frag["x"] + frag["width"]))
+                fy2 = max(0, min(img_h, frag["y"] + frag["height"]))
 
-                    if fx2 > fx1 and fy2 > fy1:
-                        for b_idx, mask in enumerate(bubble_masks):
-                            overlap = np.sum(mask[fy1:fy2, fx1:fx2] > 0)
-                            if overlap > max_overlap:
-                                max_overlap = overlap
-                                best_b_idx = b_idx
-                    frag["bubble_idx"] = best_b_idx
+                if fx2 > fx1 and fy2 > fy1:
+                    for b_idx, mask in enumerate(bubble_masks):
+                        overlap = np.sum(mask[fy1:fy2, fx1:fx2] > 0)
+                        if overlap > max_overlap:
+                            max_overlap = overlap
+                            best_b_idx = b_idx
+                frag["bubble_idx"] = best_b_idx
 
-                # 4. Group fragments for each bubble and merge them (or create default crop if empty and we are using Cloud VLM)
-                candidate_regions = []  # regions we need to OCR/transcribe
+            # 4. Group fragments for each bubble and merge them (or create default crop if empty and we are using Cloud VLM)
+            candidate_regions = []  # regions we need to OCR/transcribe
 
-                for b_idx, bubble in enumerate(detected_bubbles):
-                    bx, by, bw, bh = bubble["bbox"]
-                    bubble_mask = bubble_masks[b_idx]
-                    assigned_frags = [
-                        f for f in raw_fragments if f.get("bubble_idx", -1) == b_idx
-                    ]
+            for b_idx, bubble in enumerate(detected_bubbles):
+                bx, by, bw, bh = bubble["bbox"]
+                bubble_mask = bubble_masks[b_idx]
+                assigned_frags = [
+                    f for f in raw_fragments if f.get("bubble_idx", -1) == b_idx
+                ]
 
-                    if not assigned_frags:
-                        # If Cloud VLM is active, we STILL want to crop and VLM-OCR empty bubbles to be safe!
-                        if not use_paddle_ocr:
-                            candidate_regions.append(
-                                {
-                                    "type": "bubble",
-                                    "bubble_idx": b_idx,
-                                    "x": bx,
-                                    "y": by,
-                                    "width": bw,
-                                    "height": bh,
-                                    "poly_pts": bubble["mask_polygon"],
-                                    "safe_rect": bubble["safe_rect"],
-                                    "text": "",
-                                    "confidence": 1.0,
-                                    "bubble": bubble,
-                                }
-                            )
-                        continue
-
-                    # Run proximity merging inside the bubble to separate multiple semantic bubbles
-                    merged_bubble_regions = merge_ocr_regions(
-                        assigned_frags, reading_direction, threshold_ratio=2.0
-                    )
-
-                    for r_sub in merged_bubble_regions:
-                        if len(merged_bubble_regions) == 1:
-                            poly_pts = bubble["mask_polygon"]
-                            sp_x, sp_y, sp_w, sp_h = bx, by, bw, bh
-                            sx, sy, sw, sh = bubble["safe_rect"]
-                        else:
-                            # 1. Get split polygon for this merged region
-                            r_box = [
-                                r_sub["x"],
-                                r_sub["y"],
-                                r_sub["width"],
-                                r_sub["height"],
-                            ]
-                            poly_pts = get_split_polygon(
-                                bubble_mask, r_box, img_w, img_h, margin=20
-                            )
-                            if not poly_pts:
-                                poly_pts = bubble["mask_polygon"]
-
-                            # 2. Bounding box of the split polygon
-                            sp_x, sp_y, sp_w, sp_h = cv2.boundingRect(
-                                np.array(poly_pts, dtype=np.int32)
-                            )
-
-                            # 3. Bounding box of the eroded mask (safe area)
-                            split_mask = np.zeros((img_h, img_w), dtype=np.uint8)
-                            cv2.fillPoly(
-                                split_mask, [np.array(poly_pts, dtype=np.int32)], 255
-                            )
-                            erosion_px = YOLO_MASK_EROSION
-                            kernel_erode = cv2.getStructuringElement(
-                                cv2.MORPH_ELLIPSE,
-                                (2 * erosion_px + 1, 2 * erosion_px + 1),
-                            )
-                            eroded_split_mask = cv2.erode(
-                                split_mask, kernel_erode, iterations=1
-                            )
-                            if cv2.countNonZero(eroded_split_mask) == 0:
-                                eroded_split_mask = split_mask
-                            sx, sy, sw, sh = cv2.boundingRect(eroded_split_mask)
-
+                if not assigned_frags:
+                    # If Cloud VLM is active, we STILL want to crop and VLM-OCR empty bubbles to be safe!
+                    if not use_paddle_ocr:
                         candidate_regions.append(
                             {
                                 "type": "bubble",
                                 "bubble_idx": b_idx,
-                                "x": r_sub["x"],
-                                "y": r_sub["y"],
-                                "width": r_sub["width"],
-                                "height": r_sub["height"],
-                                "poly_pts": poly_pts,
-                                "safe_rect": [sx, sy, sw, sh],
-                                "text": r_sub["text"],
-                                "confidence": r_sub["confidence"],
-                                "bubbleX": sp_x,
-                                "bubbleY": sp_y,
-                                "bubbleWidth": sp_w,
-                                "bubbleHeight": sp_h,
+                                "x": bx,
+                                "y": by,
+                                "width": bw,
+                                "height": bh,
+                                "poly_pts": bubble["mask_polygon"],
+                                "safe_rect": bubble["safe_rect"],
+                                "text": "",
+                                "confidence": 1.0,
                                 "bubble": bubble,
                             }
                         )
+                    continue
 
-                # 5. Add unmatched fragments as merged standalone regions (direct text / SFX)
-                unmatched_frags = [
-                    f for f in raw_fragments if f.get("bubble_idx", -1) == -1
-                ]
-                if unmatched_frags:
-                    merged_unmatched = merge_ocr_regions(
-                        unmatched_frags, reading_direction
-                    )
+                # Run proximity merging inside the bubble to separate multiple semantic bubbles
+                merged_bubble_regions = merge_ocr_regions(
+                    assigned_frags, reading_direction, threshold_ratio=2.0
+                )
 
-                    for idx, r_sub in enumerate(merged_unmatched):
-                        rx, ry, rw, rh = (
+                for r_sub in merged_bubble_regions:
+                    if len(merged_bubble_regions) == 1:
+                        poly_pts = bubble["mask_polygon"]
+                        sp_x, sp_y, sp_w, sp_h = bx, by, bw, bh
+                        sx, sy, sw, sh = bubble["safe_rect"]
+                    else:
+                        # 1. Get split polygon for this merged region
+                        r_box = [
                             r_sub["x"],
                             r_sub["y"],
                             r_sub["width"],
                             r_sub["height"],
+                        ]
+                        poly_pts = get_split_polygon(
+                            bubble_mask, r_box, img_w, img_h, margin=20
+                        )
+                        if not poly_pts:
+                            poly_pts = bubble["mask_polygon"]
+
+                        # 2. Bounding box of the split polygon
+                        sp_x, sp_y, sp_w, sp_h = cv2.boundingRect(
+                            np.array(poly_pts, dtype=np.int32)
                         )
 
-                        # Generate tight padded "virtual bubble" mask to allow typesetter inpainting / background cleaning
-                        pad = 6
-                        px1 = max(0, rx - pad)
-                        py1 = max(0, ry - pad)
-                        px2 = min(img_w, rx + rw + pad)
-                        py2 = min(img_h, ry + rh + pad)
-                        mask_polygon = [[px1, py1], [px2, py1], [px2, py2], [px1, py2]]
-
-                        candidate_regions.append(
-                            {
-                                "type": "direct_text",
-                                "direct_idx": idx,
-                                "x": rx,
-                                "y": ry,
-                                "width": rw,
-                                "height": rh,
-                                "poly_pts": mask_polygon,
-                                "safe_rect": [px1, py1, px2 - px1, py2 - py1],
-                                "text": r_sub["text"],
-                                "confidence": r_sub["confidence"],
-                                "detectedLanguage": r_sub["detectedLanguage"],
-                            }
+                        # 3. Bounding box of the eroded mask (safe area)
+                        split_mask = np.zeros((img_h, img_w), dtype=np.uint8)
+                        cv2.fillPoly(
+                            split_mask, [np.array(poly_pts, dtype=np.int32)], 255
                         )
-
-                # 6. Now, recognize candidates
-                if not use_paddle_ocr:
-                    # CLOUD OCR MODE (VLM Batching)
-                    if candidate_regions:
-                        print(
-                            f"[OCR] VLM OCR Mode active (batched) for {len(candidate_regions)} regions.",
-                            flush=True,
+                        erosion_px = YOLO_MASK_EROSION
+                        kernel_erode = cv2.getStructuringElement(
+                            cv2.MORPH_ELLIPSE,
+                            (2 * erosion_px + 1, 2 * erosion_px + 1),
                         )
-                        provider = job_data.get("ocrProvider") or OCR_CONFIG.provider
-                        api_key = OCR_CONFIG.resolve_key(provider)
+                        eroded_split_mask = cv2.erode(
+                            split_mask, kernel_erode, iterations=1
+                        )
+                        if cv2.countNonZero(eroded_split_mask) == 0:
+                            eroded_split_mask = split_mask
+                        sx, sy, sw, sh = cv2.boundingRect(eroded_split_mask)
 
-                        # Generate base64 crops for all candidate regions
-                        crops_payload = []
-                        for cr_idx, r in enumerate(candidate_regions):
-                            rx, ry, rw, rh = r["x"], r["y"], r["width"], r["height"]
-                            rx1, ry1 = max(0, rx), max(0, ry)
-                            rx2, ry2 = min(img_w, rx + rw), min(img_h, ry + rh)
-
-                            crop = img[ry1:ry2, rx1:rx2]
-                            if crop.size > 0:
-                                _, buffer = cv2.imencode(".jpg", crop)
-                                base64_image = base64.b64encode(buffer).decode("utf-8")
-                                crops_payload.append(
-                                    {"id": f"region_{cr_idx}", "base64": base64_image}
-                                )
-
-                        schema = {
-                            "type": "object",
-                            "properties": {
-                                "results": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "properties": {
-                                            "id": {"type": "string"},
-                                            "text": {"type": "string"},
-                                        },
-                                        "required": ["id", "text"],
-                                    },
-                                }
-                            },
-                            "required": ["results"],
+                    candidate_regions.append(
+                        {
+                            "type": "bubble",
+                            "bubble_idx": b_idx,
+                            "x": r_sub["x"],
+                            "y": r_sub["y"],
+                            "width": r_sub["width"],
+                            "height": r_sub["height"],
+                            "poly_pts": poly_pts,
+                            "safe_rect": [sx, sy, sw, sh],
+                            "text": r_sub["text"],
+                            "confidence": r_sub["confidence"],
+                            "bubbleX": sp_x,
+                            "bubbleY": sp_y,
+                            "bubbleWidth": sp_w,
+                            "bubbleHeight": sp_h,
+                            "bubble": bubble,
                         }
+                    )
 
-                        res_text = None
-                        if crops_payload:
-                            vlm_model = job_data.get("ocrModel") or OCR_CONFIG.vlm_model
-                            # Default model depending on provider
-                            if not vlm_model:
-                                if provider == "openrouter":
-                                    vlm_model = "google/gemini-2.5-flash"
-                                elif provider == "gemini":
-                                    vlm_model = "gemini-1.5-flash"
-                                elif provider == "nvidia":
-                                    vlm_model = "nvidia/nemotron-nano-12b-v2-vl"
+            # 5. Add unmatched fragments as merged standalone regions (direct text / SFX)
+            unmatched_frags = [
+                f for f in raw_fragments if f.get("bubble_idx", -1) == -1
+            ]
+            if unmatched_frags:
+                merged_unmatched = merge_ocr_regions(
+                    unmatched_frags, reading_direction
+                )
 
-                            lang_name = LANG_MAP.get(
-                                source_language.lower(), source_language
+                for idx, r_sub in enumerate(merged_unmatched):
+                    rx, ry, rw, rh = (
+                        r_sub["x"],
+                        r_sub["y"],
+                        r_sub["width"],
+                        r_sub["height"],
+                    )
+
+                    # Generate tight padded "virtual bubble" mask to allow typesetter inpainting / background cleaning
+                    pad = 6
+                    px1 = max(0, rx - pad)
+                    py1 = max(0, ry - pad)
+                    px2 = min(img_w, rx + rw + pad)
+                    py2 = min(img_h, ry + rh + pad)
+                    mask_polygon = [[px1, py1], [px2, py1], [px2, py2], [px1, py2]]
+
+                    candidate_regions.append(
+                        {
+                            "type": "direct_text",
+                            "direct_idx": idx,
+                            "x": rx,
+                            "y": ry,
+                            "width": rw,
+                            "height": rh,
+                            "poly_pts": mask_polygon,
+                            "safe_rect": [px1, py1, px2 - px1, py2 - py1],
+                            "text": r_sub["text"],
+                            "confidence": r_sub["confidence"],
+                            "detectedLanguage": r_sub["detectedLanguage"],
+                        }
+                    )
+
+            # 6. Now, recognize candidates
+            if not use_paddle_ocr:
+                # CLOUD OCR MODE (VLM Batching)
+                if candidate_regions:
+                    print(
+                        f"[OCR] VLM OCR Mode active (batched) for {len(candidate_regions)} regions.",
+                        flush=True,
+                    )
+                    provider = job_data.get("ocrProvider") or OCR_CONFIG.provider
+                    api_key = OCR_CONFIG.resolve_key(provider)
+
+                    # Generate base64 crops for all candidate regions
+                    crops_payload = []
+                    for cr_idx, r in enumerate(candidate_regions):
+                        rx, ry, rw, rh = r["x"], r["y"], r["width"], r["height"]
+                        rx1, ry1 = max(0, rx), max(0, ry)
+                        rx2, ry2 = min(img_w, rx + rw), min(img_h, ry + rh)
+
+                        crop = img[ry1:ry2, rx1:rx2]
+                        if crop.size > 0:
+                            _, buffer = cv2.imencode(".jpg", crop)
+                            base64_image = base64.b64encode(buffer).decode("utf-8")
+                            crops_payload.append(
+                                {"id": f"region_{cr_idx}", "base64": base64_image}
                             )
-                            sys_prompt = (
-                                f"You are an expert manga OCR system. Perform OCR on each of the provided image crops. "
-                                f"The source language is {lang_name}. Return ONLY a valid JSON object matching the schema."
-                            )
 
-                            transcriptions = {}
+                    schema = {
+                        "type": "object",
+                        "properties": {
+                            "results": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "text": {"type": "string"},
+                                    },
+                                    "required": ["id", "text"],
+                                },
+                            }
+                        },
+                        "required": ["results"],
+                    }
+
+                    res_text = None
+                    if crops_payload:
+                        vlm_model = job_data.get("ocrModel") or OCR_CONFIG.vlm_model
+                        # Default model depending on provider
+                        if not vlm_model:
+                            if provider == "openrouter":
+                                vlm_model = "google/gemini-2.5-flash"
+                            elif provider == "gemini":
+                                vlm_model = "gemini-1.5-flash"
+                            elif provider == "nvidia":
+                                vlm_model = "nvidia/nemotron-nano-12b-v2-vl"
+
+                        lang_name = LANG_MAP.get(
+                            source_language.lower(), source_language
+                        )
+                        sys_prompt = (
+                            f"You are an expert manga OCR system. Perform OCR on each of the provided image crops. "
+                            f"The source language is {lang_name}. Return ONLY a valid JSON object matching the schema."
+                        )
+
+                        transcriptions = {}
+
+                        def chunk_list(lst, n):
+                            return [lst[i : i + n] for i in range(0, len(lst), n)]
+
+                        crop_chunks = chunk_list(crops_payload, 10)
+
+                        def process_crop_chunk(chunk_idx, chunk):
+                            print(
+                                f"[OCR] Processing cloud OCR batch chunk {chunk_idx + 1}/{len(crop_chunks)} ({len(chunk)} crops)...",
+                                flush=True,
+                            )
+                            results_list = []
                             if (
                                 provider
                                 in (
@@ -715,41 +732,35 @@ def process_ocr(job_data):
                                 )
                                 and api_key
                             ):
-                                res_text = try_cloud_ai_vision_batch(
-                                    provider,
-                                    api_key,
-                                    vlm_model,
-                                    crops_payload,
-                                    schema,
-                                    system_prompt=sys_prompt,
-                                )
-                                if res_text:
-                                    try:
+                                try:
+                                    chunk_res = try_cloud_ai_vision_batch(
+                                        provider,
+                                        api_key,
+                                        vlm_model,
+                                        chunk,
+                                        schema,
+                                        system_prompt=sys_prompt,
+                                    )
+                                    if chunk_res:
                                         parsed = json.loads(
-                                            res_text.strip()
+                                            chunk_res.strip()
                                             .removeprefix("```json")
                                             .removesuffix("```")
                                             .strip()
                                         )
                                         results_list = parsed.get("results", [])
-                                        for item in results_list:
-                                            item_id = item.get("id", "")
-                                            item_text = item.get("text", "")
-                                            transcriptions[item_id] = item_text
-                                    except Exception as parse_err:
-                                        print(
-                                            f"[OCR] Failed to parse batched VLM response: {parse_err}. Response was: {res_text}",
-                                            flush=True,
-                                        )
+                                except Exception as parse_err:
+                                    print(
+                                        f"[OCR] Failed to parse batched VLM response for chunk {chunk_idx + 1}: {parse_err}",
+                                        flush=True,
+                                    )
                             else:
                                 local_model = (
                                     job_data.get("ocrModel")
                                     or os.environ.get("LOCAL_VLM_MODEL", "").strip()
                                 )
                                 if local_model:
-                                    user_prompt = (
-                                        "Extract the text from this speech bubble."
-                                    )
+                                    user_prompt = "Extract the text from this speech bubble."
                                     crop_schema = {
                                         "type": "object",
                                         "properties": {
@@ -760,7 +771,7 @@ def process_ocr(job_data):
                                         },
                                         "required": ["text"],
                                     }
-                                    for crop_info in crops_payload:
+                                    for crop_info in chunk:
                                         try:
                                             crop_res = try_local_vlm_vision(
                                                 local_model,
@@ -777,108 +788,51 @@ def process_ocr(job_data):
                                                         .removesuffix("```")
                                                         .strip()
                                                     )
-                                                    transcriptions[crop_info["id"]] = (
-                                                        parsed.get("text", "")
-                                                    )
+                                                    results_list.append({
+                                                        "id": crop_info["id"],
+                                                        "text": parsed.get("text", "")
+                                                    })
                                                 except Exception:
-                                                    transcriptions[crop_info["id"]] = (
-                                                        crop_res
-                                                    )
+                                                    results_list.append({
+                                                        "id": crop_info["id"],
+                                                        "text": crop_res
+                                                    })
                                         except Exception as local_vlm_err:
                                             print(
                                                 f"[OCR] Local VLM failed for crop {crop_info['id']}: {local_vlm_err}",
                                                 flush=True,
                                             )
+                            return results_list
 
-                        # Create regions list
-                        for cr_idx, r in enumerate(candidate_regions):
-                            final_text = transcriptions.get(
-                                f"region_{cr_idx}", ""
-                            ).strip()
-                            if final_text:
-                                bg_color = detect_background_color_poly(
-                                    img, r["poly_pts"]
-                                )
-                                if r["type"] == "bubble":
-                                    regions.append(
-                                        {
-                                            "text": final_text,
-                                            "detectedLanguage": detect_language(
-                                                final_text
-                                            ),
-                                            "confidence": 0.99,
-                                            "rotation": 0.0,
-                                            "x": r["x"],
-                                            "y": r["y"],
-                                            "width": r["width"],
-                                            "height": r["height"],
-                                            "panelId": None,
-                                            "bubbleReadingOrder": 0,
-                                            "backgroundColor": bg_color,
-                                            "bubbleX": r.get("bubbleX", r["x"]),
-                                            "bubbleY": r.get("bubbleY", r["y"]),
-                                            "bubbleWidth": r.get(
-                                                "bubbleWidth", r["width"]
-                                            ),
-                                            "bubbleHeight": r.get(
-                                                "bubbleHeight", r["height"]
-                                            ),
-                                            "bubbleId": f"bubble_{r['bubble_idx']}",
-                                            "detectionConfidence": r["bubble"][
-                                                "confidence"
-                                            ],
-                                            "maskPolygon": json.dumps(r["poly_pts"]),
-                                            "safeTextX": r["safe_rect"][0],
-                                            "safeTextY": r["safe_rect"][1],
-                                            "safeTextW": r["safe_rect"][2],
-                                            "safeTextH": r["safe_rect"][3],
-                                        }
-                                    )
-                                else:
-                                    # direct text / free-floating
-                                    regions.append(
-                                        {
-                                            "text": final_text,
-                                            "detectedLanguage": detect_language(
-                                                final_text
-                                            ),
-                                            "confidence": 0.99,
-                                            "rotation": 0.0,
-                                            "x": r["x"],
-                                            "y": r["y"],
-                                            "width": r["width"],
-                                            "height": r["height"],
-                                            "panelId": None,
-                                            "bubbleReadingOrder": 0,
-                                            "backgroundColor": bg_color,
-                                            "bubbleX": r["x"],
-                                            "bubbleY": r["y"],
-                                            "bubbleWidth": r["width"],
-                                            "bubbleHeight": r["height"],
-                                            "bubbleId": f"direct_text_{r['direct_idx']}",
-                                            "detectionConfidence": 0.0,
-                                            "maskPolygon": json.dumps(r["poly_pts"]),
-                                            "safeTextX": r["safe_rect"][0],
-                                            "safeTextY": r["safe_rect"][1],
-                                            "safeTextW": r["safe_rect"][2],
-                                            "safeTextH": r["safe_rect"][3],
-                                        }
-                                    )
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=CLOUD_CONCURRENCY) as executor:
+                            futures = {
+                                executor.submit(process_crop_chunk, idx, chunk): chunk
+                                for idx, chunk in enumerate(crop_chunks)
+                            }
+                            for future in concurrent.futures.as_completed(futures):
+                                results_list = future.result()
+                                for item in results_list:
+                                    item_id = item.get("id", "")
+                                    item_text = item.get("text", "")
+                                    transcriptions[item_id] = item_text
 
-                else:
-                    # LOCAL OCR MODE (Use already-recognized texts in candidates)
-                    for r in candidate_regions:
-                        final_text = r["text"]
+                    # Create regions list
+                    for cr_idx, r in enumerate(candidate_regions):
+                        final_text = transcriptions.get(
+                            f"region_{cr_idx}", ""
+                        ).strip()
                         if final_text:
-                            bg_color = detect_background_color_poly(img, r["poly_pts"])
+                            bg_color = detect_background_color_poly(
+                                img, r["poly_pts"]
+                            )
                             if r["type"] == "bubble":
                                 regions.append(
                                     {
                                         "text": final_text,
-                                        "detectedLanguage": detect_language(final_text)
-                                        if final_text
-                                        else "ja",
-                                        "confidence": r["confidence"],
+                                        "detectedLanguage": detect_language(
+                                            final_text
+                                        ),
+                                        "confidence": 0.99,
                                         "rotation": 0.0,
                                         "x": r["x"],
                                         "y": r["y"],
@@ -889,7 +843,9 @@ def process_ocr(job_data):
                                         "backgroundColor": bg_color,
                                         "bubbleX": r.get("bubbleX", r["x"]),
                                         "bubbleY": r.get("bubbleY", r["y"]),
-                                        "bubbleWidth": r.get("bubbleWidth", r["width"]),
+                                        "bubbleWidth": r.get(
+                                            "bubbleWidth", r["width"]
+                                        ),
                                         "bubbleHeight": r.get(
                                             "bubbleHeight", r["height"]
                                         ),
@@ -905,13 +861,14 @@ def process_ocr(job_data):
                                     }
                                 )
                             else:
+                                # direct text / free-floating
                                 regions.append(
                                     {
                                         "text": final_text,
-                                        "detectedLanguage": detect_language(final_text)
-                                        if final_text
-                                        else r["detectedLanguage"],
-                                        "confidence": r["confidence"],
+                                        "detectedLanguage": detect_language(
+                                            final_text
+                                        ),
+                                        "confidence": 0.99,
                                         "rotation": 0.0,
                                         "x": r["x"],
                                         "y": r["y"],
@@ -935,146 +892,215 @@ def process_ocr(job_data):
                                 )
 
             else:
-                # Fallback mode (legacy OpenCV bubble search)
-                for bbox, text, confidence in results:
-                    xs = [pt[0] * ocr_upscale for pt in bbox]
-                    ys = [pt[1] * ocr_upscale for pt in bbox]
-                    x, y = int(min(xs)), int(min(ys))
-                    width, height = int(max(xs) - x), int(max(ys) - y)
+                # LOCAL OCR MODE (Use already-recognized texts in candidates)
+                for r in candidate_regions:
+                    final_text = r["text"]
+                    if final_text:
+                        bg_color = detect_background_color_poly(img, r["poly_pts"])
+                        if r["type"] == "bubble":
+                            regions.append(
+                                {
+                                    "text": final_text,
+                                    "detectedLanguage": detect_language(final_text)
+                                    if final_text
+                                    else "ja",
+                                    "confidence": r["confidence"],
+                                    "rotation": 0.0,
+                                    "x": r["x"],
+                                    "y": r["y"],
+                                    "width": r["width"],
+                                    "height": r["height"],
+                                    "panelId": None,
+                                    "bubbleReadingOrder": 0,
+                                    "backgroundColor": bg_color,
+                                    "bubbleX": r.get("bubbleX", r["x"]),
+                                    "bubbleY": r.get("bubbleY", r["y"]),
+                                    "bubbleWidth": r.get("bubbleWidth", r["width"]),
+                                    "bubbleHeight": r.get(
+                                        "bubbleHeight", r["height"]
+                                    ),
+                                    "bubbleId": f"bubble_{r['bubble_idx']}",
+                                    "detectionConfidence": r["bubble"][
+                                        "confidence"
+                                    ],
+                                    "maskPolygon": json.dumps(r["poly_pts"]),
+                                    "safeTextX": r["safe_rect"][0],
+                                    "safeTextY": r["safe_rect"][1],
+                                    "safeTextW": r["safe_rect"][2],
+                                    "safeTextH": r["safe_rect"][3],
+                                }
+                            )
+                        else:
+                            regions.append(
+                                {
+                                    "text": final_text,
+                                    "detectedLanguage": detect_language(final_text)
+                                    if final_text
+                                    else r["detectedLanguage"],
+                                    "confidence": r["confidence"],
+                                    "rotation": 0.0,
+                                    "x": r["x"],
+                                    "y": r["y"],
+                                    "width": r["width"],
+                                    "height": r["height"],
+                                    "panelId": None,
+                                    "bubbleReadingOrder": 0,
+                                    "backgroundColor": bg_color,
+                                    "bubbleX": r["x"],
+                                    "bubbleY": r["y"],
+                                    "bubbleWidth": r["width"],
+                                    "bubbleHeight": r["height"],
+                                    "bubbleId": f"direct_text_{r['direct_idx']}",
+                                    "detectionConfidence": 0.0,
+                                    "maskPolygon": json.dumps(r["poly_pts"]),
+                                    "safeTextX": r["safe_rect"][0],
+                                    "safeTextY": r["safe_rect"][1],
+                                    "safeTextW": r["safe_rect"][2],
+                                    "safeTextH": r["safe_rect"][3],
+                                }
+                            )
 
-                    lang = detect_language(text)
-                    bubble_box = detect_bubble_contour(img, x, y, width, height)
+        else:
+            # Fallback mode (legacy OpenCV bubble search)
+            for bbox, text, confidence in results:
+                xs = [pt[0] * ocr_upscale for pt in bbox]
+                ys = [pt[1] * ocr_upscale for pt in bbox]
+                x, y = int(min(xs)), int(min(ys))
+                width, height = int(max(xs) - x), int(max(ys) - y)
 
-                    use_bubble_contour = (
-                        bubble_box
-                        and bubble_box["width"] <= width * 2.5
-                        and bubble_box["height"] <= height * 2.5
+                lang = detect_language(text)
+                bubble_box = detect_bubble_contour(img, x, y, width, height)
+
+                use_bubble_contour = (
+                    bubble_box
+                    and bubble_box["width"] <= width * 2.5
+                    and bubble_box["height"] <= height * 2.5
+                )
+                if use_bubble_contour:
+                    bx, by, bw, bh = (
+                        bubble_box["x"],
+                        bubble_box["y"],
+                        bubble_box["width"],
+                        bubble_box["height"],
                     )
-                    if use_bubble_contour:
-                        bx, by, bw, bh = (
-                            bubble_box["x"],
-                            bubble_box["y"],
-                            bubble_box["width"],
-                            bubble_box["height"],
-                        )
-                    else:
-                        bx, by, bw, bh = x, y, width, height
-
-                    mask_polygon = (
-                        bubble_box.get("maskPolygon") if use_bubble_contour else None
-                    )
-                    bg_color = (
-                        detect_background_color_poly(img, mask_polygon)
-                        if mask_polygon
-                        else detect_background_color(img, x, y, width, height)
-                    )
-
-                    regions.append(
-                        {
-                            "text": text,
-                            "detectedLanguage": lang,
-                            "confidence": float(confidence),
-                            "rotation": 0.0,
-                            "x": x,
-                            "y": y,
-                            "width": width,
-                            "height": height,
-                            "panelId": None,
-                            "bubbleReadingOrder": 0,
-                            "backgroundColor": bg_color,
-                            "bubbleX": bx,
-                            "bubbleY": by,
-                            "bubbleWidth": bw,
-                            "bubbleHeight": bh,
-                            "bubbleId": None,
-                            "detectionConfidence": 0.0,
-                            "maskPolygon": (
-                                json.dumps(mask_polygon) if mask_polygon else None
-                            ),
-                            "safeTextX": bx,
-                            "safeTextY": by,
-                            "safeTextW": bw,
-                            "safeTextH": bh,
-                        }
-                    )
-
-                regions = merge_ocr_regions(regions, reading_direction)
-
-            panel_regions_map = {}
-            unmapped_regions = []
-
-            for r in regions:
-                best_panel_idx = -1
-                max_overlap = 0
-                for idx, p in enumerate(panels):
-                    overlap = calculate_overlap_area(r, p)
-                    if overlap > max_overlap:
-                        max_overlap = overlap
-                        best_panel_idx = idx
-
-                if best_panel_idx != -1:
-                    if best_panel_idx not in panel_regions_map:
-                        panel_regions_map[best_panel_idx] = []
-                    panel_regions_map[best_panel_idx].append(r)
                 else:
-                    unmapped_regions.append(r)
+                    bx, by, bw, bh = x, y, width, height
 
-            ordered_regions = []
-            sorted_panel_indices = sorted(
-                panel_regions_map.keys(), key=lambda idx: panels[idx]["readingOrder"]
-            )
+                mask_polygon = (
+                    bubble_box.get("maskPolygon") if use_bubble_contour else None
+                )
+                bg_color = (
+                    detect_background_color_poly(img, mask_polygon)
+                    if mask_polygon
+                    else detect_background_color(img, x, y, width, height)
+                )
 
-            # Curry the reading direction into the comparator so sort is direction-aware
-            def _bubble_cmp(a, b):
-                return bubble_compare(a, b, reading_direction)
+                regions.append(
+                    {
+                        "text": text,
+                        "detectedLanguage": lang,
+                        "confidence": float(confidence),
+                        "rotation": 0.0,
+                        "x": x,
+                        "y": y,
+                        "width": width,
+                        "height": height,
+                        "panelId": None,
+                        "bubbleReadingOrder": 0,
+                        "backgroundColor": bg_color,
+                        "bubbleX": bx,
+                        "bubbleY": by,
+                        "bubbleWidth": bw,
+                        "bubbleHeight": bh,
+                        "bubbleId": None,
+                        "detectionConfidence": 0.0,
+                        "maskPolygon": (
+                            json.dumps(mask_polygon) if mask_polygon else None
+                        ),
+                        "safeTextX": bx,
+                        "safeTextY": by,
+                        "safeTextW": bw,
+                        "safeTextH": bh,
+                    }
+                )
 
-            for panel_idx in sorted_panel_indices:
-                panel_bubbles = panel_regions_map[panel_idx]
-                panel_bubbles.sort(key=cmp_to_key(_bubble_cmp))
+            regions = merge_ocr_regions(regions, reading_direction)
 
-                for b_order, r in enumerate(panel_bubbles, start=1):
-                    r["bubbleReadingOrder"] = b_order
-                    ordered_regions.append(r)
+        panel_regions_map = {}
+        unmapped_regions = []
 
-            unmapped_regions.sort(key=cmp_to_key(_bubble_cmp))
-            for b_order, r in enumerate(unmapped_regions, start=1):
+        for r in regions:
+            best_panel_idx = -1
+            max_overlap = 0
+            for idx, p in enumerate(panels):
+                overlap = calculate_overlap_area(r, p)
+                if overlap > max_overlap:
+                    max_overlap = overlap
+                    best_panel_idx = idx
+
+            if best_panel_idx != -1:
+                if best_panel_idx not in panel_regions_map:
+                    panel_regions_map[best_panel_idx] = []
+                panel_regions_map[best_panel_idx].append(r)
+            else:
+                unmapped_regions.append(r)
+
+        ordered_regions = []
+        sorted_panel_indices = sorted(
+            panel_regions_map.keys(), key=lambda idx: panels[idx]["readingOrder"]
+        )
+
+        # Curry the reading direction into the comparator so sort is direction-aware
+        def _bubble_cmp(a, b):
+            return bubble_compare(a, b, reading_direction)
+
+        for panel_idx in sorted_panel_indices:
+            panel_bubbles = panel_regions_map[panel_idx]
+            panel_bubbles.sort(key=cmp_to_key(_bubble_cmp))
+
+            for b_order, r in enumerate(panel_bubbles, start=1):
                 r["bubbleReadingOrder"] = b_order
                 ordered_regions.append(r)
 
-            print(
-                f"[OCR] Completed OCR. Found {len(ordered_regions)} text regions (lang={source_language}, direction={reading_direction})",
-                flush=True,
-            )
+        unmapped_regions.sort(key=cmp_to_key(_bubble_cmp))
+        for b_order, r in enumerate(unmapped_regions, start=1):
+            r["bubbleReadingOrder"] = b_order
+            ordered_regions.append(r)
 
-            avg_conf = (
-                sum(r["confidence"] for r in ordered_regions) / len(ordered_regions)
-                if ordered_regions
-                else 1.0
-            )
+        print(
+            f"[OCR] Completed OCR. Found {len(ordered_regions)} text regions (lang={source_language}, direction={reading_direction})",
+            flush=True,
+        )
 
-            rec_model = os.environ.get(
-                "PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec"
-            ).strip()
-            callback_payload = {
-                "imageId": image_id,
-                "modelIdentifier": f"MangaOCR/PaddleOCR({rec_model})",
-                "confidence": avg_conf,
-                "sourceLanguage": source_language,
-                "readingDirection": reading_direction,
-                "regions": ordered_regions,
-            }
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"[OCR] Outputs: callback_payload={callback_payload}")
-            try:
-                res = requests.post(
-                    f"{CALLBACK_URL}/ocr",
-                    json=callback_payload,
-                    headers=BACKEND_HEADERS,
-                )
-                print(f"[OCR] Callback status code: {res.status_code}", flush=True)
-            except Exception as e:
-                print(f"[OCR] Failed to post callback to backend: {e}", flush=True)
-                raise e
+        avg_conf = (
+            sum(r["confidence"] for r in ordered_regions) / len(ordered_regions)
+            if ordered_regions
+            else 1.0
+        )
+
+        rec_model = os.environ.get(
+            "PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec"
+        ).strip()
+        callback_payload = {
+            "imageId": image_id,
+            "modelIdentifier": f"MangaOCR/PaddleOCR({rec_model})",
+            "confidence": avg_conf,
+            "sourceLanguage": source_language,
+            "readingDirection": reading_direction,
+            "regions": ordered_regions,
+        }
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"[OCR] Outputs: callback_payload={callback_payload}")
+        try:
+            res = requests.post(
+                f"{CALLBACK_URL}/ocr",
+                json=callback_payload,
+                headers=BACKEND_HEADERS,
+            )
+            print(f"[OCR] Callback status code: {res.status_code}", flush=True)
+        except Exception as e:
+            print(f"[OCR] Failed to post callback to backend: {e}", flush=True)
+            raise e
     except Exception as e:
-        print(f"[OCR] Error during locked OCR process: {e}", flush=True)
+        print(f"[OCR] Error during OCR process: {e}", flush=True)
         raise e

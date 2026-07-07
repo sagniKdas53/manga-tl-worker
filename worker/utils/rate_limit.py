@@ -7,6 +7,7 @@ from worker.config import redis_client, logger, RENDER_CACHE_DIR
 
 COSTS_FILE = os.environ.get("COSTS_FILE", os.path.join(RENDER_CACHE_DIR, "costs.json"))
 
+RATE_LIMIT_LOCK = threading.Lock()
 LAST_REQUEST_TIME = 0.0
 
 
@@ -31,25 +32,29 @@ def enforce_rate_limit():
 
         if rpm > 0:
             min_delay = 60.0 / rpm
-            now = time.time()
-            elapsed = now - LAST_REQUEST_TIME
-            if elapsed < min_delay:
-                sleep_time = min_delay - elapsed
-                print(
-                    f"[Translation] Rate limit: Sleeping for {sleep_time:.2f} seconds to respect {rate_limit_env} rate limit...",
-                    flush=True,
-                )
-                time.sleep(sleep_time)
-            LAST_REQUEST_TIME = time.time()
+            with RATE_LIMIT_LOCK:
+                now = time.time()
+                elapsed = now - LAST_REQUEST_TIME
+                if elapsed < min_delay:
+                    sleep_time = min_delay - elapsed
+                    print(
+                        f"[Translation] Rate limit: Sleeping for {sleep_time:.2f} seconds to respect {rate_limit_env} rate limit...",
+                        flush=True,
+                    )
+                    time.sleep(sleep_time)
+                LAST_REQUEST_TIME = time.time()
     except Exception as e:
         print(f"[Translation] Error enforcing rate limit: {e}", flush=True)
 
 
-_local_data = threading.local()
+COSTS_LOCK = threading.Lock()
+_job_costs = []
 
 
 def reset_job_costs():
-    _local_data.costs = []
+    global _job_costs
+    with COSTS_LOCK:
+        _job_costs = []
 
 
 def format_cost(cost):
@@ -207,9 +212,9 @@ def update_model_costs(models=None):
 
 
 def get_job_costs():
-    if not hasattr(_local_data, "costs"):
-        _local_data.costs = []
-    return _local_data.costs
+    global _job_costs
+    with COSTS_LOCK:
+        return list(_job_costs)
 
 
 def estimate_cost(model, prompt_tokens, completion_tokens, provider=None):
@@ -229,9 +234,8 @@ def estimate_cost(model, prompt_tokens, completion_tokens, provider=None):
             "model": model,
             "provider": provider or "unknown",
         }
-        if not hasattr(_local_data, "costs"):
-            _local_data.costs = []
-        _local_data.costs.append(cost_info)
+        with COSTS_LOCK:
+            _job_costs.append(cost_info)
         return None
 
     model_lower = (model or "").lower()
@@ -262,9 +266,8 @@ def estimate_cost(model, prompt_tokens, completion_tokens, provider=None):
             "model": model,
             "provider": provider or "unknown",
         }
-        if not hasattr(_local_data, "costs"):
-            _local_data.costs = []
-        _local_data.costs.append(cost_info)
+        with COSTS_LOCK:
+            _job_costs.append(cost_info)
         return 0.0
 
     if prompt_tokens == 0 and completion_tokens == 0:
@@ -314,9 +317,8 @@ def estimate_cost(model, prompt_tokens, completion_tokens, provider=None):
                 "model": model,
                 "provider": provider or "unknown",
             }
-            if not hasattr(_local_data, "costs"):
-                _local_data.costs = []
-            _local_data.costs.append(cost_info)
+            with COSTS_LOCK:
+                _job_costs.append(cost_info)
             return None
 
     cost = (prompt_tokens * in_rate) + (completion_tokens * out_rate)
@@ -330,8 +332,7 @@ def estimate_cost(model, prompt_tokens, completion_tokens, provider=None):
         "provider": provider or "unknown",
     }
 
-    if not hasattr(_local_data, "costs"):
-        _local_data.costs = []
-    _local_data.costs.append(cost_info)
+    with COSTS_LOCK:
+        _job_costs.append(cost_info)
 
     return cost

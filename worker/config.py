@@ -29,21 +29,22 @@ logger = logging.getLogger("translation")
 def _load_docker_secrets():
     import json
     
+    loaded_from_json = set()
     secrets_json = os.environ.get("DOCKER_SECRETS_JSON")
     if secrets_json and os.path.exists(secrets_json):
         try:
             with open(secrets_json, "r") as f:
                 secrets = json.load(f)
                 for k, v in secrets.items():
-                    if k not in os.environ:
-                        os.environ[k] = str(v)
+                    os.environ[k] = str(v)
+                    loaded_from_json.add(k)
         except Exception as e:
             logging.error(f"Failed to load DOCKER_SECRETS_JSON: {e}")
 
     for k, v in list(os.environ.items()):
         if k.endswith("_FILE") and v and os.path.exists(v):
             real_key = k[:-5]
-            if real_key not in os.environ:
+            if real_key not in loaded_from_json:
                 try:
                     with open(v, "r") as f:
                         os.environ[real_key] = f.read().strip()
