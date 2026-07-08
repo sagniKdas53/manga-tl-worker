@@ -34,10 +34,27 @@ def check_stale_job(queue_name, job_data):
     return False
 
 
+def update_job_status(job_id, status, error=None):
+    if not job_id:
+        return
+    try:
+        url = CALLBACK_URL.replace("/jobs/callback", f"/jobs/{job_id}/status")
+        payload = {"status": status}
+        if error:
+            payload["error"] = str(error)
+        requests.patch(url, json=payload, headers=BACKEND_HEADERS, timeout=5)
+    except Exception as e:
+        print(f"[RQ Worker] Failed to update job status to {status}: {e}", flush=True)
+
+
 def process_job_rq(queue_name, job_data):
+    job_id = job_data.get("jobId")
     try:
         if check_stale_job(queue_name, job_data):
+            update_job_status(job_id, "FAILED", "Stale job")
             return
+
+        update_job_status(job_id, "PROCESSING")
 
         if queue_name == "queue:panel-detection":
             process_panel_detection(job_data)
@@ -55,7 +72,10 @@ def process_job_rq(queue_name, job_data):
             process_qa(job_data)
         elif queue_name == "queue:qa-re-ocr":
             process_qa_re_ocr(job_data)
+            
+        update_job_status(job_id, "COMPLETED")
     except Exception as e:
         print(f"[RQ Worker] Error processing job from {queue_name}: {e}", flush=True)
         traceback.print_exc()
+        update_job_status(job_id, "FAILED", str(e))
         raise e  # Triggers RQ retry
