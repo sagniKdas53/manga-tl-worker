@@ -264,7 +264,14 @@ def test_process_qa_vlm_nvidia(
 @patch("worker.handlers.qa.requests.post")
 @patch("worker.handlers.qa.QA_CONFIG")
 def test_process_qa_hybrid_flow(
-    mock_qa_config, mock_post, mock_get, mock_minio, mock_download, mock_render, mock_try_llm, mock_try_vlm
+    mock_qa_config,
+    mock_post,
+    mock_get,
+    mock_minio,
+    mock_download,
+    mock_render,
+    mock_try_llm,
+    mock_try_vlm,
 ):
     mock_qa_config.provider = "gemini"
     mock_qa_config.resolve_key.return_value = "fake-key"
@@ -286,7 +293,7 @@ def test_process_qa_hybrid_flow(
             }
         ],
     }
-    
+
     mock_get_res = MagicMock()
     mock_get_res.status_code = 200
     mock_get_res.json.return_value = mock_image_info
@@ -343,7 +350,6 @@ def test_process_qa_hybrid_flow(
     mock_render.assert_called_once_with("image-uuid-1")
     # Verify VLM was called
     mock_try_vlm.assert_called_once()
-    
+
     # Verify post callbacks (one to prepare, one to final qa)
     assert mock_post.call_count == 2
-

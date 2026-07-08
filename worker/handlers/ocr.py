@@ -312,9 +312,11 @@ def process_ocr(job_data):
         detected_bubbles = None
         img = None
 
-        disable_local_ocr = os.environ.get(
-            "DISABLE_LOCAL_OCR", ""
-        ).strip().lower() in ("true", "1", "yes")
+        disable_local_ocr = os.environ.get("DISABLE_LOCAL_OCR", "").strip().lower() in (
+            "true",
+            "1",
+            "yes",
+        )
 
         provider = (
             (job_data.get("ocrProvider") or OCR_CONFIG.provider or "local")
@@ -608,9 +610,7 @@ def process_ocr(job_data):
                 f for f in raw_fragments if f.get("bubble_idx", -1) == -1
             ]
             if unmatched_frags:
-                merged_unmatched = merge_ocr_regions(
-                    unmatched_frags, reading_direction
-                )
+                merged_unmatched = merge_ocr_regions(unmatched_frags, reading_direction)
 
                 for idx, r_sub in enumerate(merged_unmatched):
                     rx, ry, rw, rh = (
@@ -688,7 +688,6 @@ def process_ocr(job_data):
                         "required": ["results"],
                     }
 
-                    res_text = None
                     if crops_payload:
                         vlm_model = job_data.get("ocrModel") or OCR_CONFIG.vlm_model
                         # Default model depending on provider
@@ -733,6 +732,7 @@ def process_ocr(job_data):
                                 and api_key
                             ):
                                 from worker.config import OCR_CONFIG
+
                                 models_to_try = []
                                 if vlm_model:
                                     models_to_try.append(vlm_model)
@@ -759,7 +759,10 @@ def process_ocr(job_data):
                                             )
                                             results_list = parsed.get("results", [])
                                             if results_list:
-                                                print(f"[OCR] Successfully processed chunk {chunk_idx + 1} using model '{current_model}'", flush=True)
+                                                print(
+                                                    f"[OCR] Successfully processed chunk {chunk_idx + 1} using model '{current_model}'",
+                                                    flush=True,
+                                                )
                                                 break
                                     except Exception as parse_err:
                                         print(
@@ -772,7 +775,9 @@ def process_ocr(job_data):
                                     or os.environ.get("LOCAL_VLM_MODEL", "").strip()
                                 )
                                 if local_model:
-                                    user_prompt = "Extract the text from this speech bubble."
+                                    user_prompt = (
+                                        "Extract the text from this speech bubble."
+                                    )
                                     crop_schema = {
                                         "type": "object",
                                         "properties": {
@@ -800,15 +805,21 @@ def process_ocr(job_data):
                                                         .removesuffix("```")
                                                         .strip()
                                                     )
-                                                    results_list.append({
-                                                        "id": crop_info["id"],
-                                                        "text": parsed.get("text", "")
-                                                    })
+                                                    results_list.append(
+                                                        {
+                                                            "id": crop_info["id"],
+                                                            "text": parsed.get(
+                                                                "text", ""
+                                                            ),
+                                                        }
+                                                    )
                                                 except Exception:
-                                                    results_list.append({
-                                                        "id": crop_info["id"],
-                                                        "text": crop_res
-                                                    })
+                                                    results_list.append(
+                                                        {
+                                                            "id": crop_info["id"],
+                                                            "text": crop_res,
+                                                        }
+                                                    )
                                         except Exception as local_vlm_err:
                                             print(
                                                 f"[OCR] Local VLM failed for crop {crop_info['id']}: {local_vlm_err}",
@@ -816,7 +827,9 @@ def process_ocr(job_data):
                                             )
                             return results_list
 
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=CLOUD_CONCURRENCY) as executor:
+                        with concurrent.futures.ThreadPoolExecutor(
+                            max_workers=CLOUD_CONCURRENCY
+                        ) as executor:
                             futures = {
                                 executor.submit(process_crop_chunk, idx, chunk): chunk
                                 for idx, chunk in enumerate(crop_chunks)
@@ -830,20 +843,14 @@ def process_ocr(job_data):
 
                     # Create regions list
                     for cr_idx, r in enumerate(candidate_regions):
-                        final_text = transcriptions.get(
-                            f"region_{cr_idx}", ""
-                        ).strip()
+                        final_text = transcriptions.get(f"region_{cr_idx}", "").strip()
                         if final_text:
-                            bg_color = detect_background_color_poly(
-                                img, r["poly_pts"]
-                            )
+                            bg_color = detect_background_color_poly(img, r["poly_pts"])
                             if r["type"] == "bubble":
                                 regions.append(
                                     {
                                         "text": final_text,
-                                        "detectedLanguage": detect_language(
-                                            final_text
-                                        ),
+                                        "detectedLanguage": detect_language(final_text),
                                         "confidence": 0.99,
                                         "rotation": 0.0,
                                         "x": r["x"],
@@ -855,9 +862,7 @@ def process_ocr(job_data):
                                         "backgroundColor": bg_color,
                                         "bubbleX": r.get("bubbleX", r["x"]),
                                         "bubbleY": r.get("bubbleY", r["y"]),
-                                        "bubbleWidth": r.get(
-                                            "bubbleWidth", r["width"]
-                                        ),
+                                        "bubbleWidth": r.get("bubbleWidth", r["width"]),
                                         "bubbleHeight": r.get(
                                             "bubbleHeight", r["height"]
                                         ),
@@ -877,9 +882,7 @@ def process_ocr(job_data):
                                 regions.append(
                                     {
                                         "text": final_text,
-                                        "detectedLanguage": detect_language(
-                                            final_text
-                                        ),
+                                        "detectedLanguage": detect_language(final_text),
                                         "confidence": 0.99,
                                         "rotation": 0.0,
                                         "x": r["x"],
@@ -928,13 +931,9 @@ def process_ocr(job_data):
                                     "bubbleX": r.get("bubbleX", r["x"]),
                                     "bubbleY": r.get("bubbleY", r["y"]),
                                     "bubbleWidth": r.get("bubbleWidth", r["width"]),
-                                    "bubbleHeight": r.get(
-                                        "bubbleHeight", r["height"]
-                                    ),
+                                    "bubbleHeight": r.get("bubbleHeight", r["height"]),
                                     "bubbleId": f"bubble_{r['bubble_idx']}",
-                                    "detectionConfidence": r["bubble"][
-                                        "confidence"
-                                    ],
+                                    "detectionConfidence": r["bubble"]["confidence"],
                                     "maskPolygon": json.dumps(r["poly_pts"]),
                                     "safeTextX": r["safe_rect"][0],
                                     "safeTextY": r["safe_rect"][1],
@@ -1090,9 +1089,7 @@ def process_ocr(job_data):
             else 1.0
         )
 
-        rec_model = os.environ.get(
-            "PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec"
-        ).strip()
+        rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
         callback_payload = {
             "imageId": image_id,
             "modelIdentifier": f"MangaOCR/PaddleOCR({rec_model})",

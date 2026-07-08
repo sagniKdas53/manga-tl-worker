@@ -26,9 +26,10 @@ for _noisy_logger in ("PIL", "PIL.PngImagePlugin"):
     logging.getLogger(_noisy_logger).setLevel(logging.WARNING)
 logger = logging.getLogger("translation")
 
+
 def _load_docker_secrets():
     import json
-    
+
     loaded_from_json = set()
     secrets_json = os.environ.get("DOCKER_SECRETS_JSON")
     if secrets_json and os.path.exists(secrets_json):
@@ -50,6 +51,7 @@ def _load_docker_secrets():
                         os.environ[real_key] = f.read().strip()
                 except Exception as e:
                     logging.error(f"Failed to read secret file for {k}: {e}")
+
 
 _load_docker_secrets()
 

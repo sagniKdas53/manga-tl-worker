@@ -71,6 +71,7 @@ def test_job_costs():
 
 def test_concurrent_cost_tracking():
     from concurrent.futures import ThreadPoolExecutor
+
     reset_job_costs()
 
     def worker(idx):
@@ -95,6 +96,7 @@ def test_concurrent_rate_limiting(mock_time):
     os.environ["RATE_LIMIT"] = "60"  # 1s delay
 
     import worker.utils.rate_limit as rlimit
+
     rlimit.LAST_REQUEST_TIME = 99.5
 
     current_time = 100.0
@@ -110,6 +112,7 @@ def test_concurrent_rate_limiting(mock_time):
         enforce_rate_limit()
 
     from concurrent.futures import ThreadPoolExecutor
+
     num_threads = 3
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         futures = [executor.submit(worker) for _ in range(num_threads)]
@@ -123,4 +126,3 @@ def test_concurrent_rate_limiting(mock_time):
     assert sleep_args[2] == pytest.approx(1.0)
 
     del os.environ["RATE_LIMIT"]
-

@@ -69,15 +69,24 @@ def process_job_rq(queue_name, job_data):
                 url = CALLBACK_URL.replace("/jobs/callback", f"/jobs/{job_id}")
                 res = requests.get(url, headers=BACKEND_HEADERS, timeout=5)
                 if res.status_code == 404:
-                    print(f"[RQ Worker] Job {job_id} was deleted/cancelled, skipping.", flush=True)
+                    print(
+                        f"[RQ Worker] Job {job_id} was deleted/cancelled, skipping.",
+                        flush=True,
+                    )
                     return
                 elif res.status_code == 200:
                     job_status = res.json().get("status")
                     if job_status != "PENDING":
-                        print(f"[RQ Worker] Job {job_id} is {job_status} (not PENDING), skipping processing.", flush=True)
+                        print(
+                            f"[RQ Worker] Job {job_id} is {job_status} (not PENDING), skipping processing.",
+                            flush=True,
+                        )
                         return
             except Exception as e:
-                print(f"[RQ Worker] Failed to check job status from backend: {e}", flush=True)
+                print(
+                    f"[RQ Worker] Failed to check job status from backend: {e}",
+                    flush=True,
+                )
 
         update_job_status(job_id, "PROCESSING")
 
@@ -97,7 +106,7 @@ def process_job_rq(queue_name, job_data):
             process_qa(job_data)
         elif queue_name == "queue:qa-re-ocr":
             process_qa_re_ocr(job_data)
-            
+
         update_job_status(job_id, "COMPLETED")
     except Exception as e:
         print(f"[RQ Worker] Error processing job from {queue_name}: {e}", flush=True)

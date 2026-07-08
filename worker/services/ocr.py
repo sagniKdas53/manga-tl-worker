@@ -192,10 +192,16 @@ def perform_redo_ocr(img_crop_bytes, lang):
                 )
                 text = try_cloud_ocr(img_crop_bytes, provider, api_key, current_model)
                 if text and len(text.strip()) > 0:
-                    print(f"[OCR Redo] Cloud AI OCR Success using '{current_model}': '{text}'", flush=True)
+                    print(
+                        f"[OCR Redo] Cloud AI OCR Success using '{current_model}': '{text}'",
+                        flush=True,
+                    )
                     return text.strip(), 1.0
             except Exception as e:
-                print(f"[OCR Redo] Cloud AI OCR with model '{current_model}' failed: {e}", flush=True)
+                print(
+                    f"[OCR Redo] Cloud AI OCR with model '{current_model}' failed: {e}",
+                    flush=True,
+                )
 
     # Try local PaddleOCR first — use the lazy-init reader for the region's language
     _redo_paddle_reader = model_manager.get_paddle_ocr_reader(lang)

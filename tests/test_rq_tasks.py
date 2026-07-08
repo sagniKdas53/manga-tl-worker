@@ -1,6 +1,5 @@
-import pytest
 from unittest.mock import patch, MagicMock
-from worker.rq_tasks import process_job_rq, check_stale_job
+from worker.rq_tasks import process_job_rq
 
 
 @patch("worker.rq_tasks.check_stale_job")
@@ -10,7 +9,7 @@ from worker.rq_tasks import process_job_rq, check_stale_job
 def test_process_job_rq_success(mock_panel, mock_get, mock_update, mock_stale):
     # Setup mocks
     mock_stale.return_value = False
-    
+
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {"status": "PENDING"}
@@ -34,7 +33,7 @@ def test_process_job_rq_success(mock_panel, mock_get, mock_update, mock_stale):
 def test_process_job_rq_cancelled(mock_panel, mock_get, mock_update, mock_stale):
     # Setup mocks
     mock_stale.return_value = False
-    
+
     mock_response = MagicMock()
     mock_response.status_code = 404
     mock_get.return_value = mock_response
@@ -59,7 +58,7 @@ def test_process_job_rq_cancelled(mock_panel, mock_get, mock_update, mock_stale)
 def test_process_job_rq_paused(mock_panel, mock_get, mock_update, mock_stale):
     # Setup mocks
     mock_stale.return_value = False
-    
+
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {"status": "PAUSED"}

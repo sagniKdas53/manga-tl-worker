@@ -801,6 +801,7 @@ def process_render(job_data):
     print(f"[Render] Processing image: {image_id}{progress_str}", flush=True)
 
     from worker.config import QA_MODE
+
     qa_mode_resolved = job_data.get("qaMode") or QA_MODE
 
     if qa_mode_resolved in ("llm", "none"):

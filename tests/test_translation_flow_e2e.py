@@ -82,7 +82,7 @@ def test_core_translation_flow_e2e(
         "id": "image-uuid-1",
         "storagePath": "test/test.png",
         "width": 1000,
-        "height": 1000
+        "height": 1000,
     }
 
     mock_ocr_get_res = MagicMock()
@@ -91,7 +91,7 @@ def test_core_translation_flow_e2e(
         "id": "image-uuid-1",
         "storagePath": "test/test.png",
         "width": 1000,
-        "height": 1000
+        "height": 1000,
     }
 
     mock_layout_get_res = MagicMock()
@@ -178,9 +178,9 @@ def test_core_translation_flow_e2e(
         mock_layout_get_res,
         mock_tl_get_res,
         mock_render_get_res,  # for render phase
-        mock_qa_get_res,      # for QA phase text check
+        mock_qa_get_res,  # for QA phase text check
         mock_render_get_res,  # for QA phase rendering of direct fixes
-        mock_qa_get_res,      # for QA phase VLM check
+        mock_qa_get_res,  # for QA phase VLM check
     ]
 
     # Define all requests.post mocks
@@ -201,7 +201,10 @@ def test_core_translation_flow_e2e(
 
     # --- 2. OCR (Local / PaddleOCR + YOLO Bubble) ---
     mock_ocr_download.return_value = b"dummy"
-    mock_downscale_for_ocr.return_value = (np.full((1000, 1000, 3), 255, dtype=np.uint8), 1.0)
+    mock_downscale_for_ocr.return_value = (
+        np.full((1000, 1000, 3), 255, dtype=np.uint8),
+        1.0,
+    )
     mock_get_paddle_ocr_reader.return_value = MagicMock()
     mock_parse_paddle_ocr_results.return_value = [
         ([[10, 10], [100, 10], [100, 50], [10, 50]], "こんにちは", 0.99),
@@ -283,7 +286,7 @@ def test_core_translation_flow_e2e(
     mock_try_llm_qa.assert_called_once()
     # Verify VLM QA called
     mock_try_vlm.assert_called_once()
-    
+
     # Verify both hybrid preparation and final QA results callback posts were sent
     assert mock_post.call_count == 7
     # Verify MinIO put_object was called (once during process_render, once during process_qa's hybrid direct-fix render)
