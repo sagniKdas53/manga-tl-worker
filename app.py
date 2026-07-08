@@ -144,6 +144,12 @@ def main():  # pylint: disable=too-many-locals
                 )
                 last_status_time = now
 
+            # Check if queue is globally paused
+            is_paused = redis_client.get("system:queue:paused")
+            if is_paused and is_paused.decode("utf-8") == "true":
+                time.sleep(5)
+                continue
+
             # Listen for new jobs on the queue
             job_tuple = redis_client.blpop(queues, timeout=5)
             if isinstance(job_tuple, (list, tuple)) and len(job_tuple) == 2:

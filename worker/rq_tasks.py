@@ -73,8 +73,8 @@ def process_job_rq(queue_name, job_data):
                     return
                 elif res.status_code == 200:
                     job_status = res.json().get("status")
-                    if job_status == "PAUSED":
-                        print(f"[RQ Worker] Job {job_id} is paused, skipping processing for now.", flush=True)
+                    if job_status != "PENDING":
+                        print(f"[RQ Worker] Job {job_id} is {job_status} (not PENDING), skipping processing.", flush=True)
                         return
             except Exception as e:
                 print(f"[RQ Worker] Failed to check job status from backend: {e}", flush=True)
