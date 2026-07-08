@@ -613,56 +613,24 @@ def fit_text_in_box_py(
     }
 
 
-def process_render(job_data):
-    image_id = job_data["imageId"]
-
-    page_num = job_data.get("pageNumber")
-    chapter_num = job_data.get("chapterNumber")
-    queue_len = redis_client.llen("queue:render")
-
-    progress_str = ""
-    if page_num is not None:
-        progress_str = f" | Page {page_num}"
-        if chapter_num is not None:
-            progress_str += f" of Chapter {chapter_num}"
-        progress_str += f" (Queue: {queue_len} remaining)"
-
-    print(f"[Render] Processing image: {image_id}{progress_str}", flush=True)
-
-    from worker.config import QA_MODE
-
-    if QA_MODE in ("llm", "none"):
-        print(
-            f"[Render] QA_MODE is '{QA_MODE}', skipping rendering for image: {image_id}",
-            flush=True,
-        )
-        callback_payload = {"imageId": image_id}
-        try:
-            res = requests.post(
-                f"{CALLBACK_URL}/render", json=callback_payload, headers=BACKEND_HEADERS
-            )
-            print(f"[Render] Callback status code: {res.status_code}", flush=True)
-        except Exception as e:
-            print(f"[Render] Failed to post callback: {e}", flush=True)
-        return
-
+def render_image_core(image_id):
     try:
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
             print(f"[Render] Failed to get image info: {res.status_code}", flush=True)
-            return
+            return False
         image_info = res.json()
         layer_elements = image_info.get("layerElements", [])
     except Exception as e:
         print(f"[Render] Error fetching image details: {e}", flush=True)
-        return
+        return False
 
     try:
         img_bytes = download_image(image_info)
     except Exception as e:
         print(f"[Render] Error downloading image: {e}", flush=True)
-        return
+        return False
 
     try:
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -806,13 +774,42 @@ def process_render(job_data):
         with open(cache_path, "wb") as f:
             f.write(out_bytes)
         logger.info(f"[Render] Cached rendered image to {cache_path}")
+        return True
 
     except Exception as e:
         print(f"[Render] Error rendering typeset: {e}", flush=True)
         import traceback
 
         traceback.print_exc()
-        return
+        return False
+
+
+def process_render(job_data):
+    image_id = job_data["imageId"]
+
+    page_num = job_data.get("pageNumber")
+    chapter_num = job_data.get("chapterNumber")
+    queue_len = redis_client.llen("queue:render")
+
+    progress_str = ""
+    if page_num is not None:
+        progress_str = f" | Page {page_num}"
+        if chapter_num is not None:
+            progress_str += f" of Chapter {chapter_num}"
+        progress_str += f" (Queue: {queue_len} remaining)"
+
+    print(f"[Render] Processing image: {image_id}{progress_str}", flush=True)
+
+    from worker.config import QA_MODE
+    qa_mode_resolved = job_data.get("qaMode") or QA_MODE
+
+    if qa_mode_resolved in ("llm", "none"):
+        print(
+            f"[Render] QA_MODE is '{qa_mode_resolved}', skipping rendering for image: {image_id}",
+            flush=True,
+        )
+    else:
+        render_image_core(image_id)
 
     # Trigger callback
     callback_payload = {"imageId": image_id}
