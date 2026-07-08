@@ -84,6 +84,7 @@ def main():  # pylint: disable=too-many-locals
         "queue:translation",
         "queue:render",
         "queue:qa",
+        "queue:qa-re-ocr",
         "queue:region-redo",
     ]
 

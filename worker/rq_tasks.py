@@ -14,7 +14,17 @@ from worker.handlers import (
 
 
 def check_stale_job(queue_name, job_data):
-    if queue_name in ("queue:translation", "queue:ocr", "queue:qa", "queue:layout"):
+    image_bound_queues = {
+        "queue:panel-detection",
+        "queue:ocr",
+        "queue:layout",
+        "queue:translation",
+        "queue:render",
+        "queue:qa",
+        "queue:qa-re-ocr",
+        "queue:region-redo",
+    }
+    if queue_name in image_bound_queues:
         image_id = job_data.get("imageId")
         if not image_id:
             return False
