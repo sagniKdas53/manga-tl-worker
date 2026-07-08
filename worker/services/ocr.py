@@ -175,18 +175,27 @@ def perform_redo_ocr(img_crop_bytes, lang):
 
     # Try Cloud AI OCR if configured
     if api_key and provider in ("openai", "openrouter", "gemini", "anthropic"):
-        try:
-            print(
-                f"[OCR Redo] Trying Cloud AI OCR with provider '{provider}'...",
-                flush=True,
-            )
-            text = try_cloud_ocr(img_crop_bytes, provider, api_key, model)
-            if text and len(text.strip()) > 0:
-                # TODO: Remove the full text logging when done with tetsing the full flow.
-                print(f"[OCR Redo] Cloud AI OCR Success: '{text}'", flush=True)
-                return text.strip(), 1.0
-        except Exception as e:
-            print(f"[OCR Redo] Cloud AI OCR failed: {e}", flush=True)
+        models_to_try = []
+        if model:
+            models_to_try.append(model)
+        for m in getattr(OCR_CONFIG, "vlm_model_list", []):
+            if m not in models_to_try:
+                models_to_try.append(m)
+        if not models_to_try:
+            models_to_try.append("")
+
+        for current_model in models_to_try:
+            try:
+                print(
+                    f"[OCR Redo] Trying Cloud AI OCR with provider '{provider}' and model '{current_model}'...",
+                    flush=True,
+                )
+                text = try_cloud_ocr(img_crop_bytes, provider, api_key, current_model)
+                if text and len(text.strip()) > 0:
+                    print(f"[OCR Redo] Cloud AI OCR Success using '{current_model}': '{text}'", flush=True)
+                    return text.strip(), 1.0
+            except Exception as e:
+                print(f"[OCR Redo] Cloud AI OCR with model '{current_model}' failed: {e}", flush=True)
 
     # Try local PaddleOCR first — use the lazy-init reader for the region's language
     _redo_paddle_reader = model_manager.get_paddle_ocr_reader(lang)

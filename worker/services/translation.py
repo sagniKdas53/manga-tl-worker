@@ -1049,68 +1049,108 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
         # 1. Cloud LLM Layer
         if provider == "openrouter" and api_key:
             preferred = TL_CONFIG.llm_model or "meta-llama/llama-3-8b-instruct:free"
-            translated = try_cloud_ai(
-                "openrouter",
-                api_key,
-                preferred,
-                prompt,
-                request_id=request_id,
-            )
-            if translated:
-                cleaned = clean_translated_text(translated)
-                if is_valid_translation(text, cleaned, request_id=request_id):
-                    return cleaned
+            models_to_try = [preferred]
+            for m in getattr(TL_CONFIG, "llm_model_list", []):
+                if m not in models_to_try:
+                    models_to_try.append(m)
+            for current_model in models_to_try:
+                try:
+                    translated = try_cloud_ai(
+                        "openrouter",
+                        api_key,
+                        current_model,
+                        prompt,
+                        request_id=request_id,
+                    )
+                    if translated:
+                        cleaned = clean_translated_text(translated)
+                        if is_valid_translation(text, cleaned, request_id=request_id):
+                            return cleaned
+                except Exception as e:
+                    logger.error(f"{req_prefix}OpenRouter translation with model '{current_model}' failed: {e}")
 
         elif provider == "gemini" and api_key:
             # Direct Gemini API fallback
             preferred = TL_CONFIG.llm_model or "gemini-1.5-pro"
-            translated = try_cloud_ai(
-                "gemini", api_key, preferred, prompt, request_id=request_id
-            )
-            if translated:
-                cleaned = clean_translated_text(translated)
-                if is_valid_translation(text, cleaned, request_id=request_id):
-                    return cleaned
+            models_to_try = [preferred]
+            for m in getattr(TL_CONFIG, "llm_model_list", []):
+                if m not in models_to_try:
+                    models_to_try.append(m)
+            for current_model in models_to_try:
+                try:
+                    translated = try_cloud_ai(
+                        "gemini", api_key, current_model, prompt, request_id=request_id
+                    )
+                    if translated:
+                        cleaned = clean_translated_text(translated)
+                        if is_valid_translation(text, cleaned, request_id=request_id):
+                            return cleaned
+                except Exception as e:
+                    logger.error(f"{req_prefix}Gemini translation with model '{current_model}' failed: {e}")
         elif provider == "openai" and api_key:
             openai_model = TL_CONFIG.llm_model or "gpt-4o-mini"
-            translated = try_cloud_ai(
-                "openai",
-                api_key,
-                openai_model,
-                prompt,
-                request_id=request_id,
-            )
-            if translated:
-                cleaned = clean_translated_text(translated)
-                if is_valid_translation(text, cleaned, request_id=request_id):
-                    return cleaned
-        if provider == "nvidia" and api_key:
+            models_to_try = [openai_model]
+            for m in getattr(TL_CONFIG, "llm_model_list", []):
+                if m not in models_to_try:
+                    models_to_try.append(m)
+            for current_model in models_to_try:
+                try:
+                    translated = try_cloud_ai(
+                        "openai",
+                        api_key,
+                        current_model,
+                        prompt,
+                        request_id=request_id,
+                    )
+                    if translated:
+                        cleaned = clean_translated_text(translated)
+                        if is_valid_translation(text, cleaned, request_id=request_id):
+                            return cleaned
+                except Exception as e:
+                    logger.error(f"{req_prefix}OpenAI translation with model '{current_model}' failed: {e}")
+        elif provider == "nvidia" and api_key:
             nvidia_model = TL_CONFIG.llm_model or "google/gemma-3n-e4b-it"
-            translated = try_cloud_ai(
-                "nvidia",
-                api_key,
-                nvidia_model,
-                prompt,
-                request_id=request_id,
-            )
-            if translated:
-                cleaned = clean_translated_text(translated)
-                if is_valid_translation(text, cleaned, request_id=request_id):
-                    return cleaned
+            models_to_try = [nvidia_model]
+            for m in getattr(TL_CONFIG, "llm_model_list", []):
+                if m not in models_to_try:
+                    models_to_try.append(m)
+            for current_model in models_to_try:
+                try:
+                    translated = try_cloud_ai(
+                        "nvidia",
+                        api_key,
+                        current_model,
+                        prompt,
+                        request_id=request_id,
+                    )
+                    if translated:
+                        cleaned = clean_translated_text(translated)
+                        if is_valid_translation(text, cleaned, request_id=request_id):
+                            return cleaned
+                except Exception as e:
+                    logger.error(f"{req_prefix}Nvidia translation with model '{current_model}' failed: {e}")
 
-        if provider == "anthropic" and api_key:
+        elif provider == "anthropic" and api_key:
             anthropic_model = TL_CONFIG.llm_model or "claude-3-5-sonnet-20241022"
-            translated = try_cloud_ai(
-                "anthropic",
-                api_key,
-                anthropic_model,
-                prompt,
-                request_id=request_id,
-            )
-            if translated:
-                cleaned = clean_translated_text(translated)
-                if is_valid_translation(text, cleaned, request_id=request_id):
-                    return cleaned
+            models_to_try = [anthropic_model]
+            for m in getattr(TL_CONFIG, "llm_model_list", []):
+                if m not in models_to_try:
+                    models_to_try.append(m)
+            for current_model in models_to_try:
+                try:
+                    translated = try_cloud_ai(
+                        "anthropic",
+                        api_key,
+                        current_model,
+                        prompt,
+                        request_id=request_id,
+                    )
+                    if translated:
+                        cleaned = clean_translated_text(translated)
+                        if is_valid_translation(text, cleaned, request_id=request_id):
+                            return cleaned
+                except Exception as e:
+                    logger.error(f"{req_prefix}Anthropic translation with model '{current_model}' failed: {e}")
 
     # 2. Local Ollama/LMStudio Layer
     disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
@@ -1275,93 +1315,118 @@ Input:
         )
     else:
         if provider == "openrouter" and api_key:
-            preferred = user_model or "meta-llama/llama-3-8b-instruct:free"
-            logger.info(f"{req_prefix}Batch: Trying OpenRouter ({preferred})...")
-            try:
-                res = try_cloud_ai(
-                    "openrouter",
-                    api_key,
-                    preferred,
-                    prompt,
-                    response_schema,
-                    request_id=request_id,
-                )
-                if res:
-                    return res
-            except Exception as e:
-                logger.error(f"{req_prefix}OpenRouter batch translation failed: {e}")
+            preferred = user_model or TL_CONFIG.llm_model or "meta-llama/llama-3-8b-instruct:free"
+            models_to_try = [preferred]
+            for m in getattr(TL_CONFIG, "llm_model_list", []):
+                if m not in models_to_try:
+                    models_to_try.append(m)
+            for current_model in models_to_try:
+                logger.info(f"{req_prefix}Batch: Trying OpenRouter ({current_model})...")
+                try:
+                    res = try_cloud_ai(
+                        "openrouter",
+                        api_key,
+                        current_model,
+                        prompt,
+                        response_schema,
+                        request_id=request_id,
+                    )
+                    if res:
+                        return res
+                except Exception as e:
+                    logger.error(f"{req_prefix}OpenRouter batch translation with model '{current_model}' failed: {e}")
 
         elif provider == "gemini" and api_key:
             # Try Direct Gemini API
-            preferred = user_model or "gemini-1.5-pro"
-            logger.info(f"{req_prefix}Batch: Trying Gemini ({preferred}) Direct...")
-            try:
-                res = try_cloud_ai(
-                    "gemini",
-                    api_key,
-                    preferred,
-                    prompt,
-                    response_schema,
-                    request_id=request_id,
-                )
-                if res:
-                    return res
-            except Exception as e:
-                logger.error(f"{req_prefix}Gemini Direct batch translation failed: {e}")
+            preferred = user_model or TL_CONFIG.llm_model or "gemini-1.5-pro"
+            models_to_try = [preferred]
+            for m in getattr(TL_CONFIG, "llm_model_list", []):
+                if m not in models_to_try:
+                    models_to_try.append(m)
+            for current_model in models_to_try:
+                logger.info(f"{req_prefix}Batch: Trying Gemini ({current_model}) Direct...")
+                try:
+                    res = try_cloud_ai(
+                        "gemini",
+                        api_key,
+                        current_model,
+                        prompt,
+                        response_schema,
+                        request_id=request_id,
+                    )
+                    if res:
+                        return res
+                except Exception as e:
+                    logger.error(f"{req_prefix}Gemini Direct batch translation with model '{current_model}' failed: {e}")
 
         elif provider == "openai" and api_key:
-            preferred = user_model or "gpt-4o-mini"
-            logger.info(f"{req_prefix}Batch: Trying OpenAI ({preferred}) Direct...")
-            try:
-                res = try_cloud_ai(
-                    "openai",
-                    api_key,
-                    preferred,
-                    prompt,
-                    response_schema,
-                    request_id=request_id,
-                )
-                if res:
-                    return res
-            except Exception as e:
-                logger.error(f"{req_prefix}OpenAI Direct batch translation failed: {e}")
+            preferred = user_model or TL_CONFIG.llm_model or "gpt-4o-mini"
+            models_to_try = [preferred]
+            for m in getattr(TL_CONFIG, "llm_model_list", []):
+                if m not in models_to_try:
+                    models_to_try.append(m)
+            for current_model in models_to_try:
+                logger.info(f"{req_prefix}Batch: Trying OpenAI ({current_model}) Direct...")
+                try:
+                    res = try_cloud_ai(
+                        "openai",
+                        api_key,
+                        current_model,
+                        prompt,
+                        response_schema,
+                        request_id=request_id,
+                    )
+                    if res:
+                        return res
+                except Exception as e:
+                    logger.error(f"{req_prefix}OpenAI Direct batch translation with model '{current_model}' failed: {e}")
 
         elif provider == "anthropic" and api_key:
-            preferred = user_model or "claude-3-5-sonnet-20241022"
-            logger.info(f"{req_prefix}Batch: Trying Anthropic ({preferred}) Direct...")
-            try:
-                res = try_cloud_ai(
-                    "anthropic",
-                    api_key,
-                    preferred,
-                    prompt,
-                    response_schema,
-                    request_id=request_id,
-                )
-                if res:
-                    return res
-            except Exception as e:
-                logger.error(
-                    f"{req_prefix}Anthropic Direct batch translation failed: {e}"
-                )
+            preferred = user_model or TL_CONFIG.llm_model or "claude-3-5-sonnet-20241022"
+            models_to_try = [preferred]
+            for m in getattr(TL_CONFIG, "llm_model_list", []):
+                if m not in models_to_try:
+                    models_to_try.append(m)
+            for current_model in models_to_try:
+                logger.info(f"{req_prefix}Batch: Trying Anthropic ({current_model}) Direct...")
+                try:
+                    res = try_cloud_ai(
+                        "anthropic",
+                        api_key,
+                        current_model,
+                        prompt,
+                        response_schema,
+                        request_id=request_id,
+                    )
+                    if res:
+                        return res
+                except Exception as e:
+                    logger.error(
+                        f"{req_prefix}Anthropic Direct batch translation with model '{current_model}' failed: {e}"
+                    )
 
         # Try Nvidia NIM
-        if provider == "nvidia" and api_key:
-            nvidia_model = user_model or "google/gemma-3n-e4b-it"
-            logger.info(f"{req_prefix}Batch: Trying Nvidia model {nvidia_model}...")
-            try:
-                res = try_cloud_ai(
-                    "nvidia",
-                    api_key,
-                    nvidia_model,
-                    prompt,
-                    response_schema,
-                    request_id=request_id,
-                )
-                if res:
-                    return res
-            except Exception as e:
-                logger.error(f"{req_prefix}Nvidia batch translation failed: {e}")
+        elif provider == "nvidia" and api_key:
+            nvidia_model = user_model or TL_CONFIG.llm_model or "google/gemma-3n-e4b-it"
+            models_to_try = [nvidia_model]
+            for m in getattr(TL_CONFIG, "llm_model_list", []):
+                if m not in models_to_try:
+                    models_to_try.append(m)
+            for current_model in models_to_try:
+                logger.info(f"{req_prefix}Batch: Trying Nvidia model {current_model}...")
+                try:
+                    res = try_cloud_ai(
+                        "nvidia",
+                        api_key,
+                        current_model,
+                        prompt,
+                        response_schema,
+                        request_id=request_id,
+                    )
+                    if res:
+                        return res
+                except Exception as e:
+                    logger.error(f"{req_prefix}Nvidia batch translation with model '{current_model}' failed: {e}")
 
     # Try Local LLM (Ollama/LMStudio)
     disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (

@@ -732,28 +732,40 @@ def process_ocr(job_data):
                                 )
                                 and api_key
                             ):
-                                try:
-                                    chunk_res = try_cloud_ai_vision_batch(
-                                        provider,
-                                        api_key,
-                                        vlm_model,
-                                        chunk,
-                                        schema,
-                                        system_prompt=sys_prompt,
-                                    )
-                                    if chunk_res:
-                                        parsed = json.loads(
-                                            chunk_res.strip()
-                                            .removeprefix("```json")
-                                            .removesuffix("```")
-                                            .strip()
+                                from worker.config import OCR_CONFIG
+                                models_to_try = []
+                                if vlm_model:
+                                    models_to_try.append(vlm_model)
+                                for m in getattr(OCR_CONFIG, "vlm_model_list", []):
+                                    if m not in models_to_try:
+                                        models_to_try.append(m)
+
+                                for current_model in models_to_try:
+                                    try:
+                                        chunk_res = try_cloud_ai_vision_batch(
+                                            provider,
+                                            api_key,
+                                            current_model,
+                                            chunk,
+                                            schema,
+                                            system_prompt=sys_prompt,
                                         )
-                                        results_list = parsed.get("results", [])
-                                except Exception as parse_err:
-                                    print(
-                                        f"[OCR] Failed to parse batched VLM response for chunk {chunk_idx + 1}: {parse_err}",
-                                        flush=True,
-                                    )
+                                        if chunk_res:
+                                            parsed = json.loads(
+                                                chunk_res.strip()
+                                                .removeprefix("```json")
+                                                .removesuffix("```")
+                                                .strip()
+                                            )
+                                            results_list = parsed.get("results", [])
+                                            if results_list:
+                                                print(f"[OCR] Successfully processed chunk {chunk_idx + 1} using model '{current_model}'", flush=True)
+                                                break
+                                    except Exception as parse_err:
+                                        print(
+                                            f"[OCR] Failed for model '{current_model}' on chunk {chunk_idx + 1}: {parse_err}",
+                                            flush=True,
+                                        )
                             else:
                                 local_model = (
                                     job_data.get("ocrModel")

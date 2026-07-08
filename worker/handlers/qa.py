@@ -230,12 +230,12 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     qa_response = None
 
-    def attempt_llm(prov):
-        user_model = job_data.get("qaLlmModel") or QA_CONFIG.llm_model
+    def attempt_llm(prov, model_override=None):
+        user_model = model_override or job_data.get("qaLlmModel") or QA_CONFIG.llm_model
         if prov == "openrouter" and api_key:
             llm_model = (
                 user_model
-                if prov == provider and user_model
+                if user_model
                 else "meta-llama/llama-3-8b-instruct:free"
             )
             try:
@@ -243,21 +243,21 @@ You MUST return a JSON object containing a "results" key with an array of object
                     "openrouter", api_key, llm_model, prompt, QA_JSON_SCHEMA
                 )
             except Exception as e:
-                print(f"[QA] LLM QA via OpenRouter failed: {e}", flush=True)
+                print(f"[QA] LLM QA via OpenRouter with model '{llm_model}' failed: {e}", flush=True)
         elif prov == "gemini" and api_key:
             llm_model = (
-                user_model if prov == provider and user_model else "gemini-1.5-pro"
+                user_model if user_model else "gemini-1.5-pro"
             )
             try:
                 return try_cloud_ai(
                     "gemini", api_key, llm_model, prompt, QA_JSON_SCHEMA
                 )
             except Exception as e:
-                print(f"[QA] LLM QA via Gemini failed: {e}", flush=True)
+                print(f"[QA] LLM QA via Gemini with model '{llm_model}' failed: {e}", flush=True)
         elif prov == "nvidia" and api_key:
             llm_model = (
                 user_model
-                if prov == provider and user_model
+                if user_model
                 else "google/gemma-3n-e4b-it"
             )
             try:
@@ -265,12 +265,28 @@ You MUST return a JSON object containing a "results" key with an array of object
                     "nvidia", api_key, llm_model, prompt, QA_JSON_SCHEMA
                 )
             except Exception as e:
-                print(f"[QA] LLM QA via Nvidia failed: {e}", flush=True)
+                print(f"[QA] LLM QA via Nvidia with model '{llm_model}' failed: {e}", flush=True)
         return None
 
     # Try the preferred provider first
     if provider:
-        qa_response = attempt_llm(provider)
+        if provider in ("openai", "openrouter", "gemini", "nvidia", "anthropic"):
+            user_model = job_data.get("qaLlmModel") or QA_CONFIG.llm_model
+            models_to_try = []
+            if user_model:
+                models_to_try.append(user_model)
+            for m in getattr(QA_CONFIG, "qa_llm_model_list" if hasattr(QA_CONFIG, "qa_llm_model_list") else "llm_model_list", []):
+                if m not in models_to_try:
+                    models_to_try.append(m)
+            if not models_to_try:
+                models_to_try.append("")
+
+            for current_model in models_to_try:
+                qa_response = attempt_llm(provider, current_model)
+                if qa_response:
+                    break
+        else:
+            qa_response = attempt_llm(provider)
 
     local_llm_model = os.environ.get("LOCAL_LLM_MODEL", "").strip()
     disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
@@ -483,12 +499,12 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     qa_response = None
 
-    def attempt_vlm(prov):
-        user_model = job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
+    def attempt_vlm(prov, model_override=None):
+        user_model = model_override or job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
         if prov == "openrouter" and api_key:
             vlm_model = (
                 user_model
-                if prov == provider and user_model
+                if user_model
                 else "google/gemini-1.5-pro"
             )
             try:
@@ -501,10 +517,10 @@ You MUST return a JSON object containing a "results" key with an array of object
                     QA_JSON_SCHEMA,
                 )
             except Exception as e:
-                print(f"[QA] VLM QA via OpenRouter failed: {e}", flush=True)
+                print(f"[QA] VLM QA via OpenRouter with model '{vlm_model}' failed: {e}", flush=True)
         elif prov == "gemini" and api_key:
             vlm_model = (
-                user_model if prov == provider and user_model else "gemini-1.5-pro"
+                user_model if user_model else "gemini-1.5-pro"
             )
             try:
                 return try_cloud_ai_vision(
@@ -516,11 +532,11 @@ You MUST return a JSON object containing a "results" key with an array of object
                     QA_JSON_SCHEMA,
                 )
             except Exception as e:
-                print(f"[QA] VLM QA via Gemini failed: {e}", flush=True)
+                print(f"[QA] VLM QA via Gemini with model '{vlm_model}' failed: {e}", flush=True)
         elif prov == "nvidia" and api_key:
             vlm_model = (
                 user_model
-                if prov == provider and user_model
+                if user_model
                 else "nvidia/nemotron-nano-12b-v2-vl"
             )
             try:
@@ -533,12 +549,28 @@ You MUST return a JSON object containing a "results" key with an array of object
                     QA_JSON_SCHEMA,
                 )
             except Exception as e:
-                print(f"[QA] VLM QA via Nvidia failed: {e}", flush=True)
+                print(f"[QA] VLM QA via Nvidia with model '{vlm_model}' failed: {e}", flush=True)
         return None
 
     # Try the preferred provider first
     if provider:
-        qa_response = attempt_vlm(provider)
+        if provider in ("openai", "openrouter", "gemini", "nvidia", "anthropic"):
+            user_model = job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
+            models_to_try = []
+            if user_model:
+                models_to_try.append(user_model)
+            for m in getattr(QA_CONFIG, "qa_vlm_model_list" if hasattr(QA_CONFIG, "qa_vlm_model_list") else "vlm_model_list", []):
+                if m not in models_to_try:
+                    models_to_try.append(m)
+            if not models_to_try:
+                models_to_try.append("")
+
+            for current_model in models_to_try:
+                qa_response = attempt_vlm(provider, current_model)
+                if qa_response:
+                    break
+        else:
+            qa_response = attempt_vlm(provider)
 
     # Fallback to Local VLM:
     # Attempted only if cloud VLM calls failed (e.g. key missing, or provider is cooled down on 429).
