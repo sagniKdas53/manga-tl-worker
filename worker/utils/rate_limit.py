@@ -32,17 +32,24 @@ def enforce_rate_limit():
 
         if rpm > 0:
             min_delay = 60.0 / rpm
+            sleep_time = 0.0
+            
             with RATE_LIMIT_LOCK:
                 now = time.time()
                 elapsed = now - LAST_REQUEST_TIME
                 if elapsed < min_delay:
                     sleep_time = min_delay - elapsed
-                    print(
-                        f"[Translation] Rate limit: Sleeping for {sleep_time:.2f} seconds to respect {rate_limit_env} rate limit...",
-                        flush=True,
-                    )
-                    time.sleep(sleep_time)
-                LAST_REQUEST_TIME = time.time()
+                    LAST_REQUEST_TIME = now + sleep_time
+                else:
+                    LAST_REQUEST_TIME = now
+                    
+            if sleep_time > 0:
+                print(
+                    f"[Translation] Rate limit: Sleeping for {sleep_time:.2f} seconds to respect {rate_limit_env} rate limit...",
+                    flush=True,
+                )
+                time.sleep(sleep_time)
+                
     except Exception as e:
         print(f"[Translation] Error enforcing rate limit: {e}", flush=True)
 

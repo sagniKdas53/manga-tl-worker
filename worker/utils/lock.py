@@ -2,6 +2,7 @@ import time
 from contextlib import contextmanager
 from worker.config import redis_client, logger
 
+import platform
 
 @contextmanager
 def acquire_lock(lock_name, timeout=600, expire=600):
@@ -10,7 +11,8 @@ def acquire_lock(lock_name, timeout=600, expire=600):
     - timeout: max time to block/wait for the lock to become free.
     - expire: TTL of the lock key in Valkey.
     """
-    lock_key = f"lock:{lock_name}"
+    node_id = platform.node()
+    lock_key = f"lock:{lock_name}:{node_id}"
     start_time = time.time()
     acquired = False
 
