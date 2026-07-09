@@ -77,36 +77,7 @@ def main():  # pylint: disable=too-many-locals
 
         sys.exit(1)
 
-    queues = [
-        "queue:panel-detection",
-        "queue:ocr",
-        "queue:layout",
-        "queue:translation",
-        "queue:render",
-        "queue:qa",
-        "queue:qa-re-ocr",
-        "queue:region-redo",
-    ]
-
-    concurrent_workers = int(os.environ.get("CONCURRENT_WORKERS", "4"))
-    print(
-        f"[Unified Worker] Listening to Redis queues: {queues}. "
-        f"Dispatching to RQ with {concurrent_workers} concurrent workers...",
-        flush=True,
-    )
-
-    # Start RQ workers in the background
-    redis_host = os.environ.get("REDIS_HOST", "localhost")
-    redis_port = os.environ.get("REDIS_PORT", 6379)
-    redis_url = f"redis://{redis_host}:{redis_port}/0"
-    worker_procs = []
-    for _ in range(concurrent_workers):
-        proc = subprocess.Popen(  # pylint: disable=consider-using-with
-            ["rq", "worker", "manga_tasks", "--url", redis_url]
-        )
-        worker_procs.append(proc)
-
-    rq_queue = Queue("manga_tasks", connection=redis_client)
+    print(f"[Unified Worker] Running in HTTP-Push mode. Listening on port {HEALTH_PORT} for ML tasks.", flush=True)
 
     last_status_time = 0.0
     status_interval = 300.0  # 5 minutes in seconds
@@ -129,48 +100,20 @@ def main():  # pylint: disable=too-many-locals
                 loaded = model_manager.get_loaded_models_status(MODEL_TTL)
                 loaded_str = ", ".join(loaded) if loaded else "None"
 
-                # Fetch Redis queue lengths
-                try:
-                    queue_lengths = [f"{q}: {redis_client.llen(q)}" for q in queues]
-                    states_str = ", ".join(queue_lengths)
-                except redis.RedisError as redis_err:
-                    states_str = f"Error fetching queue states ({redis_err})"
-
                 print(
                     f"[Unified Worker Status] Uptime: {uptime_str} | "
-                    f"Loaded Models: {loaded_str} | "
-                    f"Raw Queues: {states_str}",
+                    f"Loaded Models: {loaded_str}",
                     flush=True,
                 )
                 last_status_time = now
 
-            # Check if queue is globally paused
-            is_paused = redis_client.get("system:queue:paused")
-            if is_paused and is_paused.decode("utf-8") == "true":
-                time.sleep(5)
-                continue
-
-            # Listen for new jobs on the queue
-            job_tuple = redis_client.blpop(queues, timeout=5)
-            if isinstance(job_tuple, (list, tuple)) and len(job_tuple) == 2:
-                # pylint: disable=unsubscriptable-object
-                queue_bytes = job_tuple[0]
-                job_json = job_tuple[1]
-                queue_name = queue_bytes.decode("utf-8")
-                job_data = json.loads(job_json)
-
-                # Dispatch to RQ with exponential backoff
-                rq_queue.enqueue(
-                    process_job_rq,
-                    queue_name,
-                    job_data,
-                    retry=Retry(max=3, interval=[10, 30, 60]),
-                    job_timeout=600,
-                )
+            time.sleep(5)
+            
         except Exception as err_main:  # pylint: disable=broad-except
             print(f"[Unified Worker] Error in main loop: {err_main}", flush=True)
+            import traceback
             traceback.print_exc()
-            time.sleep(1)
+            time.sleep(5)
 
 
 if __name__ == "__main__":

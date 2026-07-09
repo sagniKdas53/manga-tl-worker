@@ -1,9 +1,14 @@
 import json
 import time
 import threading
+import os
+import platform
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from worker.config import redis_client, MODEL_TTL
 from worker.model_manager import model_manager
+
+# Import process_job_rq for executing tasks
+from worker.rq_tasks import process_job_rq
 
 # Global reference to start time
 START_TIME = time.time()
@@ -11,16 +16,51 @@ START_TIME = time.time()
 # Seeding completion status
 SEEDING_COMPLETE = False
 
+# Worker State
+ACTIVE_JOBS = 0
+ACTIVE_JOBS_LOCK = threading.Lock()
+MAX_CONCURRENT_JOBS = int(os.environ.get("CONCURRENT_WORKERS", "4"))
+WORKER_API_SECRET = os.environ.get("WORKER_API_SECRET", "").strip()
+WORKER_API_SECRET_FILE = os.environ.get("WORKER_API_SECRET_FILE", "").strip()
+
+if WORKER_API_SECRET_FILE and os.path.exists(WORKER_API_SECRET_FILE):
+    try:
+        with open(WORKER_API_SECRET_FILE, "r") as f:
+            WORKER_API_SECRET = f.read().strip()
+    except Exception as e:
+        print(f"[Health Server] Failed to read WORKER_API_SECRET_FILE: {e}", flush=True)
+
+WORKER_ID = os.environ.get("WORKER_ID", platform.node())
 
 def set_seeding_complete(complete: bool):
     global SEEDING_COMPLETE
     SEEDING_COMPLETE = complete
 
+def _run_job_async(queue_name, job_data):
+    global ACTIVE_JOBS
+    try:
+        process_job_rq(queue_name, job_data)
+    except Exception as e:
+        print(f"[Health Server] Async job execution failed: {e}", flush=True)
+    finally:
+        with ACTIVE_JOBS_LOCK:
+            ACTIVE_JOBS -= 1
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # Suppress request logs to keep stdout clean
         pass
+
+    def check_auth(self):
+        if not WORKER_API_SECRET:
+            return True
+        secret_header = self.headers.get("WORKER_API_SECRET")
+        if secret_header != WORKER_API_SECRET:
+            self.send_response(401)
+            self.end_headers()
+            self.wfile.write(b"Unauthorized")
+            return False
+        return True
 
     def do_GET(self):
         if self.path in ("/health", "/ping"):
@@ -65,18 +105,92 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(response_data).encode("utf-8"))
+
+        elif self.path == "/capabilities":
+            if not self.check_auth():
+                return
+            
+            global ACTIVE_JOBS
+            with ACTIVE_JOBS_LOCK:
+                current_active = ACTIVE_JOBS
+                
+            response_data = {
+                "worker_id": WORKER_ID,
+                "supported_tasks": [
+                    "queue:panel-detection",
+                    "queue:ocr",
+                    "queue:layout",
+                    "queue:translation",
+                    "queue:render",
+                    "queue:qa",
+                    "queue:qa-re-ocr",
+                    "queue:region-redo",
+                ],
+                "max_concurrent_jobs": MAX_CONCURRENT_JOBS,
+                "active_jobs": current_active
+            }
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(response_data).encode("utf-8"))
+
         else:
             self.send_response(404)
             self.end_headers()
             self.wfile.write(b"Not Found")
 
+    def do_POST(self):
+        if self.path == "/api/v1/jobs/submit":
+            if not self.check_auth():
+                return
+            
+            global ACTIVE_JOBS
+            with ACTIVE_JOBS_LOCK:
+                if ACTIVE_JOBS >= MAX_CONCURRENT_JOBS:
+                    self.send_response(429)
+                    self.end_headers()
+                    self.wfile.write(b"Too Many Requests")
+                    return
+                ACTIVE_JOBS += 1
+
+            try:
+                content_length = int(self.headers['Content-Length'])
+                post_data = self.rfile.read(content_length)
+                payload = json.loads(post_data.decode('utf-8'))
+                
+                queue_name = payload.get("queue_name")
+                job_data = payload.get("job_data")
+                
+                if not queue_name or not job_data:
+                    raise ValueError("Missing queue_name or job_data")
+                
+                # Start job in background
+                t = threading.Thread(target=_run_job_async, args=(queue_name, job_data), daemon=True)
+                t.start()
+                
+                self.send_response(202)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "accepted"}).encode('utf-8'))
+                
+            except Exception as e:
+                with ACTIVE_JOBS_LOCK:
+                    ACTIVE_JOBS -= 1
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(f"Bad Request: {e}".encode('utf-8'))
+        else:
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"Not Found")
 
 def start_health_server(port: int):
     """Start the health check HTTP server on a daemon thread."""
 
     def run_server():
         try:
-            server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+            from http.server import ThreadingHTTPServer
+            server = ThreadingHTTPServer(("0.0.0.0", port), HealthCheckHandler)
             print(f"[Health Server] Running on port {port}...", flush=True)
             server.serve_forever()
         except Exception as e:
