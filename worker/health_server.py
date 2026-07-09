@@ -164,14 +164,15 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 if not queue_name or not job_data:
                     raise ValueError("Missing queue_name or job_data")
                 
-                # Start job in background
-                t = threading.Thread(target=_run_job_async, args=(queue_name, job_data), daemon=True)
-                t.start()
-                
                 self.send_response(202)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps({"status": "accepted"}).encode('utf-8'))
+                self.wfile.flush()
+                
+                # Start job in background
+                t = threading.Thread(target=_run_job_async, args=(queue_name, job_data), daemon=True)
+                t.start()
                 
             except Exception as e:
                 with ACTIVE_JOBS_LOCK:
