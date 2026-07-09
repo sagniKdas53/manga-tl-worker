@@ -4,6 +4,7 @@ from worker.config import redis_client, logger
 
 import platform
 
+
 @contextmanager
 def acquire_lock(lock_name, timeout=600, expire=600):
     """

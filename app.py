@@ -2,16 +2,10 @@
 
 import os
 import time
-import json
-import traceback
-import subprocess
-import redis
-from rq import Queue, Retry
 
-from worker.config import redis_client, MODEL_TTL, HEALTH_PORT
+from worker.config import MODEL_TTL, HEALTH_PORT
 from worker.health_server import start_health_server, set_seeding_complete
 from worker.model_manager import model_manager
-from worker.rq_tasks import process_job_rq
 
 
 def seed_models():
@@ -77,7 +71,10 @@ def main():  # pylint: disable=too-many-locals
 
         sys.exit(1)
 
-    print(f"[Unified Worker] Running in HTTP-Push mode. Listening on port {HEALTH_PORT} for ML tasks.", flush=True)
+    print(
+        f"[Unified Worker] Running in HTTP-Push mode. Listening on port {HEALTH_PORT} for ML tasks.",
+        flush=True,
+    )
 
     last_status_time = 0.0
     status_interval = 300.0  # 5 minutes in seconds
@@ -108,10 +105,11 @@ def main():  # pylint: disable=too-many-locals
                 last_status_time = now
 
             time.sleep(5)
-            
+
         except Exception as err_main:  # pylint: disable=broad-except
             print(f"[Unified Worker] Error in main loop: {err_main}", flush=True)
             import traceback
+
             traceback.print_exc()
             time.sleep(5)
 
