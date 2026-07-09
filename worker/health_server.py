@@ -117,21 +117,18 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             with ACTIVE_JOBS_LOCK:
                 current_active = ACTIVE_JOBS
 
-            from worker.config import ALLOWED_QUEUES
-            supported_tasks = ALLOWED_QUEUES if ALLOWED_QUEUES is not None else [
-                "queue:panel-detection",
-                "queue:ocr",
-                "queue:layout",
-                "queue:translation",
-                "queue:render",
-                "queue:qa",
-                "queue:qa-re-ocr",
-                "queue:region-redo",
-            ]
-
             response_data = {
                 "worker_id": WORKER_ID,
-                "supported_tasks": supported_tasks,
+                "supported_tasks": [
+                    "queue:panel-detection",
+                    "queue:ocr",
+                    "queue:layout",
+                    "queue:translation",
+                    "queue:render",
+                    "queue:qa",
+                    "queue:qa-re-ocr",
+                    "queue:region-redo",
+                ],
                 "max_concurrent_jobs": MAX_CONCURRENT_JOBS,
                 "active_jobs": current_active,
             }
@@ -150,30 +147,6 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             if not self.check_auth():
                 return
 
-            try:
-                content_length = int(self.headers["Content-Length"])
-                post_data = self.rfile.read(content_length)
-                payload = json.loads(post_data.decode("utf-8"))
-
-                queue_name = payload.get("queue_name")
-                job_data = payload.get("job_data")
-
-                if not queue_name or not job_data:
-                    raise ValueError("Missing queue_name or job_data")
-            except Exception as e:
-                self.send_response(400)
-                self.end_headers()
-                self.wfile.write(f"Bad Request: {e}".encode("utf-8"))
-                return
-
-            # Check queue filtering
-            from worker.config import ALLOWED_QUEUES
-            if ALLOWED_QUEUES is not None and queue_name not in ALLOWED_QUEUES:
-                self.send_response(429)
-                self.end_headers()
-                self.wfile.write(f"Queue '{queue_name}' is not allowed on this worker".encode("utf-8"))
-                return
-
             global ACTIVE_JOBS
             with ACTIVE_JOBS_LOCK:
                 if ACTIVE_JOBS >= MAX_CONCURRENT_JOBS:
@@ -184,6 +157,16 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 ACTIVE_JOBS += 1
 
             try:
+                content_length = int(self.headers["Content-Length"])
+                post_data = self.rfile.read(content_length)
+                payload = json.loads(post_data.decode("utf-8"))
+
+                queue_name = payload.get("queue_name")
+                job_data = payload.get("job_data")
+
+                if not queue_name or not job_data:
+                    raise ValueError("Missing queue_name or job_data")
+
                 self.send_response(202)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -199,9 +182,9 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 with ACTIVE_JOBS_LOCK:
                     ACTIVE_JOBS -= 1
-                self.send_response(500)
+                self.send_response(400)
                 self.end_headers()
-                self.wfile.write(f"Internal Server Error: {e}".encode("utf-8"))
+                self.wfile.write(f"Bad Request: {e}".encode("utf-8"))
         else:
             self.send_response(404)
             self.end_headers()

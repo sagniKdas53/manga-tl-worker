@@ -76,9 +76,6 @@ MODEL_TTL = int(os.environ.get("MODEL_TTL", "3600"))  # Default: 1 hour in secon
 HEALTH_PORT = int(os.environ.get("HEALTH_PORT", "8000"))
 CLOUD_CONCURRENCY = int(os.environ.get("CLOUD_CONCURRENCY", "1"))
 
-ALLOWED_QUEUES_RAW = os.environ.get("ALLOWED_QUEUES", "").strip()
-ALLOWED_QUEUES = [q.strip() for q in ALLOWED_QUEUES_RAW.split(",") if q.strip()] if ALLOWED_QUEUES_RAW else None
-
 # Clients
 redis_client = redis.Redis(
     host=REDIS_HOST,
