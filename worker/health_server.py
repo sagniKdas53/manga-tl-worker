@@ -18,10 +18,28 @@ SEEDING_COMPLETE = False
 
 # Worker State
 ACTIVE_JOBS = 0
+ACTIVE_HEAVY_JOBS = 0
+ACTIVE_LIGHT_JOBS = 0
 ACTIVE_JOBS_LOCK = threading.Lock()
 MAX_CONCURRENT_JOBS = int(os.environ.get("CONCURRENT_WORKERS", "4"))
 WORKER_API_SECRET = os.environ.get("WORKER_API_SECRET", "").strip()
 WORKER_API_SECRET_FILE = os.environ.get("WORKER_API_SECRET_FILE", "").strip()
+
+HEAVY_QUEUES = {
+    "queue:panel-detection",
+    "queue:ocr",
+    "queue:qa-re-ocr",
+    "queue:region-redo-ocr",
+    "queue:region-redo",  # Legacy unified queue name included for backward compatibility
+}
+
+LIGHT_QUEUES = {
+    "queue:layout",
+    "queue:translation",
+    "queue:render",
+    "queue:qa",
+    "queue:region-redo-tl",
+}
 
 if WORKER_API_SECRET_FILE and os.path.exists(WORKER_API_SECRET_FILE):
     try:
@@ -39,14 +57,18 @@ def set_seeding_complete(complete: bool):
 
 
 def _run_job_async(queue_name, job_data):
-    global ACTIVE_JOBS
+    global ACTIVE_JOBS, ACTIVE_HEAVY_JOBS, ACTIVE_LIGHT_JOBS
     try:
         process_job_rq(queue_name, job_data)
     except Exception as e:
         print(f"[Health Server] Async job execution failed: {e}", flush=True)
     finally:
         with ACTIVE_JOBS_LOCK:
-            ACTIVE_JOBS -= 1
+            if queue_name in HEAVY_QUEUES:
+                ACTIVE_HEAVY_JOBS = max(0, ACTIVE_HEAVY_JOBS - 1)
+            else:
+                ACTIVE_LIGHT_JOBS = max(0, ACTIVE_LIGHT_JOBS - 1)
+            ACTIVE_JOBS = ACTIVE_HEAVY_JOBS + ACTIVE_LIGHT_JOBS
 
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -147,15 +169,6 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             if not self.check_auth():
                 return
 
-            global ACTIVE_JOBS
-            with ACTIVE_JOBS_LOCK:
-                if ACTIVE_JOBS >= MAX_CONCURRENT_JOBS:
-                    self.send_response(429)
-                    self.end_headers()
-                    self.wfile.write(b"Too Many Requests")
-                    return
-                ACTIVE_JOBS += 1
-
             try:
                 content_length = int(self.headers["Content-Length"])
                 post_data = self.rfile.read(content_length)
@@ -167,24 +180,63 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 if not queue_name or not job_data:
                     raise ValueError("Missing queue_name or job_data")
 
-                self.send_response(202)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"status": "accepted"}).encode("utf-8"))
-                self.wfile.flush()
-
-                # Start job in background
-                t = threading.Thread(
-                    target=_run_job_async, args=(queue_name, job_data), daemon=True
-                )
-                t.start()
-
-            except Exception as e:
+                global ACTIVE_JOBS, ACTIVE_HEAVY_JOBS, ACTIVE_LIGHT_JOBS
                 with ACTIVE_JOBS_LOCK:
-                    ACTIVE_JOBS -= 1
+                    # Check legacy global limit first (mainly for patched tests)
+                    if ACTIVE_JOBS >= MAX_CONCURRENT_JOBS:
+                        self.send_response(429)
+                        self.end_headers()
+                        self.wfile.write(b"Too Many Requests: Global concurrency limit reached")
+                        return
+
+                    # Check slot-specific limits
+                    is_heavy = queue_name in HEAVY_QUEUES
+                    if is_heavy:
+                        if ACTIVE_HEAVY_JOBS >= 1:
+                            self.send_response(429)
+                            self.end_headers()
+                            self.wfile.write(b"Too Many Requests: Heavy job slot occupied")
+                            return
+                        ACTIVE_HEAVY_JOBS += 1
+                    else:
+                        if ACTIVE_LIGHT_JOBS >= 1:
+                            self.send_response(429)
+                            self.end_headers()
+                            self.wfile.write(b"Too Many Requests: Light job slot occupied")
+                            return
+                        ACTIVE_LIGHT_JOBS += 1
+
+                    ACTIVE_JOBS = ACTIVE_HEAVY_JOBS + ACTIVE_LIGHT_JOBS
+
+                try:
+                    self.send_response(202)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "accepted"}).encode("utf-8"))
+                    self.wfile.flush()
+
+                    # Start job in background
+                    t = threading.Thread(
+                        target=_run_job_async, args=(queue_name, job_data), daemon=True
+                    )
+                    t.start()
+                except Exception as start_err:
+                    with ACTIVE_JOBS_LOCK:
+                        if is_heavy:
+                            ACTIVE_HEAVY_JOBS = max(0, ACTIVE_HEAVY_JOBS - 1)
+                        else:
+                            ACTIVE_LIGHT_JOBS = max(0, ACTIVE_LIGHT_JOBS - 1)
+                        ACTIVE_JOBS = ACTIVE_HEAVY_JOBS + ACTIVE_LIGHT_JOBS
+                    raise start_err
+
+            except ValueError as e:
                 self.send_response(400)
                 self.end_headers()
                 self.wfile.write(f"Bad Request: {e}".encode("utf-8"))
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(f"Server Error: {e}".encode("utf-8"))
         else:
             self.send_response(404)
             self.end_headers()
