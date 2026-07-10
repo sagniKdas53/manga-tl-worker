@@ -8,6 +8,28 @@ from worker.model_manager import model_manager
 from worker.utils.image import downscale_for_ocr
 
 
+OCR_REFUSAL_PATTERNS = [
+    "i cannot", "i can't", "i'm sorry", "i am sorry",
+    "as an ai", "as a language model", "unable to",
+    "not able to", "cannot process", "cannot fulfill",
+    "not capable",
+]
+
+
+def is_valid_ocr_text(text):
+    if not text or not text.strip():
+        return False
+    text_lower = text.strip().lower()
+    for pattern in OCR_REFUSAL_PATTERNS:
+        if pattern in text_lower:
+            print(
+                f"[OCR] Rejected OCR response: matches refusal pattern '{pattern}'",
+                flush=True,
+            )
+            return False
+    return True
+
+
 OCR_SINGLE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -235,7 +257,7 @@ def perform_redo_ocr(img_crop_bytes, lang):
                 result = try_cloud_ocr(img_crop_bytes, provider, api_key, current_model)
                 if result:
                     text, confidence = result
-                    if text:
+                    if text and is_valid_ocr_text(text):
                         print(
                             f"[OCR Redo] Cloud AI OCR Success using '{current_model}': '{text}' (conf={confidence})",
                             flush=True,
@@ -262,7 +284,15 @@ def perform_redo_ocr(img_crop_bytes, lang):
                 gc.collect()
                 parsed_crop_results = parse_paddle_ocr_results(crop_results)
                 if parsed_crop_results:
-                    text = " ".join([line[1] for line in parsed_crop_results])
+                    text = " ".join(
+                        line[1] for line in parsed_crop_results if line[1].strip()
+                    )
+                    if not is_valid_ocr_text(text):
+                        print(
+                            f"[OCR Redo] PaddleOCR result rejected by validation: '{text}'",
+                            flush=True,
+                        )
+                        text = ""
                     confidence = float(
                         np.mean([line[2] for line in parsed_crop_results])
                     )

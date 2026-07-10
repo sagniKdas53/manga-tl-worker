@@ -1320,7 +1320,7 @@ Example structure:
   ]
 }}
 
-Return ONLY valid JSON.
+Return ONLY valid JSON format conforming to the requested schema. No conversational prefix, suffix, or markdown formatting.
 
 Input:
 {bubbles_json}

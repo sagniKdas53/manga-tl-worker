@@ -679,6 +679,11 @@ def process_ocr(job_data):
                                     "properties": {
                                         "id": {"type": "string"},
                                         "text": {"type": "string"},
+                                        "confidence": {
+                                            "type": "number",
+                                            "minimum": 0.0,
+                                            "maximum": 1.0,
+                                        },
                                     },
                                     "required": ["id", "text"],
                                 },
@@ -784,6 +789,11 @@ def process_ocr(job_data):
                                                 "type": "string",
                                                 "description": "The extracted text",
                                             },
+                                            "confidence": {
+                                                "type": "number",
+                                                "minimum": 0.0,
+                                                "maximum": 1.0,
+                                            },
                                         },
                                         "required": ["text"],
                                     }
@@ -810,6 +820,9 @@ def process_ocr(job_data):
                                                             "text": parsed.get(
                                                                 "text", ""
                                                             ),
+                                                            "confidence": parsed.get(
+                                                                "confidence", 0.99
+                                                            ),
                                                         }
                                                     )
                                                 except Exception:
@@ -817,6 +830,7 @@ def process_ocr(job_data):
                                                         {
                                                             "id": crop_info["id"],
                                                             "text": crop_res,
+                                                            "confidence": 0.99,
                                                         }
                                                     )
                                         except Exception as local_vlm_err:
@@ -838,19 +852,35 @@ def process_ocr(job_data):
                                 for item in results_list:
                                     item_id = item.get("id", "")
                                     item_text = item.get("text", "")
-                                    transcriptions[item_id] = item_text
+                                    item_conf = float(
+                                        item.get("confidence", 0.99)
+                                    )
+                                    transcriptions[item_id] = {
+                                        "text": item_text,
+                                        "confidence": min(max(item_conf, 0.0), 1.0),
+                                    }
 
                     # Create regions list
                     for cr_idx, r in enumerate(candidate_regions):
-                        final_text = transcriptions.get(f"region_{cr_idx}", "").strip()
+                        entry = transcriptions.get(f"region_{cr_idx}", {})
+                        final_text = entry.get("text", "").strip()
+                        model_conf = entry.get("confidence", 0.99)
                         if final_text:
+                            from worker.services.ocr import is_valid_ocr_text
+
+                            if not is_valid_ocr_text(final_text):
+                                print(
+                                    f"[OCR] VLM result for region_{cr_idx} rejected by validation: '{final_text}'",
+                                    flush=True,
+                                )
+                                continue
                             bg_color = detect_background_color_poly(img, r["poly_pts"])
                             if r["type"] == "bubble":
                                 regions.append(
                                     {
                                         "text": final_text,
                                         "detectedLanguage": detect_language(final_text),
-                                        "confidence": 0.99,
+                                        "confidence": model_conf,
                                         "rotation": 0.0,
                                         "x": r["x"],
                                         "y": r["y"],
@@ -882,7 +912,7 @@ def process_ocr(job_data):
                                     {
                                         "text": final_text,
                                         "detectedLanguage": detect_language(final_text),
-                                        "confidence": 0.99,
+                                        "confidence": model_conf,
                                         "rotation": 0.0,
                                         "x": r["x"],
                                         "y": r["y"],
