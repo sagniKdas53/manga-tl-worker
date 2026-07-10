@@ -22,7 +22,8 @@ def check_stale_job(queue_name, job_data):
         "queue:render",
         "queue:qa",
         "queue:qa-re-ocr",
-        "queue:region-redo",
+        "queue:region-redo-ocr",
+        "queue:region-redo-tl",
     }
     if queue_name in image_bound_queues:
         image_id = job_data.get("imageId")
@@ -98,7 +99,7 @@ def process_job_rq(queue_name, job_data):
             process_layout(job_data)
         elif queue_name == "queue:translation":
             process_translation(job_data)
-        elif queue_name == "queue:region-redo":
+        elif queue_name in ("queue:region-redo-ocr", "queue:region-redo-tl", "queue:region-redo"):
             process_region_redo(job_data)
         elif queue_name == "queue:render":
             process_render(job_data)
