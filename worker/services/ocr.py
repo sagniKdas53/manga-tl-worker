@@ -1,10 +1,21 @@
 import gc
+import json
 import cv2
 import numpy as np
 import requests
 
 from worker.model_manager import model_manager
 from worker.utils.image import downscale_for_ocr
+
+
+OCR_SINGLE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "text": {"type": "string"},
+        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+    },
+    "required": ["text"],
+}
 
 
 def parse_paddle_ocr_results(raw_results):
@@ -43,7 +54,13 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model):
     import base64
 
     base64_image = base64.b64encode(img_crop_bytes).decode("utf-8")
-    prompt = "Respond ONLY with the text shown in this image. Do not add any explanations, notes, or markdown. If there is no text, respond with empty string."
+    prompt = (
+        'Respond with a JSON object containing the text shown in this image '
+        'and your confidence score. Use the format: '
+        '{"text": "<extracted text>", "confidence": <0.0-1.0>}. '
+        'If there is no text, use {"text": "", "confidence": 0.0}. '
+        'Do not add any explanations or notes outside the JSON.'
+    )
 
     url = ""
     headers = {}
@@ -71,6 +88,14 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model):
                     ],
                 }
             ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "ocr_result",
+                    "schema": OCR_SINGLE_SCHEMA,
+                    "strict": True,
+                },
+            },
         }
     elif provider == "openrouter":
         url = "https://openrouter.ai/api/v1/chat/completions"
@@ -94,6 +119,15 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model):
                     ],
                 }
             ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "ocr_result",
+                    "schema": OCR_SINGLE_SCHEMA,
+                    "strict": True,
+                },
+            },
+            "plugins": [{"id": "response-healing"}],
         }
     elif provider == "gemini":
         gemini_model = model or "gemini-1.5-flash"
@@ -151,11 +185,19 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model):
         if res.status_code == 200:
             res_json = res.json()
             if provider == "gemini":
-                return res_json["candidates"][0]["content"]["parts"][0]["text"]
+                raw = res_json["candidates"][0]["content"]["parts"][0]["text"]
             elif provider == "anthropic":
-                return res_json["content"][0]["text"]
+                raw = res_json["content"][0]["text"]
             else:
-                return res_json["choices"][0]["message"]["content"]
+                raw = res_json["choices"][0]["message"]["content"]
+
+            try:
+                parsed = json.loads(raw.strip())
+                text = parsed.get("text", "")
+                confidence = float(parsed.get("confidence", 1.0))
+                return text.strip(), min(max(confidence, 0.0), 1.0)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                return raw.strip(), 1.0
         else:
             print(
                 f"[OCR Redo] Cloud OCR error {res.status_code} from provider={provider}",
@@ -190,13 +232,15 @@ def perform_redo_ocr(img_crop_bytes, lang):
                     f"[OCR Redo] Trying Cloud AI OCR with provider '{provider}' and model '{current_model}'...",
                     flush=True,
                 )
-                text = try_cloud_ocr(img_crop_bytes, provider, api_key, current_model)
-                if text and len(text.strip()) > 0:
-                    print(
-                        f"[OCR Redo] Cloud AI OCR Success using '{current_model}': '{text}'",
-                        flush=True,
-                    )
-                    return text.strip(), 1.0
+                result = try_cloud_ocr(img_crop_bytes, provider, api_key, current_model)
+                if result:
+                    text, confidence = result
+                    if text:
+                        print(
+                            f"[OCR Redo] Cloud AI OCR Success using '{current_model}': '{text}' (conf={confidence})",
+                            flush=True,
+                        )
+                        return text, confidence
             except Exception as e:
                 print(
                     f"[OCR Redo] Cloud AI OCR with model '{current_model}' failed: {e}",
