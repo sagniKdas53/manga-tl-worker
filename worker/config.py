@@ -27,30 +27,41 @@ for _noisy_logger in ("PIL", "PIL.PngImagePlugin"):
 logger = logging.getLogger("translation")
 
 
+def _is_sensitive(path: str) -> bool:
+    sensitive_patterns = [".ssh", ".aws", ".env"]
+    for pattern in sensitive_patterns:
+        if pattern in path:
+            return True
+    return False
+
 def _load_docker_secrets():
     import json
 
     loaded_from_json = set()
     secrets_json = os.environ.get("DOCKER_SECRETS_JSON")
-    if secrets_json and os.path.exists(secrets_json):
-        try:
-            with open(secrets_json, "r") as f:
-                secrets = json.load(f)
-                for k, v in secrets.items():
-                    os.environ[k] = str(v)
-                    loaded_from_json.add(k)
-        except Exception as e:
-            logging.error(f"Failed to load DOCKER_SECRETS_JSON: {e}")
+    if secrets_json:
+        resolved_json_path = os.path.realpath(secrets_json)
+        if not _is_sensitive(resolved_json_path) and os.path.exists(resolved_json_path):
+            try:
+                with open(resolved_json_path, "r") as f:
+                    secrets = json.load(f)
+                    for k, v in secrets.items():
+                        os.environ[k] = str(v)
+                        loaded_from_json.add(k)
+            except Exception as e:
+                logging.error(f"Failed to load DOCKER_SECRETS_JSON: {e}")
 
     for k, v in list(os.environ.items()):
-        if k.endswith("_FILE") and v and os.path.exists(v):
+        if k.endswith("_FILE") and v:
             real_key = k[:-5]
             if real_key not in loaded_from_json:
-                try:
-                    with open(v, "r") as f:
-                        os.environ[real_key] = f.read().strip()
-                except Exception as e:
-                    logging.error(f"Failed to read secret file for {k}: {e}")
+                resolved_v = os.path.realpath(v)
+                if not _is_sensitive(resolved_v) and os.path.exists(resolved_v):
+                    try:
+                        with open(resolved_v, "r") as f:
+                            os.environ[real_key] = f.read().strip()
+                    except Exception as e:
+                        logging.error(f"Failed to read secret file for {k}: {e}")
 
 
 _load_docker_secrets()
