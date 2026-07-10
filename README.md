@@ -9,6 +9,7 @@ This directory contains the Python-based Machine Learning (ML) Worker service fo
 The worker runs a loop to consume tasks from Valkey/Redis and coordinates with MinIO S3 for downloading raw images and uploading processed layers and masks.
 
 Its primary responsibilities include:
+
 1. **Layout Analysis & OCR**: Runs local OCR (PaddleOCR for text detection/recognition and a YOLO bubble segmentation model for speech bubble coordinates and polygons).
 2. **Spatial OCR Region Merging**: Groups individual text lines into logical speech bubbles before panel mapping. Configurable via `OCR_MERGE_THRESHOLD` vertical/horizontal proximity algorithm multiplier.
 3. **AI Translation Pass**: Translates text using:
@@ -21,7 +22,7 @@ Its primary responsibilities include:
 
 ## 📂 Project Structure
 
-```
+```txt
 unified-workers/
 ├── app.py                   # Main entry point (starts HTTP health server and worker loop)
 ├── Dockerfile               # Production container image configuration
@@ -43,15 +44,19 @@ unified-workers/
 ## 🚀 Setup & Local Development
 
 ### 1. Prerequisites
+
 Ensure you have Python 3.10+ installed and system dependencies required by OpenCV.
 
 On Linux:
+
 ```bash
 sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0 libgomp1 libsm6 libxext6 libxrender-dev
 ```
 
 ### 2. Installation
+
 Create and activate a virtual environment, then install dependencies:
+
 ```bash
 # From workspace root
 python -m venv .venv
@@ -63,10 +68,13 @@ pip install -r requirements.txt
 ```
 
 ### 3. Run the Worker
+
 Start the HTTP health server and task listener:
+
 ```bash
 python app.py
 ```
+
 By default, the health check endpoint will be available at `http://localhost:8000/health`.
 
 ---
@@ -74,6 +82,7 @@ By default, the health check endpoint will be available at `http://localhost:800
 ## 🧪 Running Tests
 
 A test runner is provided to verify spatial OCR merging and translation validation logic:
+
 ```bash
 python run_tests.py
 ```
