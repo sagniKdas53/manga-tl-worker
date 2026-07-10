@@ -149,3 +149,97 @@ def test_heavy_light_concurrency_slots(mock_thread, mock_request_handler):
     mock_request_handler.send_response.assert_called_with(429)
     assert hs.ACTIVE_HEAVY_JOBS == 1
     assert hs.ACTIVE_LIGHT_JOBS == 1
+
+
+@patch("worker.health_server.WORKER_API_SECRET", "test_secret")
+@patch("worker.health_server.ACTIVE_JOBS", 0)
+@patch("worker.health_server.ACTIVE_HEAVY_JOBS", 0)
+@patch("worker.health_server.ACTIVE_LIGHT_JOBS", 0)
+@patch("worker.health_server.MAX_CONCURRENT_JOBS", 2)
+@patch("worker.health_server.threading.Thread")
+def test_scenario_three_jobs_concurrency(mock_thread, mock_request_handler):
+    # Reset mock request handler
+    mock_request_handler.check_auth = MagicMock(return_value=True)
+    mock_request_handler.command = "POST"
+    mock_request_handler.path = "/api/v1/jobs/submit"
+
+    # Reset globals in mock health_server namespace for this test scope
+    hs.ACTIVE_JOBS = 0
+    hs.ACTIVE_HEAVY_JOBS = 0
+    hs.ACTIVE_LIGHT_JOBS = 0
+
+    # 1. Job 1 submitted for OCR (heavy slot).
+    # Since heavy slot is empty, it must succeed.
+    body_job1_ocr = json.dumps({"queue_name": "queue:ocr", "job_data": {"id": "job1"}})
+    mock_request_handler.rfile = MagicMock()
+    mock_request_handler.rfile.read.return_value = body_job1_ocr.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body_job1_ocr))
+    
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(202)
+    assert hs.ACTIVE_HEAVY_JOBS == 1
+    assert hs.ACTIVE_LIGHT_JOBS == 0
+    assert hs.ACTIVE_JOBS == 1
+
+    mock_request_handler.send_response.reset_mock()
+
+    # 2. Job 2 submitted for OCR (heavy slot).
+    # Since active heavy jobs is already 1, it must be rejected with 429.
+    body_job2_ocr = json.dumps({"queue_name": "queue:ocr", "job_data": {"id": "job2"}})
+    mock_request_handler.rfile.read.return_value = body_job2_ocr.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body_job2_ocr))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(429)
+    assert hs.ACTIVE_HEAVY_JOBS == 1
+    assert hs.ACTIVE_LIGHT_JOBS == 0
+
+    mock_request_handler.send_response.reset_mock()
+
+    # 3. Job 1 finishes OCR. Heavy slot becomes free (active heavy goes to 0).
+    hs.ACTIVE_HEAVY_JOBS = 0
+    hs.ACTIVE_JOBS = hs.ACTIVE_HEAVY_JOBS + hs.ACTIVE_LIGHT_JOBS
+
+    # 4. Job 1 is now submitted for Translation (light slot).
+    # Since light slot is empty, it must succeed.
+    body_job1_tl = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "job1"}})
+    mock_request_handler.rfile.read.return_value = body_job1_tl.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body_job1_tl))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(202)
+    assert hs.ACTIVE_HEAVY_JOBS == 0
+    assert hs.ACTIVE_LIGHT_JOBS == 1
+    assert hs.ACTIVE_JOBS == 1
+
+    mock_request_handler.send_response.reset_mock()
+
+    # 5. Now Job 2 can start OCR (heavy slot) since heavy slot is free.
+    # Since active heavy jobs is 0, this must succeed.
+    mock_request_handler.rfile.read.return_value = body_job2_ocr.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body_job2_ocr))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(202)
+    assert hs.ACTIVE_HEAVY_JOBS == 1
+    assert hs.ACTIVE_LIGHT_JOBS == 1
+    assert hs.ACTIVE_JOBS == 2
+
+    mock_request_handler.send_response.reset_mock()
+
+    # 6. Job 2 finishes OCR. Heavy slot becomes free (active heavy goes to 0).
+    hs.ACTIVE_HEAVY_JOBS = 0
+    hs.ACTIVE_JOBS = hs.ACTIVE_HEAVY_JOBS + hs.ACTIVE_LIGHT_JOBS
+
+    # 7. Job 2 is submitted for Translation (light slot).
+    # But Job 1 is still running Translation (active light jobs = 1).
+    # Since active light jobs is already 1, this must be rejected with 429.
+    body_job2_tl = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "job2"}})
+    mock_request_handler.rfile.read.return_value = body_job2_tl.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body_job2_tl))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(429)
+    assert hs.ACTIVE_HEAVY_JOBS == 0
+    assert hs.ACTIVE_LIGHT_JOBS == 1
+
