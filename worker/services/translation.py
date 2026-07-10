@@ -368,6 +368,9 @@ def try_cloud_ai(
 ):
     req_prefix = f"[{request_id}] " if request_id else ""
     global PROVIDER_COOLDOWNS
+    
+    wait_for_cooldown(provider)
+    
     cooldown_until = PROVIDER_COOLDOWNS.get(provider, 0.0)
     if time.time() < cooldown_until:
         logger.warning(
@@ -432,6 +435,8 @@ def try_cloud_ai(
             )
 
             if response.status_code == 429:
+                # Trigger temporary 5s cooldown immediately on first 429
+                PROVIDER_COOLDOWNS[provider] = time.time() + 5.0
                 if attempt < max_retries:
                     sleep_time = base_backoff * (2**attempt)
                     logger.warning(
@@ -498,6 +503,9 @@ def try_cloud_ai_vision(
 ):
     req_prefix = f"[{request_id}] " if request_id else ""
     global PROVIDER_COOLDOWNS
+    
+    wait_for_cooldown(provider)
+    
     cooldown_until = PROVIDER_COOLDOWNS.get(provider, 0.0)
     if time.time() < cooldown_until:
         logger.warning(
@@ -584,6 +592,8 @@ def try_cloud_ai_vision(
             response = requests.post(url, headers=headers, json=payload, timeout=90)
 
             if response.status_code == 429:
+                # Trigger temporary 5s cooldown immediately on first 429
+                PROVIDER_COOLDOWNS[provider] = time.time() + 5.0
                 if attempt < max_retries:
                     sleep_time = base_backoff * (2**attempt)
                     logger.warning(
@@ -649,6 +659,9 @@ def try_cloud_ai_vision_batch(
 ):
     req_prefix = f"[{request_id}] " if request_id else ""
     global PROVIDER_COOLDOWNS
+    
+    wait_for_cooldown(provider)
+    
     cooldown_until = PROVIDER_COOLDOWNS.get(provider, 0.0)
     if time.time() < cooldown_until:
         logger.warning(
@@ -747,6 +760,8 @@ def try_cloud_ai_vision_batch(
             response = requests.post(url, headers=headers, json=payload, timeout=120)
 
             if response.status_code == 429:
+                # Trigger temporary 5s cooldown immediately on first 429
+                PROVIDER_COOLDOWNS[provider] = time.time() + 5.0
                 if attempt < max_retries:
                     sleep_time = base_backoff * (2**attempt)
                     logger.warning(
