@@ -16,7 +16,6 @@ from worker.config import (
     YOLO_MASK_EROSION,
     redis_client,
     OCR_CONFIG,
-    CLOUD_CONCURRENCY,
 )
 from worker.model_manager import model_manager
 from worker.utils.image import downscale_for_ocr, calculate_overlap_area, download_image
@@ -828,7 +827,7 @@ def process_ocr(job_data):
                             return results_list
 
                         with concurrent.futures.ThreadPoolExecutor(
-                            max_workers=CLOUD_CONCURRENCY
+                            max_workers=1
                         ) as executor:
                             futures = {
                                 executor.submit(process_crop_chunk, idx, chunk): chunk

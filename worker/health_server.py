@@ -21,7 +21,7 @@ ACTIVE_JOBS = 0
 ACTIVE_HEAVY_JOBS = 0
 ACTIVE_LIGHT_JOBS = 0
 ACTIVE_JOBS_LOCK = threading.Lock()
-MAX_CONCURRENT_JOBS = int(os.environ.get("CONCURRENT_WORKERS", "4"))
+MAX_CONCURRENT_JOBS = int(os.environ.get("CONCURRENT_JOBS", os.environ.get("CONCURRENT_WORKERS", "2")))
 WORKER_API_SECRET = os.environ.get("WORKER_API_SECRET", "").strip()
 WORKER_API_SECRET_FILE = os.environ.get("WORKER_API_SECRET_FILE", "").strip()
 

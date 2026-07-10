@@ -8,7 +8,6 @@ from worker.config import (
     BACKEND_HEADERS,
     TL_CONFIG,
     redis_client,
-    CLOUD_CONCURRENCY,
 )
 from worker.services.translation import (
     should_translate_region,
@@ -152,7 +151,7 @@ def process_translation(job_data):
                 return None
 
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=CLOUD_CONCURRENCY
+            max_workers=1
         ) as executor:
             futures = {
                 executor.submit(process_chunk, idx, chunk): chunk
@@ -232,7 +231,7 @@ def process_translation(job_data):
 
             retry_mapping = {}
             with concurrent.futures.ThreadPoolExecutor(
-                max_workers=CLOUD_CONCURRENCY
+                max_workers=1
             ) as executor:
                 futures = {
                     executor.submit(process_retry_chunk, idx, r_chunk): r_chunk
