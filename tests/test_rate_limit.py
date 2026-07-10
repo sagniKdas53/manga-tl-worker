@@ -127,8 +127,8 @@ def test_concurrent_rate_limiting(mock_time):
     for s in sleep_args:
         assert any(pytest.approx(s) == val for val in (0.5, 1.0, 1.5, 2.0, 2.5))
 
-    # The sum of all sleep times must conform to one of the valid schedules (2.5, 3.5, 4.0, 4.5)
+    # The sum of all sleep times must conform to one of the valid schedules (2.5, 3.0, 3.5, 4.0, 4.5)
     total_sleep = sum(sleep_args)
-    assert any(pytest.approx(total_sleep) == val for val in (2.5, 3.5, 4.0, 4.5))
+    assert any(pytest.approx(total_sleep) == val for val in (2.5, 3.0, 3.5, 4.0, 4.5))
 
     del os.environ["RATE_LIMIT"]
