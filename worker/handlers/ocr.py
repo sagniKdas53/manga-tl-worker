@@ -265,6 +265,8 @@ def process_ocr(job_data):
     # Defaults preserve the original behaviour (Japanese RTL) when not supplied.
     source_language = (job_data.get("sourceLanguage") or "ja").strip().lower()
     reading_direction = (job_data.get("readingDirection") or "rtl").strip().lower()
+    
+    vlm_model_used = None
 
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(f"[OCR] Inputs: job_data={job_data}")
@@ -767,6 +769,7 @@ def process_ocr(job_data):
                                                     f"[OCR] Successfully processed chunk {chunk_idx + 1} using model '{current_model}'",
                                                     flush=True,
                                                 )
+                                                vlm_model_used = current_model
                                                 break
                                     except Exception as parse_err:
                                         print(
@@ -825,6 +828,7 @@ def process_ocr(job_data):
                                                             ),
                                                         }
                                                     )
+                                                    vlm_model_used = local_model
                                                 except Exception:
                                                     results_list.append(
                                                         {
@@ -1119,14 +1123,34 @@ def process_ocr(job_data):
         )
 
         rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
+        model_identifier = f"PaddleOCR({rec_model})"
+        if vlm_model_used:
+            model_identifier += f" + {vlm_model_used}"
+
         callback_payload = {
             "imageId": image_id,
-            "modelIdentifier": f"PaddleOCR({rec_model})",
+            "modelIdentifier": model_identifier,
             "confidence": avg_conf,
             "sourceLanguage": source_language,
             "readingDirection": reading_direction,
             "regions": ordered_regions,
         }
+        
+        try:
+            from worker.utils.rate_limit import get_job_costs
+            costs = get_job_costs()
+            if costs:
+                cost_payload = {
+                    "currency": "USD",
+                    "breakdown": costs,
+                    "prompt_tokens": sum(c.get("prompt_tokens", 0) for c in costs),
+                    "estimated_cost": sum(c.get("estimated_cost", 0.0) for c in costs),
+                    "completion_tokens": sum(c.get("completion_tokens", 0) for c in costs)
+                }
+                callback_payload["cost"] = cost_payload
+        except Exception as e:
+            print(f"[OCR] Error fetching job costs: {e}", flush=True)
+
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"[OCR] Outputs: callback_payload={callback_payload}")
         try:
