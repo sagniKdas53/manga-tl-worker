@@ -81,6 +81,18 @@ def process_qa(job_data):
         progress_str += f" (Queue: {queue_len} remaining)"
 
     qa_mode_resolved = job_data.get("qaMode") or QA_MODE
+
+    if qa_mode_resolved == "auto":
+        provider = job_data.get("qaProvider") or getattr(QA_CONFIG, "provider", None)
+        has_vlm = job_data.get("qaVlmModel") or getattr(QA_CONFIG, "vlm_model", None)
+        has_llm = job_data.get("qaLlmModel") or getattr(QA_CONFIG, "llm_model", None)
+        if has_vlm and provider:
+            qa_mode_resolved = "vlm"
+        elif has_llm and provider:
+            qa_mode_resolved = "llm"
+        else:
+            qa_mode_resolved = "none"
+
     print(
         f"[QA] Processing image: {image_id}{progress_str} (mode={qa_mode_resolved})",
         flush=True,

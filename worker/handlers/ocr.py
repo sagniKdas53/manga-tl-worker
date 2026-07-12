@@ -1121,7 +1121,7 @@ def process_ocr(job_data):
         rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
         callback_payload = {
             "imageId": image_id,
-            "modelIdentifier": f"MangaOCR/PaddleOCR({rec_model})",
+            "modelIdentifier": f"PaddleOCR({rec_model})",
             "confidence": avg_conf,
             "sourceLanguage": source_language,
             "readingDirection": reading_direction,

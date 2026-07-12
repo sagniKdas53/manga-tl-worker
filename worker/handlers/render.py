@@ -804,6 +804,18 @@ def process_render(job_data):
 
     qa_mode_resolved = job_data.get("qaMode") or QA_MODE
 
+    if qa_mode_resolved == "auto":
+        from worker.config import QA_CONFIG
+        provider = job_data.get("qaProvider") or getattr(QA_CONFIG, "provider", None)
+        has_vlm = job_data.get("qaVlmModel") or getattr(QA_CONFIG, "vlm_model", None)
+        has_llm = job_data.get("qaLlmModel") or getattr(QA_CONFIG, "llm_model", None)
+        if has_vlm and provider:
+            qa_mode_resolved = "vlm"
+        elif has_llm and provider:
+            qa_mode_resolved = "llm"
+        else:
+            qa_mode_resolved = "none"
+
     if qa_mode_resolved in ("llm", "none"):
         print(
             f"[Render] QA_MODE is '{qa_mode_resolved}', skipping rendering for image: {image_id}",
