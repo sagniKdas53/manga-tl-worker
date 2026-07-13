@@ -45,7 +45,7 @@ def check_stale_job(queue_name, job_data):
     return False
 
 
-def update_job_status(job_id, status, error=None):
+def update_job_status(job_id, status, error=None, attempt=None):
     if not job_id:
         return
     try:
@@ -53,6 +53,8 @@ def update_job_status(job_id, status, error=None):
         payload = {"status": status}
         if error:
             payload["error"] = str(error)
+        if attempt is not None:
+            payload["attempt"] = str(attempt)
         requests.patch(url, json=payload, headers=BACKEND_HEADERS, timeout=5)
     except Exception as e:
         print(f"[RQ Worker] Failed to update job status to {status}: {e}", flush=True)
@@ -116,5 +118,16 @@ def process_job_rq(queue_name, job_data):
     except Exception as e:
         print(f"[RQ Worker] Error processing job from {queue_name}: {e}", flush=True)
         traceback.print_exc()
-        update_job_status(job_id, "FAILED", str(e))
-        raise e  # Triggers RQ retry
+        
+        attempt = int(job_data.get("attempt", 1))
+        max_attempts = int(job_data.get("maxAttempts", 3))
+        
+        if attempt < max_attempts:
+            print(f"[RQ Worker] Job {job_id} failed on attempt {attempt}/{max_attempts}. Retrying in 2 seconds...", flush=True)
+            import time
+            time.sleep(2)
+            job_data["attempt"] = attempt + 1
+            update_job_status(job_id, "PENDING", str(e), attempt + 1)
+        else:
+            print(f"[RQ Worker] Job {job_id} failed on attempt {attempt}/{max_attempts}. Max attempts reached.", flush=True)
+            update_job_status(job_id, "FAILED", str(e), attempt)

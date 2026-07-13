@@ -97,10 +97,13 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                     "status": "seeding",
                     "uptime_seconds": int(time.time() - START_TIME),
                 }
-                self.send_response(503)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(response_data).encode("utf-8"))
+                try:
+                    self.send_response(503)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps(response_data).encode("utf-8"))
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
                 return
 
             # Check Redis connection
@@ -128,10 +131,13 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 "loaded_models": loaded_models,
             }
 
-            self.send_response(200 if redis_status == "connected" else 503)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(response_data).encode("utf-8"))
+            try:
+                self.send_response(200 if redis_status == "connected" else 503)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(response_data).encode("utf-8"))
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         elif self.path == "/capabilities":
             if not self.check_auth():
@@ -157,15 +163,21 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 "max_concurrent_jobs": MAX_CONCURRENT_JOBS,
                 "active_jobs": current_active,
             }
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(response_data).encode("utf-8"))
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(response_data).encode("utf-8"))
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         else:
-            self.send_response(404)
-            self.end_headers()
-            self.wfile.write(b"Not Found")
+            try:
+                self.send_response(404)
+                self.end_headers()
+                self.wfile.write(b"Not Found")
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
     def do_POST(self):
         if self.path == "/api/v1/jobs/submit":

@@ -59,6 +59,12 @@ Region type handling:
 
 If multiple regions share the same conversationGroup, treat them as a continuous dialogue exchange and ensure coherent flow.
 
+NEVER include romanized text, pinyin, romaji, or pronunciation guides. Return ONLY the target-language translation.
+BAD: "Yào chūfā le o (About to depart!)"
+GOOD: "About to depart!"
+BAD: "ERUFU (ELF!)"
+GOOD: "ELF!"
+
 Return ONLY valid JSON format conforming to the requested schema. No conversational prefix, suffix, or markdown formatting."""
 
 MANGA_TRANSLATION_SYSTEM_PROMPT = """You are an expert manga translator.
@@ -71,7 +77,14 @@ Rules:
 - Do not explain.
 - Do not add notes.
 - Do not add quotation marks.
-- Return only the translated text."""
+- NEVER include romanized text, pinyin, romaji, or pronunciation guides.
+- Return only the translated text.
+
+BAD: "Yào chūfā le o (About to depart!)"
+GOOD: "About to depart!"
+BAD: "ERUFU (ELF!)"
+GOOD: "ELF!"
+"""
 
 PROMPT_VERSION = "batch-v3"
 
@@ -1004,7 +1017,7 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
 
     LANG_MAP.get(source_lang.lower(), source_lang)
     tgt_name = LANG_MAP.get(target_lang.lower(), target_lang)
-    prompt = f"Translate the following text to natural {tgt_name}, maintaining its tone and context. Respond ONLY with the translated text. Do not include any tags, notes, or explanations.\n\nText: {text}"
+    prompt = f"Translate the following text to natural {tgt_name}, maintaining its tone and context. Respond ONLY with the translated text. Do not include any tags, notes, or explanations. NEVER include romanized text, pinyin, romaji, or pronunciation guides. (e.g. BAD: 'ERUFU (ELF!)', GOOD: 'ELF!').\n\nText: {text}"
 
     # Log Strategy
     logger.info(f"{req_prefix}Translation Strategy:")
@@ -1294,6 +1307,12 @@ Region type handling:
 - "sign": Translate literally, noting it's environmental text.
 
 If multiple regions share the same conversationGroup, treat them as a continuous dialogue exchange and ensure coherent flow.
+
+NEVER include romanized text, pinyin, romaji, or pronunciation guides. Return ONLY the target-language translation.
+BAD: "Yào chūfā le o (About to depart!)"
+GOOD: "About to depart!"
+BAD: "ERUFU (ELF!)"
+GOOD: "ELF!"
 
 If a region has "previousTranslation" and "qaFeedback" fields, it means the previous translation attempt failed QA (e.g. text overflow, poor phrasing, or formatting issues). Adjust your translation accordingly based on the feedback (for example, shortening the text to fit if it overflowed).
 
