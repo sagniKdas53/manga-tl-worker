@@ -131,7 +131,7 @@ def _process_qa_hybrid(job_data):
             return
     except Exception as e:
         print(f"[QA] Error fetching image details: {e}", flush=True)
-        return
+        raise
 
     # Build region metadata list to seed the LLM
     regions_metadata = []
@@ -296,7 +296,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         )
     except Exception as e:
         print(f"[QA] Failed to post Hybrid QA preparation: {e}", flush=True)
-        return
+        raise
 
     # Trigger render inline
     from worker.handlers.render import render_image_core
@@ -322,14 +322,14 @@ You MUST return a JSON object containing a "results" key with an array of object
             return
     except Exception as e:
         print(f"[QA] Error fetching image details: {e}", flush=True)
-        return
+        raise
 
     # Download original image
     try:
         original_bytes = download_image(image_info)
     except Exception as e:
         print(f"[QA] Error downloading original image: {e}", flush=True)
-        return
+        raise
 
     # Download rendered typeset image from MinIO
     try:
@@ -337,7 +337,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         rendered_bytes = response.read()
     except Exception as e:
         print(f"[QA] Error downloading rendered image: {e}", flush=True)
-        return
+        raise
 
     try:
         img1 = Image.open(io.BytesIO(original_bytes)).convert("RGB")
@@ -359,7 +359,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         combined_base64 = base64.b64encode(combined_buf.getvalue()).decode("utf-8")
     except Exception as e:
         print(f"[QA] Error combining images: {e}", flush=True)
-        return
+        raise
 
     # Build region metadata list to seed the VLM
     regions_metadata_vlm = []
@@ -587,7 +587,7 @@ def _auto_pass_all(job_data):
         ocr_regions = image_info.get("ocrRegions", [])
     except Exception as e:
         print(f"[QA] Error fetching image details: {e}", flush=True)
-        return
+        raise
 
     results = []
     for r in ocr_regions:
@@ -659,7 +659,7 @@ def _process_qa_llm(job_data):
             return
     except Exception as e:
         print(f"[QA] Error fetching image details: {e}", flush=True)
-        return
+        raise
 
     # Build region metadata list to seed the LLM
     regions_metadata = []
@@ -892,14 +892,14 @@ def _process_qa_vlm(job_data):
             return
     except Exception as e:
         print(f"[QA] Error fetching image details: {e}", flush=True)
-        return
+        raise
 
     # Download original image
     try:
         original_bytes = download_image(image_info)
     except Exception as e:
         print(f"[QA] Error downloading original image: {e}", flush=True)
-        return
+        raise
 
     # Download rendered typeset image from MinIO
     try:
@@ -907,7 +907,7 @@ def _process_qa_vlm(job_data):
         rendered_bytes = response.read()
     except Exception as e:
         print(f"[QA] Error downloading rendered image: {e}", flush=True)
-        return
+        raise
 
     try:
         # Create side-by-side combined image for VLM comparison
@@ -931,7 +931,7 @@ def _process_qa_vlm(job_data):
         combined_base64 = base64.b64encode(combined_buf.getvalue()).decode("utf-8")
     except Exception as e:
         print(f"[QA] Error combining images: {e}", flush=True)
-        return
+        raise
 
     # Build region metadata list to seed the VLM
     regions_metadata = []

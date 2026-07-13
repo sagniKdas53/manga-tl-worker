@@ -28,21 +28,17 @@ def process_panel_detection(job_data):
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
-            print(
-                f"[Panel Detection] Failed to get image info: {res.status_code}",
-                flush=True,
-            )
-            return
+            raise Exception(f"Failed to get image info: {res.status_code}")
         image_info = res.json()
     except Exception as e:
         print(f"[Panel Detection] Error fetching image details: {e}", flush=True)
-        return
+        raise
 
     try:
         img_bytes = download_image(image_info)
     except Exception as e:
         print(f"[Panel Detection] Error downloading image: {e}", flush=True)
-        return
+        raise
 
     panels = detect_panels(img_bytes, reading_direction=reading_direction)
     print(

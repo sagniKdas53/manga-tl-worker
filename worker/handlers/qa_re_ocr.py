@@ -32,7 +32,7 @@ def process_qa_re_ocr(job_data):
         ocr_regions = image_info.get("ocrRegions", [])
     except Exception as e:
         print(f"[QA Re-OCR] Error fetching image details: {e}", flush=True)
-        return
+        raise
 
     # Filter regions
     target_regions = [r for r in ocr_regions if r["id"] in region_ids]
@@ -44,7 +44,7 @@ def process_qa_re_ocr(job_data):
         img_bytes = download_image(image_info)
     except Exception as e:
         print(f"[QA Re-OCR] Error downloading image: {e}", flush=True)
-        return
+        raise
 
     results = []
 
@@ -93,7 +93,7 @@ def process_qa_re_ocr(job_data):
 
     except Exception as e:
         print(f"[QA Re-OCR] Error during batch OCR process: {e}", flush=True)
-        return
+        raise
 
     callback_payload = {"imageId": image_id, "results": results}
 

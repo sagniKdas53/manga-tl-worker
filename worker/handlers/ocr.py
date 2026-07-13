@@ -178,7 +178,7 @@ def get_split_polygon(mask, bbox, img_w, img_h, margin=20):
         return [[int(pt[0][0]), int(pt[0][1])] for pt in simplified]
     except Exception as e:
         print(f"[OCR] Error splitting polygon: {e}", flush=True)
-        return None
+        raise None
 
 
 def detect_bubble_contour(img, ocr_x, ocr_y, ocr_w, ocr_h):
@@ -301,13 +301,13 @@ def process_ocr(job_data):
         panels = image_info.get("panels", [])
     except Exception as e:
         print(f"[OCR] Error fetching image details: {e}", flush=True)
-        return
+        raise
 
     try:
         img_bytes = download_image(image_info)
     except Exception as e:
         print(f"[OCR] Error downloading image: {e}", flush=True)
-        return
+        raise
 
     try:
         results = []

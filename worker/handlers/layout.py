@@ -32,7 +32,7 @@ def process_layout(job_data):
         panels = image_info.get("panels", [])
     except Exception as e:
         print(f"[Layout] Error fetching image details: {e}", flush=True)
-        return
+        raise
 
     if not ocr_regions:
         print("[Layout] No OCR regions found, skipping layout analysis.", flush=True)
@@ -45,7 +45,7 @@ def process_layout(job_data):
             print(f"[Layout] Callback status code: {res.status_code}", flush=True)
         except Exception as e:
             print(f"[Layout] Failed to post callback: {e}", flush=True)
-        return
+        raise
 
     # Get image dimensions from the first panel or estimate from regions
     image_width = max(

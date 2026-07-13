@@ -31,12 +31,15 @@ def test_process_panel_detection(mock_detect, mock_download, mock_requests, mock
     assert payload["imageId"] == "img1"
     assert payload["panels"] == [{"x": 10}]
 
+    import pytest
     # Test fetch fail
     mock_res.status_code = 404
-    process_panel_detection({"imageId": "img1"})
+    with pytest.raises(Exception):
+        process_panel_detection({"imageId": "img1"})
     assert mock_requests.post.call_count == 1
 
     # Test exceptions
     mock_requests.get.side_effect = Exception("failed")
-    process_panel_detection({"imageId": "img1"})
+    with pytest.raises(Exception):
+        process_panel_detection({"imageId": "img1"})
     assert mock_requests.post.call_count == 1

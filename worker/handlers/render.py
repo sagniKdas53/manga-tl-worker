@@ -624,13 +624,13 @@ def render_image_core(image_id):
         layer_elements = image_info.get("layerElements", [])
     except Exception as e:
         print(f"[Render] Error fetching image details: {e}", flush=True)
-        return False
+        raise e
 
     try:
         img_bytes = download_image(image_info)
     except Exception as e:
         print(f"[Render] Error downloading image: {e}", flush=True)
-        return False
+        raise e
 
     try:
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -781,7 +781,7 @@ def render_image_core(image_id):
         import traceback
 
         traceback.print_exc()
-        return False
+        raise e
 
 
 def process_render(job_data):
@@ -817,7 +817,8 @@ def process_render(job_data):
         else:
             qa_mode_resolved = "none"
 
-    render_image_core(image_id)
+    if not render_image_core(image_id):
+        raise Exception("Render failed")
 
     # Trigger callback
     callback_payload = {"imageId": image_id}

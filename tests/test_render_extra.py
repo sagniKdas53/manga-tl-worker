@@ -100,8 +100,10 @@ def test_fit_text_in_box_polygon_complex():
 
 @patch("worker.handlers.render.requests")
 @patch("worker.handlers.render.redis_client")
-def test_process_render_qa_mode_llm(mock_redis, mock_requests):
+@patch("worker.handlers.render.render_image_core")
+def test_process_render_qa_mode_llm(mock_render_core, mock_redis, mock_requests):
     mock_redis.llen.return_value = 0
+    mock_render_core.return_value = True
 
     with patch("worker.config.QA_MODE", "llm"):
         process_render({"imageId": "123"})
@@ -111,7 +113,9 @@ def test_process_render_qa_mode_llm(mock_redis, mock_requests):
 @patch("worker.handlers.render.requests")
 @patch("worker.handlers.render.minio_client")
 @patch("worker.handlers.render.download_image")
-def test_process_render_success(mock_download, mock_minio, mock_requests):
+@patch("worker.handlers.render.os.makedirs")
+@patch("builtins.open")
+def test_process_render_success(mock_open, mock_makedirs, mock_download, mock_minio, mock_requests):
     from PIL import Image
 
     mock_redis = MagicMock()
@@ -168,9 +172,10 @@ def test_process_render_success(mock_download, mock_minio, mock_requests):
 
 @patch("worker.handlers.render.requests")
 def test_process_render_fail_api(mock_requests):
+    import pytest
     mock_res = MagicMock()
     mock_res.status_code = 500
     mock_requests.get.return_value = mock_res
     with patch("worker.config.QA_MODE", "normal"):
-        # Should not raise exception
-        process_render({"imageId": "123"})
+        with pytest.raises(Exception):
+            process_render({"imageId": "123"})

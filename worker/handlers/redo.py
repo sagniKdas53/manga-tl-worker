@@ -114,7 +114,7 @@ def process_region_redo(job_data):
                 )
         except Exception as e:
             print(f"[Region Redo] Redo OCR failed: {e}", flush=True)
-            return
+            raise
 
     elif redo_type == "translation":
         try:
@@ -155,7 +155,7 @@ def process_region_redo(job_data):
                 )
         except Exception as e:
             logger.error(f"{req_prefix}Redo Translation failed: {e}")
-            return
+            raise
 
     try:
         callback_url = CALLBACK_URL.replace(

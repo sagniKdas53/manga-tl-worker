@@ -54,14 +54,13 @@ def process_translation(job_data):
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
-            logger.error(f"{req_prefix}Failed to get image info: {res.status_code}")
-            return
+            raise Exception(f"Failed to get image info: {res.status_code}")
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
         conversations = image_info.get("conversations", [])
     except Exception as e:
         logger.error(f"{req_prefix}Error fetching image details: {e}")
-        return
+        raise
 
     # OCR Quality Filter & Separation
     resolved_translations = {}
