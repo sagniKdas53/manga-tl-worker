@@ -104,7 +104,7 @@ def test_heavy_light_concurrency_slots(mock_thread, mock_request_handler):
     mock_request_handler.rfile = MagicMock()
     mock_request_handler.rfile.read.return_value = body_heavy_1.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body_heavy_1))
-    
+
     hs.HealthCheckHandler.do_POST(mock_request_handler)
     mock_request_handler.send_response.assert_called_with(202)
     assert hs.ACTIVE_HEAVY_JOBS == 1
@@ -128,7 +128,9 @@ def test_heavy_light_concurrency_slots(mock_thread, mock_request_handler):
     mock_request_handler.send_response.reset_mock()
 
     # Step 3: Submit Light Job (should succeed in parallel)
-    body_light_1 = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "3"}})
+    body_light_1 = json.dumps(
+        {"queue_name": "queue:translation", "job_data": {"id": "3"}}
+    )
     mock_request_handler.rfile.read.return_value = body_light_1.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body_light_1))
 
@@ -141,7 +143,9 @@ def test_heavy_light_concurrency_slots(mock_thread, mock_request_handler):
     mock_request_handler.send_response.reset_mock()
 
     # Step 4: Submit another Light Job (should fail with 429)
-    body_light_2 = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "4"}})
+    body_light_2 = json.dumps(
+        {"queue_name": "queue:translation", "job_data": {"id": "4"}}
+    )
     mock_request_handler.rfile.read.return_value = body_light_2.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body_light_2))
 
@@ -174,7 +178,7 @@ def test_scenario_three_jobs_concurrency(mock_thread, mock_request_handler):
     mock_request_handler.rfile = MagicMock()
     mock_request_handler.rfile.read.return_value = body_job1_ocr.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body_job1_ocr))
-    
+
     hs.HealthCheckHandler.do_POST(mock_request_handler)
     mock_request_handler.send_response.assert_called_with(202)
     assert hs.ACTIVE_HEAVY_JOBS == 1
@@ -202,7 +206,9 @@ def test_scenario_three_jobs_concurrency(mock_thread, mock_request_handler):
 
     # 4. Job 1 is now submitted for Translation (light slot).
     # Since light slot is empty, it must succeed.
-    body_job1_tl = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "job1"}})
+    body_job1_tl = json.dumps(
+        {"queue_name": "queue:translation", "job_data": {"id": "job1"}}
+    )
     mock_request_handler.rfile.read.return_value = body_job1_tl.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body_job1_tl))
 
@@ -234,7 +240,9 @@ def test_scenario_three_jobs_concurrency(mock_thread, mock_request_handler):
     # 7. Job 2 is submitted for Translation (light slot).
     # But Job 1 is still running Translation (active light jobs = 1).
     # Since active light jobs is already 1, this must be rejected with 429.
-    body_job2_tl = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "job2"}})
+    body_job2_tl = json.dumps(
+        {"queue_name": "queue:translation", "job_data": {"id": "job2"}}
+    )
     mock_request_handler.rfile.read.return_value = body_job2_tl.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body_job2_tl))
 
@@ -242,4 +250,3 @@ def test_scenario_three_jobs_concurrency(mock_thread, mock_request_handler):
     mock_request_handler.send_response.assert_called_with(429)
     assert hs.ACTIVE_HEAVY_JOBS == 0
     assert hs.ACTIVE_LIGHT_JOBS == 1
-

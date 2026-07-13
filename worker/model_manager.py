@@ -5,7 +5,6 @@ import gc
 import time
 import threading
 
-
 # Configure PaddleOCR environment variables
 try:
     os.environ.setdefault("PADDLEX_OFFLINE_MODE", "0")

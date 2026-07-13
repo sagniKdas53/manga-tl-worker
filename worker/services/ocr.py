@@ -7,11 +7,17 @@ import requests
 from worker.model_manager import model_manager
 from worker.utils.image import downscale_for_ocr
 
-
 OCR_REFUSAL_PATTERNS = [
-    "i cannot", "i can't", "i'm sorry", "i am sorry",
-    "as an ai", "as a language model", "unable to",
-    "not able to", "cannot process", "cannot fulfill",
+    "i cannot",
+    "i can't",
+    "i'm sorry",
+    "i am sorry",
+    "as an ai",
+    "as a language model",
+    "unable to",
+    "not able to",
+    "cannot process",
+    "cannot fulfill",
     "not capable",
 ]
 
@@ -77,11 +83,11 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model):
 
     base64_image = base64.b64encode(img_crop_bytes).decode("utf-8")
     prompt = (
-        'Respond with a JSON object containing the text shown in this image '
-        'and your confidence score. Use the format: '
+        "Respond with a JSON object containing the text shown in this image "
+        "and your confidence score. Use the format: "
         '{"text": "<extracted text>", "confidence": <0.0-1.0>}. '
         'If there is no text, use {"text": "", "confidence": 0.0}. '
-        'Do not add any explanations or notes outside the JSON.'
+        "Do not add any explanations or notes outside the JSON."
     )
 
     url = ""

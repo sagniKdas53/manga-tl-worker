@@ -261,14 +261,15 @@ def detect_bubble_contour(img, ocr_x, ocr_y, ocr_w, ocr_h):
 
 def process_ocr(job_data):
     from worker.utils.rate_limit import reset_job_costs
+
     reset_job_costs()
-    
+
     image_id = job_data["imageId"]
     # The backend sets these from the series context when it enqueues the job.
     # Defaults preserve the original behaviour (Japanese RTL) when not supplied.
     source_language = (job_data.get("sourceLanguage") or "ja").strip().lower()
     reading_direction = (job_data.get("readingDirection") or "rtl").strip().lower()
-    
+
     vlm_model_used = None
 
     if logger.isEnabledFor(logging.DEBUG):
@@ -859,9 +860,7 @@ def process_ocr(job_data):
                                 for item in results_list:
                                     item_id = item.get("id", "")
                                     item_text = item.get("text", "")
-                                    item_conf = float(
-                                        item.get("confidence", 0.99)
-                                    )
+                                    item_conf = float(item.get("confidence", 0.99))
                                     transcriptions[item_id] = {
                                         "text": item_text,
                                         "confidence": min(max(item_conf, 0.0), 1.0),
@@ -952,9 +951,11 @@ def process_ocr(job_data):
                             regions.append(
                                 {
                                     "text": final_text,
-                                    "detectedLanguage": detect_language(final_text)
-                                    if final_text
-                                    else "ja",
+                                    "detectedLanguage": (
+                                        detect_language(final_text)
+                                        if final_text
+                                        else "ja"
+                                    ),
                                     "confidence": r["confidence"],
                                     "rotation": 0.0,
                                     "x": r["x"],
@@ -981,9 +982,11 @@ def process_ocr(job_data):
                             regions.append(
                                 {
                                     "text": final_text,
-                                    "detectedLanguage": detect_language(final_text)
-                                    if final_text
-                                    else r["detectedLanguage"],
+                                    "detectedLanguage": (
+                                        detect_language(final_text)
+                                        if final_text
+                                        else r["detectedLanguage"]
+                                    ),
                                     "confidence": r["confidence"],
                                     "rotation": 0.0,
                                     "x": r["x"],
@@ -1138,9 +1141,10 @@ def process_ocr(job_data):
             "readingDirection": reading_direction,
             "regions": ordered_regions,
         }
-        
+
         try:
             from worker.utils.rate_limit import get_job_costs
+
             costs = get_job_costs()
             if costs:
                 cost_payload = {
@@ -1148,7 +1152,9 @@ def process_ocr(job_data):
                     "breakdown": costs,
                     "prompt_tokens": sum(c.get("prompt_tokens", 0) for c in costs),
                     "estimated_cost": sum(c.get("estimated_cost", 0.0) for c in costs),
-                    "completion_tokens": sum(c.get("completion_tokens", 0) for c in costs)
+                    "completion_tokens": sum(
+                        c.get("completion_tokens", 0) for c in costs
+                    ),
                 }
                 callback_payload["cost"] = cost_payload
         except Exception as e:

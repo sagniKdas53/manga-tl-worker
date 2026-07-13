@@ -228,9 +228,11 @@ You MUST return a JSON object containing a "results" key with an array of object
                 models_to_try.append(user_model)
             for m in getattr(
                 QA_CONFIG,
-                "qa_llm_model_list"
-                if hasattr(QA_CONFIG, "qa_llm_model_list")
-                else "llm_model_list",
+                (
+                    "qa_llm_model_list"
+                    if hasattr(QA_CONFIG, "qa_llm_model_list")
+                    else "llm_model_list"
+                ),
                 [],
             ):
                 if m not in models_to_try:
@@ -466,9 +468,11 @@ You MUST return a JSON object containing a "results" key with an array of object
                 models_to_try.append(user_model)
             for m in getattr(
                 QA_CONFIG,
-                "qa_vlm_model_list"
-                if hasattr(QA_CONFIG, "qa_vlm_model_list")
-                else "vlm_model_list",
+                (
+                    "qa_vlm_model_list"
+                    if hasattr(QA_CONFIG, "qa_vlm_model_list")
+                    else "vlm_model_list"
+                ),
                 [],
             ):
                 if m not in models_to_try:
@@ -752,9 +756,11 @@ You MUST return a JSON object containing a "results" key with an array of object
                 models_to_try.append(user_model)
             for m in getattr(
                 QA_CONFIG,
-                "qa_llm_model_list"
-                if hasattr(QA_CONFIG, "qa_llm_model_list")
-                else "llm_model_list",
+                (
+                    "qa_llm_model_list"
+                    if hasattr(QA_CONFIG, "qa_llm_model_list")
+                    else "llm_model_list"
+                ),
                 [],
             ):
                 if m not in models_to_try:
@@ -1041,9 +1047,11 @@ You MUST return a JSON object containing a "results" key with an array of object
                 models_to_try.append(user_model)
             for m in getattr(
                 QA_CONFIG,
-                "qa_vlm_model_list"
-                if hasattr(QA_CONFIG, "qa_vlm_model_list")
-                else "vlm_model_list",
+                (
+                    "qa_vlm_model_list"
+                    if hasattr(QA_CONFIG, "qa_vlm_model_list")
+                    else "vlm_model_list"
+                ),
                 [],
             ):
                 if m not in models_to_try:

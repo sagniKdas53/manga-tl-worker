@@ -806,6 +806,7 @@ def process_render(job_data):
 
     if qa_mode_resolved == "auto":
         from worker.config import QA_CONFIG
+
         provider = job_data.get("qaProvider") or getattr(QA_CONFIG, "provider", None)
         has_vlm = job_data.get("qaVlmModel") or getattr(QA_CONFIG, "vlm_model", None)
         has_llm = job_data.get("qaLlmModel") or getattr(QA_CONFIG, "llm_model", None)

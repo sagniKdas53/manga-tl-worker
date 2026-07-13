@@ -21,7 +21,9 @@ ACTIVE_JOBS = 0
 ACTIVE_HEAVY_JOBS = 0
 ACTIVE_LIGHT_JOBS = 0
 ACTIVE_JOBS_LOCK = threading.Lock()
-MAX_CONCURRENT_JOBS = int(os.environ.get("CONCURRENT_JOBS", os.environ.get("CONCURRENT_WORKERS", "2")))
+MAX_CONCURRENT_JOBS = int(
+    os.environ.get("CONCURRENT_JOBS", os.environ.get("CONCURRENT_WORKERS", "2"))
+)
 WORKER_API_SECRET = os.environ.get("WORKER_API_SECRET", "").strip()
 WORKER_API_SECRET_FILE = os.environ.get("WORKER_API_SECRET_FILE", "").strip()
 
@@ -187,7 +189,9 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                     if ACTIVE_JOBS >= MAX_CONCURRENT_JOBS:
                         self.send_response(429)
                         self.end_headers()
-                        self.wfile.write(b"Too Many Requests: Global concurrency limit reached")
+                        self.wfile.write(
+                            b"Too Many Requests: Global concurrency limit reached"
+                        )
                         return
 
                     # Check slot-specific limits
@@ -196,14 +200,18 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                         if ACTIVE_HEAVY_JOBS >= 1:
                             self.send_response(429)
                             self.end_headers()
-                            self.wfile.write(b"Too Many Requests: Heavy job slot occupied")
+                            self.wfile.write(
+                                b"Too Many Requests: Heavy job slot occupied"
+                            )
                             return
                         ACTIVE_HEAVY_JOBS += 1
                     else:
                         if ACTIVE_LIGHT_JOBS >= 1:
                             self.send_response(429)
                             self.end_headers()
-                            self.wfile.write(b"Too Many Requests: Light job slot occupied")
+                            self.wfile.write(
+                                b"Too Many Requests: Light job slot occupied"
+                            )
                             return
                         ACTIVE_LIGHT_JOBS += 1
 

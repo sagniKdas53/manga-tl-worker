@@ -99,7 +99,11 @@ def process_job_rq(queue_name, job_data):
             process_layout(job_data)
         elif queue_name == "queue:translation":
             process_translation(job_data)
-        elif queue_name in ("queue:region-redo-ocr", "queue:region-redo-tl", "queue:region-redo"):
+        elif queue_name in (
+            "queue:region-redo-ocr",
+            "queue:region-redo-tl",
+            "queue:region-redo",
+        ):
             process_region_redo(job_data)
         elif queue_name == "queue:render":
             process_render(job_data)

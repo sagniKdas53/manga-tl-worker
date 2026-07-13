@@ -150,9 +150,7 @@ def process_translation(job_data):
                 )
                 return None
 
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=1
-        ) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             futures = {
                 executor.submit(process_chunk, idx, chunk): chunk
                 for idx, chunk in enumerate(unmatched_chunks)
@@ -230,9 +228,7 @@ def process_translation(job_data):
                     return None
 
             retry_mapping = {}
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=1
-            ) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 futures = {
                     executor.submit(process_retry_chunk, idx, r_chunk): r_chunk
                     for idx, r_chunk in enumerate(retry_chunks)
