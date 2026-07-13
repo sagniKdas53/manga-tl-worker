@@ -260,6 +260,9 @@ def detect_bubble_contour(img, ocr_x, ocr_y, ocr_w, ocr_h):
 
 
 def process_ocr(job_data):
+    from worker.utils.rate_limit import reset_job_costs
+    reset_job_costs()
+    
     image_id = job_data["imageId"]
     # The backend sets these from the series context when it enqueues the job.
     # Defaults preserve the original behaviour (Japanese RTL) when not supplied.
