@@ -1,3 +1,4 @@
+import time
 import traceback
 import requests
 from worker.config import CALLBACK_URL, BACKEND_HEADERS
@@ -118,16 +119,21 @@ def process_job_rq(queue_name, job_data):
     except Exception as e:
         print(f"[RQ Worker] Error processing job from {queue_name}: {e}", flush=True)
         traceback.print_exc()
-        
+
         attempt = int(job_data.get("attempt", 1))
         max_attempts = int(job_data.get("maxAttempts", 3))
-        
+
         if attempt < max_attempts:
-            print(f"[RQ Worker] Job {job_id} failed on attempt {attempt}/{max_attempts}. Retrying in 2 seconds...", flush=True)
-            import time
+            print(
+                f"[RQ Worker] Job {job_id} failed on attempt {attempt}/{max_attempts}. Retrying in 2 seconds...",
+                flush=True,
+            )
             time.sleep(2)
             job_data["attempt"] = attempt + 1
             update_job_status(job_id, "PENDING", str(e), attempt + 1)
         else:
-            print(f"[RQ Worker] Job {job_id} failed on attempt {attempt}/{max_attempts}. Max attempts reached.", flush=True)
+            print(
+                f"[RQ Worker] Job {job_id} failed on attempt {attempt}/{max_attempts}. Max attempts reached.",
+                flush=True,
+            )
             update_job_status(job_id, "FAILED", str(e), attempt)
