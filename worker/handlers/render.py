@@ -816,13 +816,7 @@ def process_render(job_data):
         else:
             qa_mode_resolved = "none"
 
-    if qa_mode_resolved in ("llm", "none"):
-        print(
-            f"[Render] QA_MODE is '{qa_mode_resolved}', skipping rendering for image: {image_id}",
-            flush=True,
-        )
-    else:
-        render_image_core(image_id)
+    render_image_core(image_id)
 
     # Trigger callback
     callback_payload = {"imageId": image_id}
