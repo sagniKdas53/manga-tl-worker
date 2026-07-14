@@ -1,16 +1,17 @@
 import io
 import json
 import os
+from unittest.mock import MagicMock, patch
+
 import numpy as np
-from unittest.mock import patch, MagicMock
 from PIL import Image
 
-from worker.handlers.panel import process_panel_detection
-from worker.handlers.ocr import process_ocr
 from worker.handlers.layout import process_layout
-from worker.handlers.translation import process_translation
-from worker.handlers.render import process_render
+from worker.handlers.ocr import process_ocr
+from worker.handlers.panel import process_panel_detection
 from worker.handlers.qa import process_qa
+from worker.handlers.render import process_render
+from worker.handlers.translation import process_translation
 
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_CACHE_DIR = os.path.join(TEST_DIR, "test_rendered_cache")

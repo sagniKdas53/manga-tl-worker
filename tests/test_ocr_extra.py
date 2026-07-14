@@ -1,15 +1,15 @@
+import contextlib
+
 import numpy as np
 
-try:
+with contextlib.suppress(Exception):
     import cv2
-except Exception:
-    pass
 from worker.handlers.ocr import (
-    sort_fragments_vertical,
     detect_background_color,
     detect_background_color_poly,
-    get_split_polygon,
     detect_bubble_contour,
+    get_split_polygon,
+    sort_fragments_vertical,
 )
 
 

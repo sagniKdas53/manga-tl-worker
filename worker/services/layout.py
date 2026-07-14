@@ -20,10 +20,7 @@ def bubble_compare(a, b, reading_direction="rtl"):
         return 1 if y_diff > 0 else -1
 
     # Within the same row: RTL puts rightmost bubble first, LTR puts leftmost first
-    if reading_direction == "ltr":
-        x_diff = a["x"] - b["x"]
-    else:  # default: rtl
-        x_diff = b["x"] - a["x"]
+    x_diff = a["x"] - b["x"] if reading_direction == "ltr" else b["x"] - a["x"]
 
     return 1 if x_diff > 0 else -1
 
@@ -36,7 +33,7 @@ def classify_region_type(region, panel, image_width, image_height):
     """
     text = region.get("text", "")
     confidence = region.get("confidence") or 1.0
-    region.get("bboxX") or region.get("x", 0)
+    region.get("bboxX") or region.get("x", 0)  # type: ignore
     ry = region.get("bboxY") or region.get("y", 0)
     rw = region.get("bboxW") or region.get("width", 1)
     rh = region.get("bboxH") or region.get("height", 1)
@@ -49,9 +46,7 @@ def classify_region_type(region, panel, image_width, image_height):
     cleaned = re.sub(r"[\s！？\?!\.\,\-\_\"]", "", text.strip())
     is_kana_only = False
     if cleaned:
-        is_kana_only = bool(
-            re.match(r"^[\u3040-\u309F\u30A0-\u30FF\u30FC\uFF66-\uFF9F]+$", cleaned)
-        )
+        is_kana_only = bool(re.match(r"^[\u3040-\u309F\u30A0-\u30FF\u30FC\uFF66-\uFF9F]+$", cleaned))
 
     # --- SFX detection ---
     # Kana-only text or very tall narrow region (vertical SFX)
@@ -119,7 +114,7 @@ def group_conversations(regions, panels, reading_direction="rtl"):
     1. For each panel, collect its assigned regions sorted by bubble reading order.
     2. Within a panel, group regions into conversations using spatial proximity:
        - Two regions belong to the same conversation if their vertical gap is
-         ≤ 1.5× the average bubble height in the panel.
+         <= 1.5x the average bubble height in the panel.
        - Narration and SFX regions start their own group.
     3. Assign scene_type based on the region types within each group.
 
@@ -163,18 +158,12 @@ def group_conversations(regions, panels, reading_direction="rtl"):
             if region_type in ("narration", "sfx", "caption", "sign"):
                 # Flush current dialogue group
                 if current_group:
-                    conversations.append(
-                        _finish_conversation_group(current_group, current_panel_ids)
-                    )
+                    conversations.append(_finish_conversation_group(current_group, current_panel_ids))
                     current_group = []
                     current_panel_ids = set()
 
                 # Single-region group for narration/sfx
-                scene = (
-                    "narration"
-                    if region_type in ("narration", "caption")
-                    else "sfx_cluster"
-                )
+                scene = "narration" if region_type in ("narration", "caption") else "sfx_cluster"
                 conversations.append(
                     {
                         "regionIds": [rid],
@@ -193,9 +182,7 @@ def group_conversations(regions, panels, reading_direction="rtl"):
                 gap = ry - last_bottom
                 if gap > proximity_threshold:
                     # Start new group
-                    conversations.append(
-                        _finish_conversation_group(current_group, current_panel_ids)
-                    )
+                    conversations.append(_finish_conversation_group(current_group, current_panel_ids))
                     current_group = []
                     current_panel_ids = set()
 
@@ -204,9 +191,7 @@ def group_conversations(regions, panels, reading_direction="rtl"):
 
         # Flush remaining group
         if current_group:
-            conversations.append(
-                _finish_conversation_group(current_group, current_panel_ids)
-            )
+            conversations.append(_finish_conversation_group(current_group, current_panel_ids))
 
     # Handle unmapped regions (outside all panels)
     for r in unmapped:

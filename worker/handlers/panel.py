@@ -1,5 +1,6 @@
 import requests
-from worker.config import CALLBACK_URL, BACKEND_HEADERS, redis_client
+
+from worker.config import BACKEND_HEADERS, CALLBACK_URL, redis_client
 from worker.services.panel_detection import detect_panels
 from worker.utils.image import download_image
 
@@ -48,9 +49,7 @@ def process_panel_detection(job_data):
 
     callback_payload = {"imageId": image_id, "panels": panels}
     try:
-        res = requests.post(
-            f"{CALLBACK_URL}/panel", json=callback_payload, headers=BACKEND_HEADERS
-        )
+        res = requests.post(f"{CALLBACK_URL}/panel", json=callback_payload, headers=BACKEND_HEADERS)
         print(f"[Panel Detection] Callback status code: {res.status_code}", flush=True)
     except Exception as e:
         print(f"[Panel Detection] Failed to post callback to backend: {e}", flush=True)

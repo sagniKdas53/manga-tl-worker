@@ -1,5 +1,6 @@
 import requests
-from worker.config import CALLBACK_URL, BACKEND_HEADERS, redis_client
+
+from worker.config import BACKEND_HEADERS, CALLBACK_URL, redis_client
 from worker.services.layout import classify_region_type, group_conversations
 
 
@@ -39,9 +40,7 @@ def process_layout(job_data):
         # Still send callback so pipeline continues
         callback_payload = {"imageId": image_id, "regionTypes": [], "conversations": []}
         try:
-            res = requests.post(
-                f"{CALLBACK_URL}/layout", json=callback_payload, headers=BACKEND_HEADERS
-            )
+            res = requests.post(f"{CALLBACK_URL}/layout", json=callback_payload, headers=BACKEND_HEADERS)
             print(f"[Layout] Callback status code: {res.status_code}", flush=True)
         except Exception as e:
             print(f"[Layout] Failed to post callback: {e}", flush=True)
@@ -50,15 +49,11 @@ def process_layout(job_data):
     # Get image dimensions from the first panel or estimate from regions
     image_width = max(
         (p.get("bboxX", 0) + p.get("bboxW", 0) for p in panels),
-        default=max(
-            (r.get("bboxX", 0) + r.get("bboxW", 0) for r in ocr_regions), default=1000
-        ),
+        default=max((r.get("bboxX", 0) + r.get("bboxW", 0) for r in ocr_regions), default=1000),
     )
     image_height = max(
         (p.get("bboxY", 0) + p.get("bboxH", 0) for p in panels),
-        default=max(
-            (r.get("bboxY", 0) + r.get("bboxH", 0) for r in ocr_regions), default=1400
-        ),
+        default=max((r.get("bboxY", 0) + r.get("bboxH", 0) for r in ocr_regions), default=1400),
     )
 
     # Build panel lookup by ID
@@ -84,8 +79,7 @@ def process_layout(job_data):
             }
         )
         print(
-            f"[Layout] Region {str(r.get('id', ''))[:8]}... "
-            f"type={rtype} text='{(r.get('text', '') or '')[:30]}'",
+            f"[Layout] Region {str(r.get('id', ''))[:8]}... type={rtype} text='{(r.get('text', '') or '')[:30]}'",
             flush=True,
         )
 
@@ -116,12 +110,9 @@ def process_layout(job_data):
                 text = reg.get("text", "").strip().replace("\n", " ")
                 rtype = reg.get("regionType") or reg.get("region_type") or "speech"
                 region_details.append(f"[{rtype}] '{text}'")
-        panel_info = (
-            f"panels={conv['panelIds']}" if conv.get("panelIds") else "unmapped"
-        )
+        panel_info = f"panels={conv['panelIds']}" if conv.get("panelIds") else "unmapped"
         print(
-            f"[Layout] Conversation #{idx + 1} ({conv['sceneType']}, {panel_info}): "
-            + " -> ".join(region_details),
+            f"[Layout] Conversation #{idx + 1} ({conv['sceneType']}, {panel_info}): " + " -> ".join(region_details),
             flush=True,
         )
     print("[Layout] -------------------------------------", flush=True)
@@ -139,9 +130,7 @@ def process_layout(job_data):
         ],
     }
     try:
-        res = requests.post(
-            f"{CALLBACK_URL}/layout", json=callback_payload, headers=BACKEND_HEADERS
-        )
+        res = requests.post(f"{CALLBACK_URL}/layout", json=callback_payload, headers=BACKEND_HEADERS)
         print(f"[Layout] Callback status code: {res.status_code}", flush=True)
     except Exception as e:
         print(f"[Layout] Failed to post callback to backend: {e}", flush=True)

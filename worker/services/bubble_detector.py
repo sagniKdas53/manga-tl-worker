@@ -1,12 +1,14 @@
-import os
 import hashlib
+import os
+
 import cv2
 import numpy as np
+
 from worker.config import (
-    YOLO_MODEL_PATH,
     YOLO_CONF_THRESHOLD,
     YOLO_INPUT_SIZE,
     YOLO_MASK_EROSION,
+    YOLO_MODEL_PATH,
     YOLO_PINNED_CHECKSUM,
     logger,
 )
@@ -38,26 +40,20 @@ def get_ort_session():
     # Checksum verification
     current_checksum = get_sha256(YOLO_MODEL_PATH)
     if current_checksum != YOLO_PINNED_CHECKSUM:
-        logger.warning(
-            f"[YOLO] Pinned checksum mismatch! Expected: {YOLO_PINNED_CHECKSUM}, got: {current_checksum}"
-        )
+        logger.warning(f"[YOLO] Pinned checksum mismatch! Expected: {YOLO_PINNED_CHECKSUM}, got: {current_checksum}")
     else:
         logger.info("[YOLO] Model checksum matches pinned checksum.")
 
     try:
         import onnxruntime as ort
 
-        logger.info(
-            f"[YOLO] Loading ONNX model from {YOLO_MODEL_PATH} via ONNX Runtime..."
-        )
+        logger.info(f"[YOLO] Loading ONNX model from {YOLO_MODEL_PATH} via ONNX Runtime...")
         # Load ONNX session (CPU by default)
-        _ort_session = ort.InferenceSession(
-            YOLO_MODEL_PATH, providers=["CPUExecutionProvider"]
-        )
+        _ort_session = ort.InferenceSession(YOLO_MODEL_PATH, providers=["CPUExecutionProvider"])
         logger.info("[YOLO] ONNX Runtime session initialized successfully.")
         return _ort_session
     except Exception as e:
-        raise RuntimeError(f"Failed to load ONNX model via ONNX Runtime: {e}")
+        raise RuntimeError(f"Failed to load ONNX model via ONNX Runtime: {e}") from e
 
 
 def letterbox(img, new_shape=(1280, 1280), color=(114, 114, 114)):
@@ -69,7 +65,7 @@ def letterbox(img, new_shape=(1280, 1280), color=(114, 114, 114)):
     r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
 
     # Compute padding
-    new_unpad = (int(round(shape[1] * r)), int(round(shape[0] * r)))
+    new_unpad = (round(shape[1] * r), round(shape[0] * r))
     dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]
 
     dw /= 2
@@ -77,11 +73,9 @@ def letterbox(img, new_shape=(1280, 1280), color=(114, 114, 114)):
 
     if shape[::-1] != new_unpad:
         img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
-    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
-    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
-    img = cv2.copyMakeBorder(
-        img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color
-    )
+    top, bottom = round(dh - 0.1), round(dh + 0.1)
+    left, right = round(dw - 0.1), round(dw + 0.1)
+    img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
     return img, r, (dw, dh), new_unpad
 
 
@@ -97,9 +91,7 @@ def detect_bubbles_yolo(img):
     """
     session = get_ort_session()
     if session is None:
-        raise RuntimeError(
-            "YOLO model session initialization failed. Cannot proceed without the required model."
-        )
+        raise RuntimeError("YOLO model session initialization failed. Cannot proceed without the required model.")
 
     if img is None:
         return []
@@ -112,9 +104,7 @@ def detect_bubbles_yolo(img):
 
     # Preprocess (Letterbox to YOLO_INPUT_SIZE)
     input_sz = YOLO_INPUT_SIZE
-    padded_img, r, (dw, dh), (unpad_w, unpad_h) = letterbox(
-        img, new_shape=(input_sz, input_sz)
-    )
+    padded_img, r, (dw, dh), (unpad_w, unpad_h) = letterbox(img, new_shape=(input_sz, input_sz))
 
     # Convert BGR to RGB, normalize, transpose to BCHW
     img_rgb = cv2.cvtColor(padded_img, cv2.COLOR_BGR2RGB)
@@ -132,8 +122,8 @@ def detect_bubbles_yolo(img):
     # Postprocess
     # output0: detections [1, 37, 33600]
     # output1: prototype masks [1, 32, 320, 320]
-    preds = outputs[0][0]  # [37, 33600]
-    proto = outputs[1][0]  # [32, 320, 320]
+    preds = outputs[0][0]  # [37, 33600]  # type: ignore
+    proto = outputs[1][0]  # [32, 320, 320]  # type: ignore
 
     boxes = []
     scores = []
@@ -150,16 +140,12 @@ def detect_bubbles_yolo(img):
             coefficients.append(preds[5:, i].tolist())
 
     if not boxes:
-        logger.info(
-            f"[YOLO] No bubbles detected. Inference took {time.perf_counter() - start_time:.3f}s"
-        )
+        logger.info(f"[YOLO] No bubbles detected. Inference took {time.perf_counter() - start_time:.3f}s")
         return []
 
     indices = cv2.dnn.NMSBoxes(boxes, scores, YOLO_CONF_THRESHOLD, 0.45)
     if len(indices) == 0:
-        logger.info(
-            f"[YOLO] 0 bubbles survived NMS. Inference took {time.perf_counter() - start_time:.3f}s"
-        )
+        logger.info(f"[YOLO] 0 bubbles survived NMS. Inference took {time.perf_counter() - start_time:.3f}s")
         return []
 
     indices = np.array(indices).flatten().tolist()
@@ -193,9 +179,7 @@ def detect_bubbles_yolo(img):
         cropped_mask = cropped_mask[top_m:bottom_m, left_m:right_m]
 
         # Resize to original image dimensions
-        resized_mask = cv2.resize(
-            cropped_mask, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR
-        )
+        resized_mask = cv2.resize(cropped_mask, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
 
         # Threshold to binary
         binary_mask = (resized_mask >= 0.5).astype(np.uint8) * 255
@@ -205,9 +189,7 @@ def detect_bubbles_yolo(img):
         cleaned_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel_close)
 
         # Get Contour
-        contours, _ = cv2.findContours(
-            cleaned_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
+        contours, _ = cv2.findContours(cleaned_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             continue
 
@@ -223,9 +205,7 @@ def detect_bubbles_yolo(img):
 
         # Derive eroded safe text area
         erosion_px = YOLO_MASK_EROSION
-        kernel_erode = cv2.getStructuringElement(
-            cv2.MORPH_ELLIPSE, (2 * erosion_px + 1, 2 * erosion_px + 1)
-        )
+        kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * erosion_px + 1, 2 * erosion_px + 1))
         eroded_mask = cv2.erode(cleaned_mask, kernel_erode, iterations=1)
 
         # If erosion completely ate the bubble, fallback to the cleaned mask
@@ -257,7 +237,5 @@ def detect_bubbles_yolo(img):
         )
 
     duration = time.perf_counter() - start_time
-    logger.info(
-        f"[YOLO] Bubble detection completed. Found {len(bubbles)} bubbles in {duration:.3f}s"
-    )
+    logger.info(f"[YOLO] Bubble detection completed. Found {len(bubbles)} bubbles in {duration:.3f}s")
     return bubbles

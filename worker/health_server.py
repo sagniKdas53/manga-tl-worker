@@ -1,10 +1,11 @@
 import json
-import time
-import threading
 import os
 import platform
+import threading
+import time
 from http.server import BaseHTTPRequestHandler
-from worker.config import redis_client, MODEL_TTL
+
+from worker.config import MODEL_TTL, redis_client
 from worker.model_manager import model_manager
 
 # Import process_job_rq for executing tasks
@@ -21,9 +22,7 @@ ACTIVE_JOBS = 0
 ACTIVE_HEAVY_JOBS = 0
 ACTIVE_LIGHT_JOBS = 0
 ACTIVE_JOBS_LOCK = threading.Lock()
-MAX_CONCURRENT_JOBS = int(
-    os.environ.get("CONCURRENT_JOBS", os.environ.get("CONCURRENT_WORKERS", "2"))
-)
+MAX_CONCURRENT_JOBS = int(os.environ.get("CONCURRENT_JOBS", os.environ.get("CONCURRENT_WORKERS", "2")))
 WORKER_API_SECRET = os.environ.get("WORKER_API_SECRET", "").strip()
 WORKER_API_SECRET_FILE = os.environ.get("WORKER_API_SECRET_FILE", "").strip()
 
@@ -45,7 +44,7 @@ LIGHT_QUEUES = {
 
 if WORKER_API_SECRET_FILE and os.path.exists(WORKER_API_SECRET_FILE):
     try:
-        with open(WORKER_API_SECRET_FILE, "r") as f:
+        with open(WORKER_API_SECRET_FILE) as f:
             WORKER_API_SECRET = f.read().strip()
     except Exception as e:
         print(f"[Health Server] Failed to read WORKER_API_SECRET_FILE: {e}", flush=True)
@@ -109,10 +108,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             # Check Redis connection
             redis_status = "connected"
             try:
-                if redis_client.ping():
-                    redis_status = "connected"
-                else:
-                    redis_status = "disconnected"
+                redis_status = "connected" if redis_client.ping() else "disconnected"
             except Exception:
                 redis_status = "disconnected"
 
@@ -201,9 +197,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                     if ACTIVE_JOBS >= MAX_CONCURRENT_JOBS:
                         self.send_response(429)
                         self.end_headers()
-                        self.wfile.write(
-                            b"Too Many Requests: Global concurrency limit reached"
-                        )
+                        self.wfile.write(b"Too Many Requests: Global concurrency limit reached")
                         return
 
                     # Check slot-specific limits
@@ -212,18 +206,14 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                         if ACTIVE_HEAVY_JOBS >= 1:
                             self.send_response(429)
                             self.end_headers()
-                            self.wfile.write(
-                                b"Too Many Requests: Heavy job slot occupied"
-                            )
+                            self.wfile.write(b"Too Many Requests: Heavy job slot occupied")
                             return
                         ACTIVE_HEAVY_JOBS += 1
                     else:
                         if ACTIVE_LIGHT_JOBS >= 1:
                             self.send_response(429)
                             self.end_headers()
-                            self.wfile.write(
-                                b"Too Many Requests: Light job slot occupied"
-                            )
+                            self.wfile.write(b"Too Many Requests: Light job slot occupied")
                             return
                         ACTIVE_LIGHT_JOBS += 1
 
@@ -237,9 +227,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                     self.wfile.flush()
 
                     # Start job in background
-                    t = threading.Thread(
-                        target=_run_job_async, args=(queue_name, job_data), daemon=True
-                    )
+                    t = threading.Thread(target=_run_job_async, args=(queue_name, job_data), daemon=True)
                     t.start()
                 except Exception as start_err:
                     with ACTIVE_JOBS_LOCK:
@@ -253,11 +241,11 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             except ValueError as e:
                 self.send_response(400)
                 self.end_headers()
-                self.wfile.write(f"Bad Request: {e}".encode("utf-8"))
+                self.wfile.write(f"Bad Request: {e}".encode())
             except Exception as e:
                 self.send_response(500)
                 self.end_headers()
-                self.wfile.write(f"Server Error: {e}".encode("utf-8"))
+                self.wfile.write(f"Server Error: {e}".encode())
         else:
             self.send_response(404)
             self.end_headers()

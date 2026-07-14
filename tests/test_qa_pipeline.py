@@ -1,6 +1,7 @@
 import io
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from PIL import Image
 
 from worker.handlers.qa import process_qa
@@ -61,7 +62,7 @@ def test_process_qa_llm_gemini(mock_qa_config, mock_post, mock_get, mock_try_clo
     process_qa({"imageId": "image-uuid-1"})
 
     mock_try_cloud_ai.assert_called_once()
-    args, kwargs = mock_try_cloud_ai.call_args
+    args, _kwargs = mock_try_cloud_ai.call_args
     assert args[0] == "gemini"
     assert args[1] == "fake-gemini-key"
     assert args[2] == "gemini-1.5-pro"
@@ -119,7 +120,7 @@ def test_process_qa_llm_nvidia(mock_qa_config, mock_post, mock_get, mock_try_clo
     process_qa({"imageId": "image-uuid-1"})
 
     mock_try_cloud_ai.assert_called_once()
-    args, kwargs = mock_try_cloud_ai.call_args
+    args, _kwargs = mock_try_cloud_ai.call_args
     assert args[0] == "nvidia"
     assert args[1] == "fake-nvidia-key"
     assert args[2] == "google/gemma-3n-e4b-it"
@@ -132,9 +133,7 @@ def test_process_qa_llm_nvidia(mock_qa_config, mock_post, mock_get, mock_try_clo
 @patch("worker.handlers.qa.requests.post")
 @patch("worker.handlers.qa.QA_MODE", "vlm")
 @patch("worker.handlers.qa.QA_CONFIG")
-def test_process_qa_vlm_openrouter(
-    mock_qa_config, mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm
-):
+def test_process_qa_vlm_openrouter(mock_qa_config, mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm):
     mock_qa_config.provider = "openrouter"
     mock_qa_config.resolve_key.return_value = "fake-openrouter-key"
     mock_qa_config.vlm_model = "google/gemini-1.5-pro"
@@ -184,7 +183,7 @@ def test_process_qa_vlm_openrouter(
     process_qa({"imageId": "image-uuid-1"})
 
     mock_try_cloud_vlm.assert_called_once()
-    args, kwargs = mock_try_cloud_vlm.call_args
+    args, _kwargs = mock_try_cloud_vlm.call_args
     assert args[0] == "openrouter"
     assert args[1] == "fake-openrouter-key"
     assert args[2] == "google/gemini-1.5-pro"
@@ -197,9 +196,7 @@ def test_process_qa_vlm_openrouter(
 @patch("worker.handlers.qa.requests.post")
 @patch("worker.handlers.qa.QA_MODE", "vlm")
 @patch("worker.handlers.qa.QA_CONFIG")
-def test_process_qa_vlm_nvidia(
-    mock_qa_config, mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm
-):
+def test_process_qa_vlm_nvidia(mock_qa_config, mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm):
     mock_qa_config.provider = "nvidia"
     mock_qa_config.resolve_key.return_value = "fake-nvidia-key"
     mock_qa_config.vlm_model = "nvidia/nemotron-nano-12b-v2-vl"
@@ -249,7 +246,7 @@ def test_process_qa_vlm_nvidia(
     process_qa({"imageId": "image-uuid-1"})
 
     mock_try_cloud_vlm.assert_called_once()
-    args, kwargs = mock_try_cloud_vlm.call_args
+    args, _kwargs = mock_try_cloud_vlm.call_args
     assert args[0] == "nvidia"
     assert args[1] == "fake-nvidia-key"
     assert args[2] == "nvidia/nemotron-nano-12b-v2-vl"

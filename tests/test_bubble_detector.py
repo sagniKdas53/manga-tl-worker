@@ -1,12 +1,13 @@
-import pytest
+from unittest.mock import MagicMock, patch
+
 import numpy as np
-from unittest.mock import patch, MagicMock
+import pytest
 
 from worker.services.bubble_detector import (
-    get_sha256,
-    get_ort_session,
-    letterbox,
     detect_bubbles_yolo,
+    get_ort_session,
+    get_sha256,
+    letterbox,
 )
 
 
@@ -67,7 +68,7 @@ def test_letterbox():
     # create a dummy image
     img = np.zeros((100, 200, 3), dtype=np.uint8)
 
-    padded, r, (dw, dh), new_unpad = letterbox(img, new_shape=(300, 300))
+    padded, _r, (_dw, _dh), _new_unpad = letterbox(img, new_shape=(300, 300))
     assert padded.shape[:2] == (300, 300)
 
 
@@ -122,8 +123,8 @@ def test_detect_bubbles_yolo_with_predictions(mock_nms, mock_get_session):
     img = np.zeros((100, 100, 3), dtype=np.uint8)
     result = detect_bubbles_yolo(img)
 
-    assert len(result) == 1
-    assert "bbox" in result[0]
-    assert "confidence" in result[0]
-    assert "mask_polygon" in result[0]
-    assert "safe_rect" in result[0]
+    assert len(result) == 1  # type: ignore
+    assert "bbox" in result[0]  # type: ignore
+    assert "confidence" in result[0]  # type: ignore
+    assert "mask_polygon" in result[0]  # type: ignore
+    assert "safe_rect" in result[0]  # type: ignore

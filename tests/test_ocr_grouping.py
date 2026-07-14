@@ -1,6 +1,8 @@
 import json
+from unittest.mock import MagicMock, patch
+
 import numpy as np
-from unittest.mock import patch, MagicMock
+
 from worker.handlers.ocr import process_ocr
 
 
@@ -95,14 +97,10 @@ def test_process_ocr_yolo_preserves_grouping(
 
     # Ensure they haven't been convex-hulled together (a hull would span the whole 1000x1000 image)
     for pt in mask_a:
-        assert pt[0] < 500 and pt[1] < 500, (
-            "Mask A contains points from Mask B! Masking regression!"
-        )
+        assert pt[0] < 500 and pt[1] < 500, "Mask A contains points from Mask B! Masking regression!"
 
     for pt in mask_b:
-        assert pt[0] > 500 and pt[1] > 500, (
-            "Mask B contains points from Mask A! Masking regression!"
-        )
+        assert pt[0] > 500 and pt[1] > 500, "Mask B contains points from Mask A! Masking regression!"
 
 
 @patch("worker.handlers.ocr.redis_client")
@@ -219,7 +217,7 @@ def test_process_ocr_different_shapes(
         return (min(xs), min(ys), max(xs), max(ys))
 
     def bbox_match(b1, b2, tol=2):
-        return all(abs(a - b) <= tol for a, b in zip(b1, b2))
+        return all(abs(a - b) <= tol for a, b in zip(b1, b2, strict=False))
 
     masks_found = [json.loads(r["maskPolygon"]) for r in regions]
     bboxes_found = [poly_bbox(m) for m in masks_found]
@@ -229,9 +227,5 @@ def test_process_ocr_different_shapes(
 
     assert check_bbox_present(poly_bbox(square_poly)), "Square mask was not preserved"
     assert check_bbox_present(poly_bbox(circle_poly)), "Circular mask was not preserved"
-    assert check_bbox_present(poly_bbox(ellipse_poly)), (
-        "Elliptical mask was not preserved"
-    )
-    assert check_bbox_present(poly_bbox(pentagon_poly)), (
-        "Pentagonal mask was not preserved"
-    )
+    assert check_bbox_present(poly_bbox(ellipse_poly)), "Elliptical mask was not preserved"
+    assert check_bbox_present(poly_bbox(pentagon_poly)), "Pentagonal mask was not preserved"

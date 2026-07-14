@@ -1,7 +1,8 @@
 import io
 import json
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from PIL import Image
 
 from worker.handlers.ocr import process_ocr
@@ -53,9 +54,7 @@ def test_process_ocr_vlm_gemini(
             "safe_rect": [15, 25, 90, 70],
         }
     ]
-    mock_try_cloud_vlm.return_value = json.dumps(
-        {"results": [{"id": "region_0", "text": "Hello from Gemini VLM OCR"}]}
-    )
+    mock_try_cloud_vlm.return_value = json.dumps({"results": [{"id": "region_0", "text": "Hello from Gemini VLM OCR"}]})
 
     mock_image_info = {"id": "image-uuid-1", "panels": []}
     mock_get_res = MagicMock()
@@ -77,7 +76,7 @@ def test_process_ocr_vlm_gemini(
 
     # Check cloud VLM called with gemini parameters
     mock_try_cloud_vlm.assert_called_once()
-    args, kwargs = mock_try_cloud_vlm.call_args
+    args, _kwargs = mock_try_cloud_vlm.call_args
     assert args[0] == "gemini"
     assert args[1] == "fake-gemini-key"
     assert args[2] == "gemini-1.5-flash"
@@ -150,7 +149,7 @@ def test_process_ocr_vlm_openrouter(
     process_ocr(job_data)
 
     mock_try_cloud_vlm.assert_called_once()
-    args, kwargs = mock_try_cloud_vlm.call_args
+    args, _kwargs = mock_try_cloud_vlm.call_args
     assert args[0] == "openrouter"
     assert args[1] == "fake-openrouter-key"
     assert args[2] == "qwen/qwen3-vl-8b-instruct"
@@ -199,9 +198,7 @@ def test_process_ocr_vlm_nvidia(
             "safe_rect": [15, 25, 90, 70],
         }
     ]
-    mock_try_cloud_vlm.return_value = json.dumps(
-        {"results": [{"id": "region_0", "text": "Hello from Nvidia VLM OCR"}]}
-    )
+    mock_try_cloud_vlm.return_value = json.dumps({"results": [{"id": "region_0", "text": "Hello from Nvidia VLM OCR"}]})
 
     mock_image_info = {"id": "image-uuid-1", "panels": []}
     mock_get_res = MagicMock()
@@ -217,7 +214,7 @@ def test_process_ocr_vlm_nvidia(
     process_ocr(job_data)
 
     mock_try_cloud_vlm.assert_called_once()
-    args, kwargs = mock_try_cloud_vlm.call_args
+    args, _kwargs = mock_try_cloud_vlm.call_args
     assert args[0] == "nvidia"
     assert args[1] == "fake-nvidia-key"
     assert args[2] == "nvidia/nemotron-nano-12b-v2-vl"
@@ -283,7 +280,7 @@ def test_process_ocr_vlm_local_fallback(
     process_ocr(job_data)
 
     mock_try_local_vlm.assert_called_once()
-    args, kwargs = mock_try_local_vlm.call_args
+    args, _kwargs = mock_try_local_vlm.call_args
     assert args[0] == "local-vlm-model"
 
     mock_post.assert_called_once()
@@ -379,7 +376,7 @@ def test_process_ocr_vlm_batched_multiple_regions(
 
     # Check cloud VLM called with 3 crops
     mock_try_cloud_vlm.assert_called_once()
-    args, kwargs = mock_try_cloud_vlm.call_args
+    args, _kwargs = mock_try_cloud_vlm.call_args
     assert len(args[3]) == 3  # 3 crops: 2 bubbles, 1 direct text
     assert args[3][0]["id"] == "region_0"
     assert args[3][1]["id"] == "region_1"

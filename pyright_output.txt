@@ -1,0 +1,103 @@
+/home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/conftest.py
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/conftest.py:12:28 - error: Cannot assign to attribute "gapi" for class "ModuleType"
+    Attribute "gapi" is unknown (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/conftest.py:13:28 - error: Cannot assign to attribute "mat_wrapper" for class "ModuleType"
+    Attribute "mat_wrapper" is unknown (reportAttributeAccessIssue)
+/home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_bubble_detector.py
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_bubble_detector.py:126:16 - error: Argument of type "list[Unknown] | None" cannot be assigned to parameter "obj" of type "Sized" in function "len"
+    Type "list[Unknown] | None" is not assignable to type "Sized"
+      "None" is incompatible with protocol "Sized"
+        "__len__" is not present (reportArgumentType)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_bubble_detector.py:127:22 - error: Object of type "None" is not subscriptable (reportOptionalSubscript)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_bubble_detector.py:128:28 - error: Object of type "None" is not subscriptable (reportOptionalSubscript)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_bubble_detector.py:129:30 - error: Object of type "None" is not subscriptable (reportOptionalSubscript)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_bubble_detector.py:130:27 - error: Object of type "None" is not subscriptable (reportOptionalSubscript)
+/home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_ocr_shaping_color.py
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_ocr_shaping_color.py:61:5 - error: No overloads for "circle" match the provided arguments (reportCallIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_ocr_shaping_color.py:61:36 - error: Argument of type "Literal[255]" cannot be assigned to parameter "color" of type "Scalar" in function "circle"
+    "Literal[255]" is not assignable to "Sequence[float]" (reportArgumentType)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_ocr_shaping_color.py:62:5 - error: No overloads for "circle" match the provided arguments (reportCallIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_ocr_shaping_color.py:62:38 - error: Argument of type "Literal[255]" cannot be assigned to parameter "color" of type "Scalar" in function "circle"
+    "Literal[255]" is not assignable to "Sequence[float]" (reportArgumentType)
+/home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_translation_extra.py
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_translation_extra.py:24:12 - error: Operator "in" not supported for types "Literal['1']" and "dict[Unknown, dict[str, Unknown]] | dict[Unknown, Unknown] | None"
+    Operator "in" not supported for types "Literal['1']" and "None" (reportOperatorIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_translation_extra.py:25:12 - error: Object of type "None" is not subscriptable (reportOptionalSubscript)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_translation_extra.py:30:12 - error: Operator "in" not supported for types "Literal['1']" and "dict[Unknown, dict[str, Unknown]] | dict[Unknown, Unknown] | None"
+    Operator "in" not supported for types "Literal['1']" and "None" (reportOperatorIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/tests/test_translation_extra.py:35:12 - error: Operator "in" not supported for types "Literal['1']" and "dict[Unknown, dict[str, Unknown]] | dict[Unknown, Unknown] | None"
+    Operator "in" not supported for types "Literal['1']" and "None" (reportOperatorIssue)
+/home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/config.py
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/config.py:10:9 - error: "TRACE" is not a known attribute of module "logging" (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/config.py:11:30 - error: "TRACE" is not a known attribute of module "logging" (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/config.py:16:34 - error: "TRACE" is not a known attribute of module "logging" (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/config.py:17:27 - error: "TRACE" is not a known attribute of module "logging" (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/config.py:20:16 - error: Cannot assign to attribute "trace" for class "type[Logger]"
+    Attribute "trace" is unknown (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/config.py:23:17 - error: "TRACE" is not a known attribute of module "logging" (reportAttributeAccessIssue)
+/home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/ocr.py
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/ocr.py:133:9 - error: No overloads for "fillPoly" match the provided arguments (reportCallIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/ocr.py:133:36 - error: Argument of type "Literal[255]" cannot be assigned to parameter "color" of type "Scalar" in function "fillPoly"
+    "Literal[255]" is not assignable to "Sequence[float]" (reportArgumentType)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/ocr.py:220:5 - warning: Expression value is unused (reportUnusedExpression)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/ocr.py:221:5 - warning: Expression value is unused (reportUnusedExpression)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/ocr.py:471:17 - error: No overloads for "fillPoly" match the provided arguments (reportCallIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/ocr.py:471:44 - error: Argument of type "Literal[255]" cannot be assigned to parameter "color" of type "Scalar" in function "fillPoly"
+    "Literal[255]" is not assignable to "Sequence[float]" (reportArgumentType)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/ocr.py:544:25 - error: No overloads for "fillPoly" match the provided arguments (reportCallIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/ocr.py:544:88 - error: Argument of type "Literal[255]" cannot be assigned to parameter "color" of type "Scalar" in function "fillPoly"
+    "Literal[255]" is not assignable to "Sequence[float]" (reportArgumentType)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/ocr.py:630:32 - error: Object of type "None" is not subscriptable (reportOptionalSubscript)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/ocr.py:962:25 - error: Object of type "None" is not subscriptable (reportOptionalSubscript)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/ocr.py:963:25 - error: Object of type "None" is not subscriptable (reportOptionalSubscript)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/ocr.py:964:25 - error: Object of type "None" is not subscriptable (reportOptionalSubscript)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/ocr.py:965:25 - error: Object of type "None" is not subscriptable (reportOptionalSubscript)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/ocr.py:970:43 - error: "get" is not a known attribute of "None" (reportOptionalMemberAccess)
+/home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/render.py
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/render.py:264:37 - error: Cannot access attribute "getsize" for class "FreeTypeFont"
+    Attribute "getsize" is unknown (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/render.py:264:37 - error: Cannot access attribute "getsize" for class "ImageFont"
+    Attribute "getsize" is unknown (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/render.py:284:33 - error: Argument of type "list[Unknown] | None" cannot be assigned to parameter "obj" of type "Sized" in function "len"
+    Type "list[Unknown] | None" is not assignable to type "Sized"
+      "None" is incompatible with protocol "Sized"
+        "__len__" is not present (reportArgumentType)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/render.py:286:30 - error: Object of type "None" is not subscriptable (reportOptionalSubscript)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/render.py:287:30 - error: Object of type "None" is not subscriptable (reportOptionalSubscript)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/render.py:670:23 - error: Argument of type "float" cannot be assigned to parameter "box_x" of type "int" in function "fit_text_in_box_py"
+    "float" is not assignable to "int" (reportArgumentType)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/render.py:671:23 - error: Argument of type "float" cannot be assigned to parameter "box_y" of type "int" in function "fit_text_in_box_py"
+    "float" is not assignable to "int" (reportArgumentType)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/render.py:699:51 - error: Cannot access attribute "getsize" for class "FreeTypeFont"
+    Attribute "getsize" is unknown (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/handlers/render.py:699:51 - error: Cannot access attribute "getsize" for class "ImageFont"
+    Attribute "getsize" is unknown (reportAttributeAccessIssue)
+/home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/model_manager.py
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/model_manager.py:71:26 - error: Import "paddleocr" could not be resolved (reportMissingImports)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/model_manager.py:121:26 - error: Import "paddleocr" could not be resolved (reportMissingImports)
+/home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/bubble_detector.py
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/bubble_detector.py:125:13 - error: "__getitem__" method not defined on type "SparseTensor" (reportIndexIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/bubble_detector.py:126:13 - error: "__getitem__" method not defined on type "SparseTensor" (reportIndexIssue)
+/home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/layout.py
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/layout.py:36:5 - warning: Expression value is unused (reportUnusedExpression)
+/home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/translation.py
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/translation.py:653:17 - error: Argument of type "dict[str, str | dict[str, str | Unknown]]" cannot be assigned to parameter "object" of type "dict[str, str]" in function "append" (reportArgumentType)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/translation.py:682:17 - error: Argument of type "dict[str, str | dict[str, str]]" cannot be assigned to parameter "object" of type "dict[str, str]" in function "append" (reportArgumentType)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/translation.py:854:40 - error: "TRACE" is not a known attribute of module "logging" (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/translation.py:855:20 - error: Cannot access attribute "trace" for class "Logger"
+    Attribute "trace" is unknown (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/translation.py:856:20 - error: Cannot access attribute "trace" for class "Logger"
+    Attribute "trace" is unknown (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/translation.py:862:40 - error: "TRACE" is not a known attribute of module "logging" (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/translation.py:863:20 - error: Cannot access attribute "trace" for class "Logger"
+    Attribute "trace" is unknown (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/translation.py:864:20 - error: Cannot access attribute "trace" for class "Logger"
+    Attribute "trace" is unknown (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/translation.py:892:40 - error: "TRACE" is not a known attribute of module "logging" (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/translation.py:893:20 - error: Cannot access attribute "trace" for class "Logger"
+    Attribute "trace" is unknown (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/translation.py:894:20 - error: Cannot access attribute "trace" for class "Logger"
+    Attribute "trace" is unknown (reportAttributeAccessIssue)
+  /home/sagnik/Projects/docker-composes/manga-library/unified-workers/worker/services/translation.py:895:20 - error: Cannot access attribute "trace" for class "Logger"
+    Attribute "trace" is unknown (reportAttributeAccessIssue)
+58 errors, 3 warnings, 0 informations

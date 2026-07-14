@@ -1,5 +1,6 @@
-from unittest.mock import patch
 import json
+from unittest.mock import patch
+
 from worker.services.translation import translate_batch_llm
 
 
@@ -40,7 +41,7 @@ def test_translate_batch_llm_handles_qa_feedback(mock_tl_config, mock_try_cloud_
     assert res is not None
 
     # Check that mock_try_cloud_ai was called with the prompt containing qaFeedback
-    args, kwargs = mock_try_cloud_ai.call_args
+    args, _kwargs = mock_try_cloud_ai.call_args
     prompt = args[3]  # The prompt parameter
     assert "previousTranslation" in prompt or "qaFeedback" in prompt
     assert "It should be more polite." in prompt

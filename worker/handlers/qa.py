@@ -1,26 +1,28 @@
+import base64
 import io
+import json
 import logging
 import os
-import json
-import base64
+
 import requests
 from PIL import Image
+
 from worker.config import (
-    CALLBACK_URL,
     BACKEND_HEADERS,
-    minio_client,
-    logger,
-    QA_MODE,
-    redis_client,
+    CALLBACK_URL,
     QA_CONFIG,
+    QA_MODE,
+    logger,
+    minio_client,
+    redis_client,
 )
-from worker.utils.image import download_image
 from worker.services.translation import (
     try_cloud_ai,
-    try_local_ai,
     try_cloud_ai_vision,
+    try_local_ai,
     try_local_vlm_vision,
 )
+from worker.utils.image import download_image
 
 QA_JSON_SCHEMA = {
     "type": "object",
@@ -107,9 +109,7 @@ def process_qa(job_data):
     elif qa_mode_resolved == "hybrid":
         _process_qa_hybrid(job_data)
     else:
-        logger.warning(
-            f"[QA] Unknown QA_MODE={qa_mode_resolved}, falling back to auto-pass"
-        )
+        logger.warning(f"[QA] Unknown QA_MODE={qa_mode_resolved}, falling back to auto-pass")
         _auto_pass_all(job_data)
 
 
@@ -183,13 +183,9 @@ You MUST return a JSON object containing a "results" key with an array of object
     def attempt_llm(prov, model_override=None):
         user_model = model_override or job_data.get("qaLlmModel") or QA_CONFIG.llm_model
         if prov == "openrouter" and api_key:
-            llm_model = (
-                user_model if user_model else "meta-llama/llama-3-8b-instruct:free"
-            )
+            llm_model = user_model if user_model else "meta-llama/llama-3-8b-instruct:free"
             try:
-                return try_cloud_ai(
-                    "openrouter", api_key, llm_model, prompt, QA_JSON_SCHEMA
-                )
+                return try_cloud_ai("openrouter", api_key, llm_model, prompt, QA_JSON_SCHEMA)
             except Exception as e:
                 print(
                     f"[QA] LLM QA via OpenRouter with model '{llm_model}' failed: {e}",
@@ -198,9 +194,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         elif prov == "gemini" and api_key:
             llm_model = user_model if user_model else "gemini-1.5-pro"
             try:
-                return try_cloud_ai(
-                    "gemini", api_key, llm_model, prompt, QA_JSON_SCHEMA
-                )
+                return try_cloud_ai("gemini", api_key, llm_model, prompt, QA_JSON_SCHEMA)
             except Exception as e:
                 print(
                     f"[QA] LLM QA via Gemini with model '{llm_model}' failed: {e}",
@@ -209,9 +203,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         elif prov == "nvidia" and api_key:
             llm_model = user_model if user_model else "google/gemma-3n-e4b-it"
             try:
-                return try_cloud_ai(
-                    "nvidia", api_key, llm_model, prompt, QA_JSON_SCHEMA
-                )
+                return try_cloud_ai("nvidia", api_key, llm_model, prompt, QA_JSON_SCHEMA)
             except Exception as e:
                 print(
                     f"[QA] LLM QA via Nvidia with model '{llm_model}' failed: {e}",
@@ -228,11 +220,7 @@ You MUST return a JSON object containing a "results" key with an array of object
                 models_to_try.append(user_model)
             for m in getattr(
                 QA_CONFIG,
-                (
-                    "qa_llm_model_list"
-                    if hasattr(QA_CONFIG, "qa_llm_model_list")
-                    else "llm_model_list"
-                ),
+                ("qa_llm_model_list" if hasattr(QA_CONFIG, "qa_llm_model_list") else "llm_model_list"),
                 [],
             ):
                 if m not in models_to_try:
@@ -257,9 +245,7 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     if not qa_response and local_llm_model and (is_explicit_local or not disable_local):
         try:
-            qa_response = try_local_ai(
-                prompt, json.dumps(regions_metadata), QA_JSON_SCHEMA
-            )
+            qa_response = try_local_ai(prompt, json.dumps(regions_metadata), QA_JSON_SCHEMA)
         except Exception as e:
             print(f"[QA] LLM QA via Local LLM failed: {e}", flush=True)
 
@@ -283,13 +269,9 @@ You MUST return a JSON object containing a "results" key with an array of object
             )
 
     # Call backend prepare endpoint to apply fixes and set visibility
-    prepare_url = CALLBACK_URL.replace(
-        "/jobs/callback", f"/images/{image_id}/qa-hybrid-prepare"
-    )
+    prepare_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}/qa-hybrid-prepare")
     try:
-        prep_res = requests.post(
-            prepare_url, json={"qaResults": results}, headers=BACKEND_HEADERS
-        )
+        prep_res = requests.post(prepare_url, json={"qaResults": results}, headers=BACKEND_HEADERS)
         print(
             f"[QA] Hybrid QA preparation status code: {prep_res.status_code}",
             flush=True,
@@ -310,9 +292,7 @@ You MUST return a JSON object containing a "results" key with an array of object
     try:
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
-            print(
-                f"[QA] Failed to get updated image info: {res.status_code}", flush=True
-            )
+            print(f"[QA] Failed to get updated image info: {res.status_code}", flush=True)
             return
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
@@ -348,9 +328,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         combined_width = w1 + w2
         combined_height = max(h1, h2)
 
-        combined_img = Image.new(
-            "RGB", (combined_width, combined_height), (255, 255, 255)
-        )
+        combined_img = Image.new("RGB", (combined_width, combined_height), (255, 255, 255))
         combined_img.paste(img1, (0, 0))
         combined_img.paste(img2, (w1, 0))
 
@@ -468,11 +446,7 @@ You MUST return a JSON object containing a "results" key with an array of object
                 models_to_try.append(user_model)
             for m in getattr(
                 QA_CONFIG,
-                (
-                    "qa_vlm_model_list"
-                    if hasattr(QA_CONFIG, "qa_vlm_model_list")
-                    else "vlm_model_list"
-                ),
+                ("qa_vlm_model_list" if hasattr(QA_CONFIG, "qa_vlm_model_list") else "vlm_model_list"),
                 [],
             ):
                 if m not in models_to_try:
@@ -489,15 +463,9 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     local_vlm_model = os.environ.get("LOCAL_VLM_MODEL", "").strip()
 
-    if (
-        not qa_response_vlm
-        and local_vlm_model
-        and (is_explicit_local or not disable_local)
-    ):
+    if not qa_response_vlm and local_vlm_model and (is_explicit_local or not disable_local):
         try:
-            qa_response_vlm = try_local_vlm_vision(
-                local_vlm_model, prompt_vlm, combined_base64, QA_JSON_SCHEMA
-            )
+            qa_response_vlm = try_local_vlm_vision(local_vlm_model, prompt_vlm, combined_base64, QA_JSON_SCHEMA)
         except Exception as e:
             print(f"[QA] VLM QA via Local VLM failed: {e}", flush=True)
 
@@ -534,17 +502,12 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     # Call backend
     callback_payload = {"imageId": image_id, "qaResults": results_vlm}
-    from worker.utils.rate_limit import get_job_costs, format_cost
+    from worker.utils.rate_limit import format_cost, get_job_costs
 
     costs = get_job_costs()
     if costs:
         has_na = any(c.get("estimated_cost") is None for c in costs)
-        if has_na:
-            total_estimated_cost = None
-        else:
-            total_estimated_cost = sum(
-                c.get("estimated_cost", 0.0) or 0.0 for c in costs
-            )
+        total_estimated_cost = None if has_na else sum(c.get("estimated_cost", 0.0) or 0.0 for c in costs)
         total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
         total_completion_tokens = sum(c.get("completion_tokens", 0) or 0 for c in costs)
 
@@ -565,9 +528,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
         )
     try:
-        res = requests.post(
-            f"{CALLBACK_URL}/qa", json=callback_payload, headers=BACKEND_HEADERS
-        )
+        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=BACKEND_HEADERS)
         print(f"[QA] Callback status code: {res.status_code}", flush=True)
     except Exception as e:
         print(f"[QA] Failed to post QA callback to backend: {e}", flush=True)
@@ -602,17 +563,12 @@ def _auto_pass_all(job_data):
 
     # Call backend
     callback_payload = {"imageId": image_id, "qaResults": results}
-    from worker.utils.rate_limit import get_job_costs, format_cost
+    from worker.utils.rate_limit import format_cost, get_job_costs
 
     costs = get_job_costs()
     if costs:
         has_na = any(c.get("estimated_cost") is None for c in costs)
-        if has_na:
-            total_estimated_cost = None
-        else:
-            total_estimated_cost = sum(
-                c.get("estimated_cost", 0.0) or 0.0 for c in costs
-            )
+        total_estimated_cost = None if has_na else sum(c.get("estimated_cost", 0.0) or 0.0 for c in costs)
         total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
         total_completion_tokens = sum(c.get("completion_tokens", 0) or 0 for c in costs)
 
@@ -633,9 +589,7 @@ def _auto_pass_all(job_data):
             f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
         )
     try:
-        res = requests.post(
-            f"{CALLBACK_URL}/qa", json=callback_payload, headers=BACKEND_HEADERS
-        )
+        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=BACKEND_HEADERS)
         print(f"[QA] Callback status code: {res.status_code}", flush=True)
     except Exception as e:
         print(f"[QA] Failed to post QA callback to backend: {e}", flush=True)
@@ -711,13 +665,9 @@ You MUST return a JSON object containing a "results" key with an array of object
     def attempt_llm(prov, model_override=None):
         user_model = model_override or job_data.get("qaLlmModel") or QA_CONFIG.llm_model
         if prov == "openrouter" and api_key:
-            llm_model = (
-                user_model if user_model else "meta-llama/llama-3-8b-instruct:free"
-            )
+            llm_model = user_model if user_model else "meta-llama/llama-3-8b-instruct:free"
             try:
-                return try_cloud_ai(
-                    "openrouter", api_key, llm_model, prompt, QA_JSON_SCHEMA
-                )
+                return try_cloud_ai("openrouter", api_key, llm_model, prompt, QA_JSON_SCHEMA)
             except Exception as e:
                 print(
                     f"[QA] LLM QA via OpenRouter with model '{llm_model}' failed: {e}",
@@ -726,9 +676,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         elif prov == "gemini" and api_key:
             llm_model = user_model if user_model else "gemini-1.5-pro"
             try:
-                return try_cloud_ai(
-                    "gemini", api_key, llm_model, prompt, QA_JSON_SCHEMA
-                )
+                return try_cloud_ai("gemini", api_key, llm_model, prompt, QA_JSON_SCHEMA)
             except Exception as e:
                 print(
                     f"[QA] LLM QA via Gemini with model '{llm_model}' failed: {e}",
@@ -737,9 +685,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         elif prov == "nvidia" and api_key:
             llm_model = user_model if user_model else "google/gemma-3n-e4b-it"
             try:
-                return try_cloud_ai(
-                    "nvidia", api_key, llm_model, prompt, QA_JSON_SCHEMA
-                )
+                return try_cloud_ai("nvidia", api_key, llm_model, prompt, QA_JSON_SCHEMA)
             except Exception as e:
                 print(
                     f"[QA] LLM QA via Nvidia with model '{llm_model}' failed: {e}",
@@ -756,11 +702,7 @@ You MUST return a JSON object containing a "results" key with an array of object
                 models_to_try.append(user_model)
             for m in getattr(
                 QA_CONFIG,
-                (
-                    "qa_llm_model_list"
-                    if hasattr(QA_CONFIG, "qa_llm_model_list")
-                    else "llm_model_list"
-                ),
+                ("qa_llm_model_list" if hasattr(QA_CONFIG, "qa_llm_model_list") else "llm_model_list"),
                 [],
             ):
                 if m not in models_to_try:
@@ -785,14 +727,10 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     if not qa_response and local_llm_model and (is_explicit_local or not disable_local):
         try:
-            qa_response = try_local_ai(
-                prompt, json.dumps(regions_metadata), QA_JSON_SCHEMA
-            )
+            qa_response = try_local_ai(prompt, json.dumps(regions_metadata), QA_JSON_SCHEMA)
         except Exception as e:
             print(f"[QA] LLM QA via Local LLM failed: {e}", flush=True)
-    elif (
-        not qa_response and local_llm_model and disable_local and not is_explicit_local
-    ):
+    elif not qa_response and local_llm_model and disable_local and not is_explicit_local:
         print("[QA] Local LLM QA skipped (disabled via environment).", flush=True)
 
     results = []
@@ -829,23 +767,16 @@ You MUST return a JSON object containing a "results" key with an array of object
                 }
             )
 
-    logger.debug(
-        f"[QA] LLM QA results output:\n{json.dumps(results, ensure_ascii=False, indent=2)}"
-    )
+    logger.debug(f"[QA] LLM QA results output:\n{json.dumps(results, ensure_ascii=False, indent=2)}")
 
     # Call backend
     callback_payload = {"imageId": image_id, "qaResults": results}
-    from worker.utils.rate_limit import get_job_costs, format_cost
+    from worker.utils.rate_limit import format_cost, get_job_costs
 
     costs = get_job_costs()
     if costs:
         has_na = any(c.get("estimated_cost") is None for c in costs)
-        if has_na:
-            total_estimated_cost = None
-        else:
-            total_estimated_cost = sum(
-                c.get("estimated_cost", 0.0) or 0.0 for c in costs
-            )
+        total_estimated_cost = None if has_na else sum(c.get("estimated_cost", 0.0) or 0.0 for c in costs)
         total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
         total_completion_tokens = sum(c.get("completion_tokens", 0) or 0 for c in costs)
 
@@ -866,9 +797,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
         )
     try:
-        res = requests.post(
-            f"{CALLBACK_URL}/qa", json=callback_payload, headers=BACKEND_HEADERS
-        )
+        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=BACKEND_HEADERS)
         print(f"[QA] Callback status code: {res.status_code}", flush=True)
     except Exception as e:
         print(f"[QA] Failed to post QA callback to backend: {e}", flush=True)
@@ -919,9 +848,7 @@ def _process_qa_vlm(job_data):
         combined_width = w1 + w2
         combined_height = max(h1, h2)
 
-        combined_img = Image.new(
-            "RGB", (combined_width, combined_height), (255, 255, 255)
-        )
+        combined_img = Image.new("RGB", (combined_width, combined_height), (255, 255, 255))
         combined_img.paste(img1, (0, 0))
         combined_img.paste(img2, (w1, 0))
 
@@ -1047,11 +974,7 @@ You MUST return a JSON object containing a "results" key with an array of object
                 models_to_try.append(user_model)
             for m in getattr(
                 QA_CONFIG,
-                (
-                    "qa_vlm_model_list"
-                    if hasattr(QA_CONFIG, "qa_vlm_model_list")
-                    else "vlm_model_list"
-                ),
+                ("qa_vlm_model_list" if hasattr(QA_CONFIG, "qa_vlm_model_list") else "vlm_model_list"),
                 [],
             ):
                 if m not in models_to_try:
@@ -1079,14 +1002,10 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     if not qa_response and local_vlm_model and (is_explicit_local or not disable_local):
         try:
-            qa_response = try_local_vlm_vision(
-                local_vlm_model, prompt, combined_base64, QA_JSON_SCHEMA
-            )
+            qa_response = try_local_vlm_vision(local_vlm_model, prompt, combined_base64, QA_JSON_SCHEMA)
         except Exception as e:
             print(f"[QA] VLM QA via Local VLM failed: {e}", flush=True)
-    elif (
-        not qa_response and local_vlm_model and disable_local and not is_explicit_local
-    ):
+    elif not qa_response and local_vlm_model and disable_local and not is_explicit_local:
         print("[QA] Local VLM QA skipped (disabled via environment).", flush=True)
 
     # VLM Evaluation Fail-Safe Fallback:
@@ -1127,23 +1046,16 @@ You MUST return a JSON object containing a "results" key with an array of object
                 }
             )
 
-    logger.debug(
-        f"[QA] VLM QA results output:\n{json.dumps(results, ensure_ascii=False, indent=2)}"
-    )
+    logger.debug(f"[QA] VLM QA results output:\n{json.dumps(results, ensure_ascii=False, indent=2)}")
 
     # Call backend
     callback_payload = {"imageId": image_id, "qaResults": results}
-    from worker.utils.rate_limit import get_job_costs, format_cost
+    from worker.utils.rate_limit import format_cost, get_job_costs
 
     costs = get_job_costs()
     if costs:
         has_na = any(c.get("estimated_cost") is None for c in costs)
-        if has_na:
-            total_estimated_cost = None
-        else:
-            total_estimated_cost = sum(
-                c.get("estimated_cost", 0.0) or 0.0 for c in costs
-            )
+        total_estimated_cost = None if has_na else sum(c.get("estimated_cost", 0.0) or 0.0 for c in costs)
         total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
         total_completion_tokens = sum(c.get("completion_tokens", 0) or 0 for c in costs)
 
@@ -1164,9 +1076,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
         )
     try:
-        res = requests.post(
-            f"{CALLBACK_URL}/qa", json=callback_payload, headers=BACKEND_HEADERS
-        )
+        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=BACKEND_HEADERS)
         print(f"[QA] Callback status code: {res.status_code}", flush=True)
     except Exception as e:
         print(f"[QA] Failed to post QA callback to backend: {e}", flush=True)

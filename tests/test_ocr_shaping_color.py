@@ -1,9 +1,10 @@
-import numpy as np
 import cv2
+import numpy as np
+
 from worker.handlers.ocr import (
     detect_background_color,
-    detect_bubble_contour,
     detect_background_color_poly,
+    detect_bubble_contour,
     get_split_polygon,
 )
 
@@ -57,8 +58,8 @@ def test_split_polygon_and_safe_area():
     # Circle 1: center (50, 50), radius 30
     # Circle 2: center (150, 150), radius 30
     mask = np.zeros((200, 200), dtype=np.uint8)
-    cv2.circle(mask, (50, 50), 30, 255, -1)
-    cv2.circle(mask, (150, 150), 30, 255, -1)
+    cv2.circle(mask, (50, 50), 30, 255, -1)  # type: ignore
+    cv2.circle(mask, (150, 150), 30, 255, -1)  # type: ignore
 
     # We want to split out Circle 1 using a bounding box around it
     bbox = [30, 30, 40, 40]

@@ -11,3 +11,5 @@ rq
 pytest
 pytest-cov
 pytest-mock
+ruff
+pyright

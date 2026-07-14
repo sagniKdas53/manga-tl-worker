@@ -1,5 +1,5 @@
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from worker.handlers.translation import process_translation
 
@@ -8,9 +8,7 @@ from worker.handlers.translation import process_translation
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
 @patch("worker.config.TL_CONFIG")
-def test_process_translation_gemini(
-    mock_tl_config, mock_post, mock_get, mock_try_cloud_ai
-):
+def test_process_translation_gemini(mock_tl_config, mock_post, mock_get, mock_try_cloud_ai):
     mock_tl_config.provider = "gemini"
     mock_tl_config.resolve_key.return_value = "fake-gemini-key"
     mock_tl_config.llm_model = "gemini-1.5-pro"
@@ -67,7 +65,7 @@ def test_process_translation_gemini(
     # Assertions
     mock_get.assert_called_once()
     mock_try_cloud_ai.assert_called_once()
-    args, kwargs = mock_try_cloud_ai.call_args
+    args, _kwargs = mock_try_cloud_ai.call_args
     assert args[0] == "gemini"
     assert args[1] == "fake-gemini-key"
     assert args[2] == "gemini-1.5-pro"
@@ -87,9 +85,7 @@ def test_process_translation_gemini(
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
 @patch("worker.config.TL_CONFIG")
-def test_process_translation_openrouter(
-    mock_tl_config, mock_post, mock_get, mock_try_cloud_ai
-):
+def test_process_translation_openrouter(mock_tl_config, mock_post, mock_get, mock_try_cloud_ai):
     mock_tl_config.provider = "openrouter"
     mock_tl_config.resolve_key.return_value = "fake-openrouter-key"
     mock_tl_config.llm_model = "meta-llama/llama-3-8b-instruct:free"
@@ -141,7 +137,7 @@ def test_process_translation_openrouter(
     process_translation(job_data)
 
     mock_try_cloud_ai.assert_called_once()
-    args, kwargs = mock_try_cloud_ai.call_args
+    args, _kwargs = mock_try_cloud_ai.call_args
     assert args[0] == "openrouter"
     assert args[1] == "fake-openrouter-key"
     assert args[2] == "meta-llama/llama-3-8b-instruct:free"
@@ -155,9 +151,7 @@ def test_process_translation_openrouter(
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
 @patch("worker.config.TL_CONFIG")
-def test_process_translation_openai(
-    mock_tl_config, mock_post, mock_get, mock_try_cloud_ai
-):
+def test_process_translation_openai(mock_tl_config, mock_post, mock_get, mock_try_cloud_ai):
     mock_tl_config.provider = "openai"
     mock_tl_config.resolve_key.return_value = "fake-openai-key"
     mock_tl_config.llm_model = "gpt-4o-mini"
@@ -209,7 +203,7 @@ def test_process_translation_openai(
     process_translation(job_data)
 
     mock_try_cloud_ai.assert_called_once()
-    args, kwargs = mock_try_cloud_ai.call_args
+    args, _kwargs = mock_try_cloud_ai.call_args
     assert args[0] == "openai"
     assert args[1] == "fake-openai-key"
     assert args[2] == "gpt-4o-mini"
@@ -223,9 +217,7 @@ def test_process_translation_openai(
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
 @patch("worker.config.TL_CONFIG")
-def test_process_translation_anthropic(
-    mock_tl_config, mock_post, mock_get, mock_try_cloud_ai
-):
+def test_process_translation_anthropic(mock_tl_config, mock_post, mock_get, mock_try_cloud_ai):
     mock_tl_config.provider = "anthropic"
     mock_tl_config.resolve_key.return_value = "fake-anthropic-key"
     mock_tl_config.llm_model = "claude-3-5-sonnet-20241022"
@@ -277,7 +269,7 @@ def test_process_translation_anthropic(
     process_translation(job_data)
 
     mock_try_cloud_ai.assert_called_once()
-    args, kwargs = mock_try_cloud_ai.call_args
+    args, _kwargs = mock_try_cloud_ai.call_args
     assert args[0] == "anthropic"
     assert args[1] == "fake-anthropic-key"
     assert args[2] == "claude-3-5-sonnet-20241022"
@@ -291,9 +283,7 @@ def test_process_translation_anthropic(
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
 @patch("worker.config.TL_CONFIG")
-def test_process_translation_nvidia(
-    mock_tl_config, mock_post, mock_get, mock_try_cloud_ai
-):
+def test_process_translation_nvidia(mock_tl_config, mock_post, mock_get, mock_try_cloud_ai):
     mock_tl_config.provider = "nvidia"
     mock_tl_config.resolve_key.return_value = "fake-nvidia-key"
     mock_tl_config.llm_model = "google/gemma-3n-e4b-it"
@@ -345,7 +335,7 @@ def test_process_translation_nvidia(
     process_translation(job_data)
 
     mock_try_cloud_ai.assert_called_once()
-    args, kwargs = mock_try_cloud_ai.call_args
+    args, _kwargs = mock_try_cloud_ai.call_args
     assert args[0] == "nvidia"
     assert args[1] == "fake-nvidia-key"
     assert args[2] == "google/gemma-3n-e4b-it"
@@ -359,9 +349,7 @@ def test_process_translation_nvidia(
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
 @patch("worker.config.TL_CONFIG")
-def test_process_translation_local_fallback(
-    mock_tl_config, mock_post, mock_get, mock_try_local_ai
-):
+def test_process_translation_local_fallback(mock_tl_config, mock_post, mock_get, mock_try_local_ai):
     mock_tl_config.provider = "ollama"
     mock_tl_config.resolve_key.return_value = ""
     mock_tl_config.llm_model = "gemma4:e4b"
@@ -480,7 +468,4 @@ def test_process_translation_retry_individual_fallback(
     mock_post.assert_called_once()
     payload = mock_post.call_args[1]["json"]
     assert payload["translations"][0]["translatedText"] == "Hello"
-    assert (
-        payload["translations"][0]["translationNotes"]
-        == "Individual translation fallback"
-    )
+    assert payload["translations"][0]["translationNotes"] == "Individual translation fallback"

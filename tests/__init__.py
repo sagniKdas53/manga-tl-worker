@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 import redis
 
 # Mock redis.Redis globally before any test modules import worker.config

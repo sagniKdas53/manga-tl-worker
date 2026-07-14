@@ -1,4 +1,5 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from worker.handlers.panel import process_panel_detection
 
 
@@ -35,12 +36,12 @@ def test_process_panel_detection(mock_detect, mock_download, mock_requests, mock
 
     # Test fetch fail
     mock_res.status_code = 404
-    with pytest.raises(Exception):
+    with pytest.raises(Exception, match=r".*"):
         process_panel_detection({"imageId": "img1"})
     assert mock_requests.post.call_count == 1
 
     # Test exceptions
     mock_requests.get.side_effect = Exception("failed")
-    with pytest.raises(Exception):
+    with pytest.raises(Exception, match=r".*"):
         process_panel_detection({"imageId": "img1"})
     assert mock_requests.post.call_count == 1

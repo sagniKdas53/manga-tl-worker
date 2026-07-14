@@ -1,7 +1,7 @@
+import json
+import logging
 import os
 import re
-import logging
-import json
 
 logger = logging.getLogger("translation")
 
@@ -10,9 +10,7 @@ def _parse_polygon(mask_polygon):
     if not mask_polygon:
         return None
     try:
-        pts = (
-            json.loads(mask_polygon) if isinstance(mask_polygon, str) else mask_polygon
-        )
+        pts = json.loads(mask_polygon) if isinstance(mask_polygon, str) else mask_polygon
     except Exception:
         return None
     if not isinstance(pts, list) or len(pts) < 3:
@@ -58,11 +56,7 @@ def _convex_hull(points):
 
 
 def _merged_mask_polygon(regions, comp):
-    polygons = [
-        polygon
-        for polygon in (_parse_polygon(regions[idx].get("maskPolygon")) for idx in comp)
-        if polygon
-    ]
+    polygons = [polygon for polygon in (_parse_polygon(regions[idx].get("maskPolygon")) for idx in comp) if polygon]
     if not polygons:
         return None
     if len(polygons) == 1:
@@ -81,9 +75,7 @@ def _merged_mask_polygon(regions, comp):
     return json.dumps(largest)
 
 
-def merge_ocr_regions(
-    regions: list, reading_direction: str = "rtl", threshold_ratio: float = None
-) -> list:
+def merge_ocr_regions(regions: list, reading_direction: str = "rtl", threshold_ratio: float | None = None) -> list:
     """Merge OCR line-level detections into logical speech balloon groups.
 
     Args:
@@ -112,10 +104,7 @@ def merge_ocr_regions(
     # the character/font size is represented by the line's width, so the vertical gap
     # threshold should be scaled relative to avg_width rather than avg_height.
     # For horizontal text (LTR), the character size is represented by the line's height.
-    if reading_direction == "rtl":
-        char_size_vertical = avg_width
-    else:
-        char_size_vertical = avg_height
+    char_size_vertical = avg_width if reading_direction == "rtl" else avg_height
 
     max_vertical_gap = char_size_vertical * threshold_ratio
     max_horizontal_gap = avg_width * threshold_ratio
@@ -146,13 +135,12 @@ def merge_ocr_regions(
             # 3. Vertical overlap and horizontal proximity
             # 4. Close diagonally
             should_merge = False
-            if x_overlap > 0 and y_overlap > 0:
-                should_merge = True
-            elif x_overlap > 0 and y_dist <= max_vertical_gap:
-                should_merge = True
-            elif y_overlap > 0 and x_dist <= max_horizontal_gap:
-                should_merge = True
-            elif x_dist <= max_horizontal_gap and y_dist <= max_vertical_gap:
+            if (
+                (x_overlap > 0 and y_overlap > 0)
+                or (x_overlap > 0 and y_dist <= max_vertical_gap)
+                or (y_overlap > 0 and x_dist <= max_horizontal_gap)
+                or (x_dist <= max_horizontal_gap and y_dist <= max_vertical_gap)
+            ):
                 should_merge = True
 
             if should_merge:
@@ -205,10 +193,7 @@ def merge_ocr_regions(
         else:
             # Check if any part contains CJK characters to decide on spacer-less join
             has_cjk = any(cjk_pattern.search(t) for t in texts_to_join)
-            if has_cjk:
-                joined_text = "".join(texts_to_join)
-            else:
-                joined_text = " ".join(texts_to_join)
+            joined_text = "".join(texts_to_join) if has_cjk else " ".join(texts_to_join)
 
         # Calculate union bounding box
         x_min = min(regions[idx]["x"] for idx in comp)
@@ -230,13 +215,11 @@ def merge_ocr_regions(
         bx_min = min(regions[idx].get("bubbleX", regions[idx]["x"]) for idx in comp)
         by_min = min(regions[idx].get("bubbleY", regions[idx]["y"]) for idx in comp)
         bx_max = max(
-            regions[idx].get("bubbleX", regions[idx]["x"])
-            + regions[idx].get("bubbleWidth", regions[idx]["width"])
+            regions[idx].get("bubbleX", regions[idx]["x"]) + regions[idx].get("bubbleWidth", regions[idx]["width"])
             for idx in comp
         )
         by_max = max(
-            regions[idx].get("bubbleY", regions[idx]["y"])
-            + regions[idx].get("bubbleHeight", regions[idx]["height"])
+            regions[idx].get("bubbleY", regions[idx]["y"]) + regions[idx].get("bubbleHeight", regions[idx]["height"])
             for idx in comp
         )
 
@@ -244,13 +227,11 @@ def merge_ocr_regions(
         sx_min = min(regions[idx].get("safeTextX", regions[idx]["x"]) for idx in comp)
         sy_min = min(regions[idx].get("safeTextY", regions[idx]["y"]) for idx in comp)
         sx_max = max(
-            regions[idx].get("safeTextX", regions[idx]["x"])
-            + regions[idx].get("safeTextW", regions[idx]["width"])
+            regions[idx].get("safeTextX", regions[idx]["x"]) + regions[idx].get("safeTextW", regions[idx]["width"])
             for idx in comp
         )
         sy_max = max(
-            regions[idx].get("safeTextY", regions[idx]["y"])
-            + regions[idx].get("safeTextH", regions[idx]["height"])
+            regions[idx].get("safeTextY", regions[idx]["y"]) + regions[idx].get("safeTextH", regions[idx]["height"])
             for idx in comp
         )
         merged_mask_polygon = _merged_mask_polygon(regions, comp)
@@ -274,8 +255,7 @@ def merge_ocr_regions(
                 "bubbleHeight": by_max - by_min,
                 "bubbleId": None,
                 "detectionConfidence": float(
-                    sum(regions[idx].get("detectionConfidence", 0.0) for idx in comp)
-                    / len(comp)
+                    sum(regions[idx].get("detectionConfidence", 0.0) for idx in comp) / len(comp)
                 ),
                 "maskPolygon": merged_mask_polygon,
                 "safeTextX": sx_min,
@@ -285,7 +265,5 @@ def merge_ocr_regions(
             }
         )
 
-    logger.info(
-        f"[OCR] Merged {n} regions into {len(merged_regions)} regions (threshold={threshold_ratio})"
-    )
+    logger.info(f"[OCR] Merged {n} regions into {len(merged_regions)} regions (threshold={threshold_ratio})")
     return merged_regions

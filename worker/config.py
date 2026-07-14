@@ -1,25 +1,26 @@
 """Configuration parameters and initialization for the unified workers."""
 
-import os
 import logging
+import os
+
 import redis
 from minio import Minio
 
 # Configure structured logging
-logging.TRACE = 5
-logging.addLevelName(logging.TRACE, "TRACE")
+logging.TRACE = 5  # type: ignore
+logging.addLevelName(logging.TRACE, "TRACE")  # type: ignore
 
 
 def trace(self, message, *args, **kws):
     """Log a message with TRACE level."""
-    if self.isEnabledFor(logging.TRACE):
-        self._log(logging.TRACE, message, args, **kws)  # pylint: disable=protected-access
+    if self.isEnabledFor(logging.TRACE):  # type: ignore
+        self._log(logging.TRACE, message, args, **kws)  # pylint: disable=protected-access  # type: ignore
 
 
-logging.Logger.trace = trace
+logging.Logger.trace = trace  # type: ignore
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
-level = logging.TRACE if LOG_LEVEL == "TRACE" else getattr(logging, LOG_LEVEL)
+level = logging.TRACE if LOG_LEVEL == "TRACE" else getattr(logging, LOG_LEVEL)  # type: ignore
 logging.basicConfig(level=level, format="%(asctime)s [%(levelname)s] %(message)s")
 # Suppress noisy third-party loggers that flood output at DEBUG level
 for _noisy_logger in ("PIL", "PIL.PngImagePlugin"):
@@ -29,10 +30,7 @@ logger = logging.getLogger("translation")
 
 def _is_sensitive(path: str) -> bool:
     sensitive_patterns = [".ssh", ".aws", ".env"]
-    for pattern in sensitive_patterns:
-        if pattern in path:
-            return True
-    return False
+    return any(pattern in path for pattern in sensitive_patterns)
 
 
 def _load_docker_secrets():
@@ -44,7 +42,7 @@ def _load_docker_secrets():
         resolved_json_path = os.path.realpath(secrets_json)
         if not _is_sensitive(resolved_json_path) and os.path.exists(resolved_json_path):
             try:
-                with open(resolved_json_path, "r") as f:
+                with open(resolved_json_path) as f:
                     secrets = json.load(f)
                     for k, v in secrets.items():
                         os.environ[k] = str(v)
@@ -59,7 +57,7 @@ def _load_docker_secrets():
                 resolved_v = os.path.realpath(v)
                 if not _is_sensitive(resolved_v) and os.path.exists(resolved_v):
                     try:
-                        with open(resolved_v, "r") as f:
+                        with open(resolved_v) as f:
                             os.environ[real_key] = f.read().strip()
                     except Exception as e:
                         logging.error(f"Failed to read secret file for {k}: {e}")
@@ -76,9 +74,7 @@ MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
 MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
 
 # Callback & Auth Configs
-CALLBACK_URL = os.environ.get(
-    "BACKEND_CALLBACK_URL", "http://localhost:8080/api/internal/jobs/callback"
-)
+CALLBACK_URL = os.environ.get("BACKEND_CALLBACK_URL", "http://localhost:8080/api/internal/jobs/callback")
 INTERNAL_API_TOKEN = os.environ.get("INTERNAL_API_TOKEN", "")
 BACKEND_HEADERS = {"X-Internal-Token": INTERNAL_API_TOKEN} if INTERNAL_API_TOKEN else {}
 
@@ -108,21 +104,15 @@ minio_client = Minio(
 YOLO_MODEL_PATH = os.environ.get("YOLO_MODEL_PATH", "")
 if not YOLO_MODEL_PATH:
     LOCAL_PATH = (
-        "/home/sagnik/Projects/docker-composes/manga-library/data/worker/"
-        "huggingface/models/yolo11n_bubble.onnx"
+        "/home/sagnik/Projects/docker-composes/manga-library/data/worker/huggingface/models/yolo11n_bubble.onnx"
     )
     DOCKER_PATH = "/root/.cache/huggingface/models/yolo11n_bubble.onnx"
-    if os.path.exists(LOCAL_PATH):
-        YOLO_MODEL_PATH = LOCAL_PATH
-    else:
-        YOLO_MODEL_PATH = DOCKER_PATH
+    YOLO_MODEL_PATH = LOCAL_PATH if os.path.exists(LOCAL_PATH) else DOCKER_PATH
 
 YOLO_CONF_THRESHOLD = float(os.environ.get("YOLO_CONF_THRESHOLD", "0.25"))
 YOLO_INPUT_SIZE = int(os.environ.get("YOLO_INPUT_SIZE", "1280"))
 YOLO_MASK_EROSION = int(os.environ.get("YOLO_MASK_EROSION", "3"))
-YOLO_PINNED_CHECKSUM = (
-    "c9208cb610aa35b8f8dc7ef0890182322992a43399a853093ad5d04a3764af4f"
-)
+YOLO_PINNED_CHECKSUM = "c9208cb610aa35b8f8dc7ef0890182322992a43399a853093ad5d04a3764af4f"
 YOLO_FALLBACK_MODE = os.environ.get("YOLO_FALLBACK_MODE", "opencv").lower()
 
 
@@ -141,20 +131,12 @@ class ModelConfig:
         self.vlm_model = os.environ.get(vlm_env, "").strip()
 
         llm_list_raw = os.environ.get(llm_list_env, "").strip() if llm_list_env else ""
-        self.llm_model_list = (
-            [x.strip() for x in llm_list_raw.split(",") if x.strip()]
-            if llm_list_raw
-            else []
-        )
+        self.llm_model_list = [x.strip() for x in llm_list_raw.split(",") if x.strip()] if llm_list_raw else []
 
         vlm_list_raw = os.environ.get(vlm_list_env, "").strip() if vlm_list_env else ""
-        self.vlm_model_list = (
-            [x.strip() for x in vlm_list_raw.split(",") if x.strip()]
-            if vlm_list_raw
-            else []
-        )
+        self.vlm_model_list = [x.strip() for x in vlm_list_raw.split(",") if x.strip()] if vlm_list_raw else []
 
-    def resolve_key(self, provider: str = None) -> str:
+    def resolve_key(self, provider: str | None = None) -> str:
         prov = (provider or self.provider or "").lower().strip()
         if not prov:
             return ""
@@ -231,11 +213,7 @@ if QA_MODE == "auto":
 RENDER_CACHE_DIR = os.environ.get("RENDER_CACHE_DIR", "/app/rendered_cache")
 
 # Validate and fetch openrouter costs on startup
-if (
-    OCR_CONFIG.provider == "openrouter"
-    or TL_CONFIG.provider == "openrouter"
-    or QA_CONFIG.provider == "openrouter"
-):
+if OCR_CONFIG.provider == "openrouter" or TL_CONFIG.provider == "openrouter" or QA_CONFIG.provider == "openrouter":
     from worker.utils.rate_limit import update_model_costs
 
     models_to_check = []

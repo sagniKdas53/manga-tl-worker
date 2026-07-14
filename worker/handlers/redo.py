@@ -1,13 +1,14 @@
 import uuid
-import requests
+
 import cv2
 import numpy as np
+import requests
 
-from worker.config import logger, CALLBACK_URL, BACKEND_HEADERS
-from worker.utils.image import download_image
-from worker.utils.text import detect_language
+from worker.config import BACKEND_HEADERS, CALLBACK_URL, logger
 from worker.services.ocr import perform_redo_ocr
 from worker.services.translation import translate_text
+from worker.utils.image import download_image
+from worker.utils.text import detect_language
 
 
 def process_region_redo(job_data):
@@ -23,9 +24,7 @@ def process_region_redo(job_data):
     req_prefix = f"[{request_id}] " if request_id else ""
 
     if redo_type == "translation":
-        logger.info(
-            f"{req_prefix}Processing region redo: {region_id} on image {image_id} with type {redo_type}"
-        )
+        logger.info(f"{req_prefix}Processing region redo: {region_id} on image {image_id} with type {redo_type}")
     else:
         print(
             f"[Region Redo] Processing region: {region_id} on image {image_id} with type {redo_type}",
@@ -98,12 +97,10 @@ def process_region_redo(job_data):
 
             if (x2 - x1) > 0 and (y2 - y1) > 0:
                 crop = img[y1:y2, x1:x2]
-                is_success, buffer = cv2.imencode(".jpg", crop)
+                _is_success, buffer = cv2.imencode(".jpg", crop)
                 crop_bytes = buffer.tobytes()
 
-                text, confidence = perform_redo_ocr(
-                    crop_bytes, region["detectedLanguage"]
-                )
+                text, confidence = perform_redo_ocr(crop_bytes, region["detectedLanguage"])
                 detected_lang = detect_language(text)
                 callback_payload["text"] = text
                 callback_payload["confidence"] = confidence
@@ -123,24 +120,15 @@ def process_region_redo(job_data):
             translated = translate_text(text, source_lang=lang, request_id=request_id)
             callback_payload["translatedText"] = translated
             callback_payload["translationFailed"] = translated is None
-            logger.info(
-                f"{req_prefix}Redo Translation result: '{translated}' (failed={translated is None})"
-            )
+            logger.info(f"{req_prefix}Redo Translation result: '{translated}' (failed={translated is None})")
             from worker.utils.rate_limit import get_job_costs
 
             costs = get_job_costs()
             if costs:
                 has_na = any(c.get("estimated_cost") is None for c in costs)
-                if has_na:
-                    total_estimated_cost = None
-                else:
-                    total_estimated_cost = sum(
-                        c.get("estimated_cost", 0.0) or 0.0 for c in costs
-                    )
+                total_estimated_cost = None if has_na else sum(c.get("estimated_cost", 0.0) or 0.0 for c in costs)
                 total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
-                total_completion_tokens = sum(
-                    c.get("completion_tokens", 0) or 0 for c in costs
-                )
+                total_completion_tokens = sum(c.get("completion_tokens", 0) or 0 for c in costs)
 
                 if total_estimated_cost is None:
                     cost_str = "N/A"
@@ -158,12 +146,8 @@ def process_region_redo(job_data):
             raise
 
     try:
-        callback_url = CALLBACK_URL.replace(
-            "/jobs/callback", f"/ocr-regions/{region_id}/callback"
-        )
-        res = requests.post(
-            callback_url, json=callback_payload, headers=BACKEND_HEADERS
-        )
+        callback_url = CALLBACK_URL.replace("/jobs/callback", f"/ocr-regions/{region_id}/callback")
+        res = requests.post(callback_url, json=callback_payload, headers=BACKEND_HEADERS)
         if redo_type == "translation":
             logger.info(f"{req_prefix}Callback status code: {res.status_code}")
         else:

@@ -1,8 +1,8 @@
+import platform
 import time
 from contextlib import contextmanager
-from worker.config import redis_client, logger
 
-import platform
+from worker.config import logger, redis_client
 
 
 @contextmanager
@@ -26,9 +26,7 @@ def acquire_lock(lock_name, timeout=600, expire=600):
         time.sleep(0.5)
 
     if not acquired:
-        logger.error(
-            f"Failed to acquire Valkey lock: {lock_name} within {timeout}s timeout"
-        )
+        logger.error(f"Failed to acquire Valkey lock: {lock_name} within {timeout}s timeout")
         raise TimeoutError(f"Could not acquire Valkey lock: {lock_name}")
 
     logger.info(f"Acquired Valkey lock: {lock_name}")

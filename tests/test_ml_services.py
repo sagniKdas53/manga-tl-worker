@@ -1,8 +1,8 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from worker.services.layout import (
-    classify_region_type,
     bubble_compare,
+    classify_region_type,
 )
 from worker.services.ocr import perform_redo_ocr
 
@@ -45,8 +45,8 @@ def test_perform_redo_ocr_paddleocr(mock_ocr_config, mock_model_manager):
     mock_model_manager.get_paddle_ocr_reader.return_value = mock_paddle_reader
 
     # Generate valid dummy PNG bytes dynamically using numpy and cv2
-    import numpy as np
     import cv2
+    import numpy as np
 
     img = np.zeros((10, 10, 3), dtype=np.uint8)
     _, buf = cv2.imencode(".png", img)
@@ -68,9 +68,7 @@ def test_perform_redo_ocr_cloud(mock_ocr_config, mock_post):
 
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "choices": [{"message": {"content": "Cloud OCR text"}}]
-    }
+    mock_response.json.return_value = {"choices": [{"message": {"content": "Cloud OCR text"}}]}
     mock_post.return_value = mock_response
 
     text, conf = perform_redo_ocr(b"dummy_image_bytes", "en")

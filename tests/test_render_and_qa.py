@@ -1,10 +1,12 @@
 import io
 import json
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from PIL import Image
-from worker.handlers.render import process_render
+
 from worker.handlers.qa import process_qa
+from worker.handlers.render import process_render
 
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_CACHE_DIR = os.path.join(TEST_DIR, "test_rendered_cache")
@@ -203,11 +205,9 @@ def test_process_qa_vlm_cloud_success(
 
     # Assertions
     mock_try_cloud_vlm.assert_called_once()
-    mock_minio.get_object.assert_called_once_with(
-        "manga-library", "rendered/image-uuid-1.png"
-    )
+    mock_minio.get_object.assert_called_once_with("manga-library", "rendered/image-uuid-1.png")
     mock_post.assert_called_once()
-    post_args, post_kwargs = mock_post.call_args
+    _post_args, post_kwargs = mock_post.call_args
     qa_results = post_kwargs["json"]["qaResults"]
     assert len(qa_results) == 1
     assert qa_results[0]["regionId"] == "region-uuid-1"
@@ -301,7 +301,7 @@ def test_process_qa_vlm_local_fallback(
     mock_try_cloud_vlm.assert_called_once()
     mock_try_local_vlm.assert_called_once()
     mock_post.assert_called_once()
-    post_args, post_kwargs = mock_post.call_args
+    _post_args, post_kwargs = mock_post.call_args
     qa_results = post_kwargs["json"]["qaResults"]
     assert len(qa_results) == 1
     assert qa_results[0]["regionId"] == "region-uuid-1"
@@ -315,9 +315,7 @@ def test_process_qa_vlm_local_fallback(
 @patch("worker.handlers.qa.requests.get")
 @patch("worker.handlers.qa.requests.post")
 @patch("worker.handlers.qa.QA_MODE", "vlm")
-def test_process_qa_vlm_empty_ocr_regions(
-    mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm
-):
+def test_process_qa_vlm_empty_ocr_regions(mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm):
     # Setup mock image info with empty ocrRegions
     mock_image_info = {"id": "image-uuid-1", "ocrRegions": []}
     mock_get_res = MagicMock()

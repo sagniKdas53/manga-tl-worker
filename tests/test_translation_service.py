@@ -1,4 +1,5 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from worker.services.translation import (
     is_valid_translation,
     should_translate_region,

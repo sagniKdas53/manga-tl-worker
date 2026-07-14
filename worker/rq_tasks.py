@@ -1,16 +1,18 @@
 import time
 import traceback
+
 import requests
-from worker.config import CALLBACK_URL, BACKEND_HEADERS
+
+from worker.config import BACKEND_HEADERS, CALLBACK_URL
 from worker.handlers import (
-    process_panel_detection,
-    process_ocr,
     process_layout,
-    process_translation,
-    process_region_redo,
-    process_render,
+    process_ocr,
+    process_panel_detection,
     process_qa,
     process_qa_re_ocr,
+    process_region_redo,
+    process_render,
+    process_translation,
 )
 
 
@@ -37,9 +39,7 @@ def check_stale_job(queue_name, job_data):
                 # If image exists we can proceed. Future logic for specific cancellation can go here.
                 return False
             elif res.status_code == 404:
-                print(
-                    f"[RQ Task] Image {image_id} not found, aborting job.", flush=True
-                )
+                print(f"[RQ Task] Image {image_id} not found, aborting job.", flush=True)
                 return True
         except Exception:
             pass

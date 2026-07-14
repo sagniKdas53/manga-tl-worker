@@ -40,6 +40,7 @@ def download_image(image_info):
     presigned_url = image_info.get("presignedUrl")
     if presigned_url:
         import requests
+
         from worker.config import logger
 
         logger.info("Downloading image via presigned GET URL")
@@ -47,7 +48,7 @@ def download_image(image_info):
         res.raise_for_status()
         return res.content
     else:
-        from worker.config import minio_client, logger
+        from worker.config import logger, minio_client
 
         storage_path = image_info["storagePath"]
         logger.info(f"Downloading image from local MinIO path: {storage_path}")

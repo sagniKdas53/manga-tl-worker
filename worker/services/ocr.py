@@ -1,5 +1,6 @@
 import gc
 import json
+
 import cv2
 import numpy as np
 import requests
@@ -109,9 +110,7 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model):
                         {"type": "text", "text": prompt},
                         {
                             "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
-                            },
+                            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
                         },
                     ],
                 }
@@ -140,9 +139,7 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model):
                         {"type": "text", "text": prompt},
                         {
                             "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
-                            },
+                            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
                         },
                     ],
                 }
@@ -290,18 +287,14 @@ def perform_redo_ocr(img_crop_bytes, lang):
                 gc.collect()
                 parsed_crop_results = parse_paddle_ocr_results(crop_results)
                 if parsed_crop_results:
-                    text = " ".join(
-                        line[1] for line in parsed_crop_results if line[1].strip()
-                    )
+                    text = " ".join(line[1] for line in parsed_crop_results if line[1].strip())
                     if not is_valid_ocr_text(text):
                         print(
                             f"[OCR Redo] PaddleOCR result rejected by validation: '{text}'",
                             flush=True,
                         )
                         text = ""
-                    confidence = float(
-                        np.mean([line[2] for line in parsed_crop_results])
-                    )
+                    confidence = float(np.mean([line[2] for line in parsed_crop_results]))
                     print(
                         f"[OCR Redo] PaddleOCR Success: '{text}' (conf={confidence})",
                         flush=True,

@@ -1,20 +1,18 @@
-import requests
 import cv2
 import numpy as np
+import requests
 
-from worker.config import CALLBACK_URL, BACKEND_HEADERS
+from worker.config import BACKEND_HEADERS, CALLBACK_URL
+from worker.services.ocr import perform_redo_ocr
 from worker.utils.image import download_image
 from worker.utils.text import detect_language
-from worker.services.ocr import perform_redo_ocr
 
 
 def process_qa_re_ocr(job_data):
     image_id = job_data.get("imageId")
     region_ids = job_data.get("regionsToReOcr", [])
 
-    print(
-        f"[QA Re-OCR] Processing image {image_id} for regions: {region_ids}", flush=True
-    )
+    print(f"[QA Re-OCR] Processing image {image_id} for regions: {region_ids}", flush=True)
 
     if not image_id or not region_ids:
         print("[QA Re-OCR] Missing imageId or regionsToReOcr", flush=True)
@@ -24,9 +22,7 @@ def process_qa_re_ocr(job_data):
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
-            print(
-                f"[QA Re-OCR] Failed to get image info: {res.status_code}", flush=True
-            )
+            print(f"[QA Re-OCR] Failed to get image info: {res.status_code}", flush=True)
             return
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
@@ -66,12 +62,10 @@ def process_qa_re_ocr(job_data):
 
                 if (x2 - x1) > 0 and (y2 - y1) > 0:
                     crop = img[y1:y2, x1:x2]
-                    is_success, buffer = cv2.imencode(".jpg", crop)
+                    _is_success, buffer = cv2.imencode(".jpg", crop)
                     crop_bytes = buffer.tobytes()
 
-                    text, confidence = perform_redo_ocr(
-                        crop_bytes, region["detectedLanguage"]
-                    )
+                    text, confidence = perform_redo_ocr(crop_bytes, region["detectedLanguage"])
                     detected_lang = detect_language(text)
 
                     results.append(
@@ -87,9 +81,7 @@ def process_qa_re_ocr(job_data):
                         flush=True,
                     )
             except Exception as e:
-                print(
-                    f"[QA Re-OCR] Failed to OCR region {region['id']}: {e}", flush=True
-                )
+                print(f"[QA Re-OCR] Failed to OCR region {region['id']}: {e}", flush=True)
 
     except Exception as e:
         print(f"[QA Re-OCR] Error during batch OCR process: {e}", flush=True)
@@ -99,9 +91,7 @@ def process_qa_re_ocr(job_data):
 
     try:
         callback_url = f"{CALLBACK_URL}/qa-re-ocr"
-        res = requests.post(
-            callback_url, json=callback_payload, headers=BACKEND_HEADERS
-        )
+        res = requests.post(callback_url, json=callback_payload, headers=BACKEND_HEADERS)
         print(f"[QA Re-OCR] Callback status code: {res.status_code}", flush=True)
     except Exception as e:
         print(f"[QA Re-OCR] Failed to post callback: {e}", flush=True)

@@ -3,8 +3,8 @@
 import os
 import time
 
-from worker.config import MODEL_TTL, HEALTH_PORT
-from worker.health_server import start_health_server, set_seeding_complete
+from worker.config import HEALTH_PORT, MODEL_TTL
+from worker.health_server import set_seeding_complete, start_health_server
 from worker.model_manager import model_manager
 
 
@@ -98,8 +98,7 @@ def main():  # pylint: disable=too-many-locals
                 loaded_str = ", ".join(loaded) if loaded else "None"
 
                 print(
-                    f"[Unified Worker Status] Uptime: {uptime_str} | "
-                    f"Loaded Models: {loaded_str}",
+                    f"[Unified Worker Status] Uptime: {uptime_str} | Loaded Models: {loaded_str}",
                     flush=True,
                 )
                 last_status_time = now

@@ -1,8 +1,8 @@
+import sys
 import time
 from unittest.mock import MagicMock
-from worker.model_manager import ModelManager
 
-import sys
+from worker.model_manager import ModelManager
 
 
 def test_get_paddle_ocr_reader():

@@ -1,40 +1,38 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from worker.services.translation import (
-    validate_translation_response,
-    parse_and_validate_batch,
-    wait_for_cooldown,
     _get_api_url_and_headers,
+    build_context_string,
+    parse_and_validate_batch,
+    translate_batch_deepl,
+    translate_batch_llm,
+    translate_text,
     try_cloud_ai,
     try_cloud_ai_vision,
-    try_local_ai,
     try_google_translate,
-    translate_text,
-    translate_batch_llm,
-    translate_batch_deepl,
-    build_context_string,
+    try_local_ai,
     try_local_vlm_vision,
+    validate_translation_response,
+    wait_for_cooldown,
 )
 
 
 def test_validate_translation_response():
     # test dict format
-    data = {
-        "translations": [{"id": "1", "translation": "hello", "translationScore": 0.9}]
-    }
+    data = {"translations": [{"id": "1", "translation": "hello", "translationScore": 0.9}]}
     res = validate_translation_response(data)
-    assert "1" in res
-    assert res["1"]["translatedText"] == "hello"
+    assert "1" in res  # type: ignore
+    assert res["1"]["translatedText"] == "hello"  # type: ignore
 
     # test items format
     data = {"items": [{"id": "1", "translation": "hello"}]}
     res = validate_translation_response(data)
-    assert "1" in res
+    assert "1" in res  # type: ignore
 
     # test simple dict
     data = {"1": "hello"}
     res = validate_translation_response(data)
-    assert "1" in res
+    assert "1" in res  # type: ignore
 
     # test invalid
     assert validate_translation_response("not_a_list_or_dict") is None
@@ -60,11 +58,11 @@ def test_wait_for_cooldown(mock_time, mock_sleep):
 
 
 def test_get_api_url_and_headers():
-    url, hdrs, model = _get_api_url_and_headers("openrouter", "key", "")
+    url, hdrs, _model = _get_api_url_and_headers("openrouter", "key", "")
     assert "openrouter" in url
     assert "Authorization" in hdrs
 
-    url, hdrs, model = _get_api_url_and_headers("anthropic", "key", "claude")
+    url, hdrs, _model = _get_api_url_and_headers("anthropic", "key", "claude")
     assert "anthropic" in url
     assert "x-api-key" in hdrs
 
@@ -105,9 +103,7 @@ def test_try_cloud_ai_vision(mock_post):
     mock_resp.json.return_value = {"content": [{"text": "hello vision"}]}
     mock_post.return_value = mock_resp
 
-    res = try_cloud_ai_vision(
-        "anthropic", "key", "claude", "prompt", "base64", system_prompt="sys"
-    )
+    res = try_cloud_ai_vision("anthropic", "key", "claude", "prompt", "base64", system_prompt="sys")
     assert res == "hello vision"
 
 
@@ -202,9 +198,7 @@ def test_translate_batch_deepl(mock_env, mock_post):
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
-    mock_resp.json.return_value = {
-        "translations": [{"text": "hello deepl 1"}, {"text": "hello deepl 2"}]
-    }
+    mock_resp.json.return_value = {"translations": [{"text": "hello deepl 1"}, {"text": "hello deepl 2"}]}
     mock_post.return_value = mock_resp
 
     regions = [{"id": "1", "text": "j1"}, {"id": "2", "text": "j2"}]

@@ -1,4 +1,5 @@
 import json
+
 from worker.services.merge_regions import merge_ocr_regions
 
 

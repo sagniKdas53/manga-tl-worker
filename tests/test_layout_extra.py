@@ -1,8 +1,8 @@
 from worker.services.layout import (
     bubble_compare,
+    chunk_regions_by_conversation,
     classify_region_type,
     group_conversations,
-    chunk_regions_by_conversation,
 )
 
 

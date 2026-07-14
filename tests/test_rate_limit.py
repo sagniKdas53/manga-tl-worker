@@ -1,14 +1,15 @@
-import os
 import json
+import os
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from worker.utils.rate_limit import (
     enforce_rate_limit,
-    update_model_costs,
-    reset_job_costs,
-    get_job_costs,
     estimate_cost,
+    get_job_costs,
+    reset_job_costs,
+    update_model_costs,
 )
 
 
@@ -41,11 +42,7 @@ def test_update_model_costs(mock_redis, mock_req, tmp_path):
         mock_res = MagicMock()
         mock_res.status_code = 200
         mock_res.json.return_value = {
-            "data": {
-                "endpoints": [
-                    {"pricing": {"prompt": "0.000001", "completion": "0.000002"}}
-                ]
-            }
+            "data": {"endpoints": [{"pricing": {"prompt": "0.000001", "completion": "0.000002"}}]}
         }
         mock_req.get.return_value = mock_res
 

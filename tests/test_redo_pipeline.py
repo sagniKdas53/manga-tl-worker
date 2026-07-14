@@ -1,9 +1,10 @@
 import io
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from PIL import Image
 
-from worker.handlers.redo import process_region_redo
 from worker.handlers.qa_re_ocr import process_qa_re_ocr
+from worker.handlers.redo import process_region_redo
 
 
 def get_dummy_image_bytes():
@@ -55,7 +56,7 @@ def test_process_region_redo_ocr(mock_post, mock_get, mock_perform_ocr, mock_dow
     mock_download.assert_called_once()
 
     mock_perform_ocr.assert_called_once()
-    args, kwargs = mock_perform_ocr.call_args
+    args, _kwargs = mock_perform_ocr.call_args
     assert isinstance(args[0], bytes)
     assert args[1] == "ja"
 
@@ -72,9 +73,7 @@ def test_process_region_redo_ocr(mock_post, mock_get, mock_perform_ocr, mock_dow
 @patch("worker.handlers.redo.translate_text")
 @patch("worker.handlers.redo.requests.get")
 @patch("worker.handlers.redo.requests.post")
-def test_process_region_redo_translation(
-    mock_post, mock_get, mock_translate, mock_download
-):
+def test_process_region_redo_translation(mock_post, mock_get, mock_translate, mock_download):
     mock_image_info = {
         "id": "image-uuid-1",
         "storagePath": "originals/page1.png",

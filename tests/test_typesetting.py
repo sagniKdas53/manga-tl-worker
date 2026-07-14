@@ -1,4 +1,5 @@
 import json
+
 from worker.handlers.render import fit_text_in_box_py
 
 
