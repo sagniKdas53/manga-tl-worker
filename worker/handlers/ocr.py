@@ -725,6 +725,7 @@ def process_ocr(job_data):
                         crop_chunks = chunk_list(crops_payload, 10)
 
                         def process_crop_chunk(chunk_idx, chunk):
+                            nonlocal vlm_model_used
                             print(
                                 f"[OCR] Processing cloud OCR batch chunk {chunk_idx + 1}/{len(crop_chunks)} ({len(chunk)} crops)...",
                                 flush=True,

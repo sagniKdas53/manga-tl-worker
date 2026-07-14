@@ -32,6 +32,7 @@ def test_process_panel_detection(mock_detect, mock_download, mock_requests, mock
     assert payload["panels"] == [{"x": 10}]
 
     import pytest
+
     # Test fetch fail
     mock_res.status_code = 404
     with pytest.raises(Exception):
