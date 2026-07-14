@@ -242,3 +242,176 @@ def test_scenario_three_jobs_concurrency(mock_thread, mock_request_handler):
     mock_request_handler.send_response.assert_called_with(429)
     assert hs.ACTIVE_HEAVY_JOBS == 0
     assert hs.ACTIVE_LIGHT_JOBS == 1
+
+
+@patch("worker.health_server.WORKER_API_SECRET", "test_secret")
+@patch("worker.health_server.ACTIVE_JOBS", 0)
+@patch("worker.health_server.ACTIVE_HEAVY_JOBS", 0)
+@patch("worker.health_server.ACTIVE_LIGHT_JOBS", 0)
+@patch("worker.health_server.MAX_CONCURRENT_JOBS", 3)
+@patch("worker.health_server.MAX_HEAVY_SLOTS", 2)
+@patch("worker.health_server.MAX_LIGHT_SLOTS", 1)
+@patch("worker.health_server.threading.Thread")
+def test_configurable_heavy_slots(mock_thread, mock_request_handler):
+    """With MAX_HEAVY_SLOTS=2, two heavy jobs should be accepted; the third should get 429."""
+    mock_request_handler.check_auth = MagicMock(return_value=True)
+    mock_request_handler.command = "POST"
+    mock_request_handler.path = "/api/v1/jobs/submit"
+
+    hs.ACTIVE_JOBS = 0
+    hs.ACTIVE_HEAVY_JOBS = 0
+    hs.ACTIVE_LIGHT_JOBS = 0
+
+    # Heavy job 1 — accepted
+    body = json.dumps({"queue_name": "queue:ocr", "job_data": {"id": "h1"}})
+    mock_request_handler.rfile = MagicMock()
+    mock_request_handler.rfile.read.return_value = body.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(202)
+    assert hs.ACTIVE_HEAVY_JOBS == 1
+
+    mock_request_handler.send_response.reset_mock()
+
+    # Heavy job 2 — accepted (second heavy slot)
+    body = json.dumps({"queue_name": "queue:panel-detection", "job_data": {"id": "h2"}})
+    mock_request_handler.rfile.read.return_value = body.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(202)
+    assert hs.ACTIVE_HEAVY_JOBS == 2
+
+    mock_request_handler.send_response.reset_mock()
+
+    # Heavy job 3 — rejected (both heavy slots occupied)
+    body = json.dumps({"queue_name": "queue:ocr", "job_data": {"id": "h3"}})
+    mock_request_handler.rfile.read.return_value = body.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(429)
+    assert hs.ACTIVE_HEAVY_JOBS == 2
+
+
+@patch("worker.health_server.WORKER_API_SECRET", "test_secret")
+@patch("worker.health_server.ACTIVE_JOBS", 0)
+@patch("worker.health_server.ACTIVE_HEAVY_JOBS", 0)
+@patch("worker.health_server.ACTIVE_LIGHT_JOBS", 0)
+@patch("worker.health_server.MAX_CONCURRENT_JOBS", 3)
+@patch("worker.health_server.MAX_HEAVY_SLOTS", 1)
+@patch("worker.health_server.MAX_LIGHT_SLOTS", 2)
+@patch("worker.health_server.threading.Thread")
+def test_configurable_light_slots(mock_thread, mock_request_handler):
+    """With MAX_LIGHT_SLOTS=2, two light jobs should be accepted; the third should get 429."""
+    mock_request_handler.check_auth = MagicMock(return_value=True)
+    mock_request_handler.command = "POST"
+    mock_request_handler.path = "/api/v1/jobs/submit"
+
+    hs.ACTIVE_JOBS = 0
+    hs.ACTIVE_HEAVY_JOBS = 0
+    hs.ACTIVE_LIGHT_JOBS = 0
+
+    # Light job 1 — accepted
+    body = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "l1"}})
+    mock_request_handler.rfile = MagicMock()
+    mock_request_handler.rfile.read.return_value = body.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(202)
+    assert hs.ACTIVE_LIGHT_JOBS == 1
+
+    mock_request_handler.send_response.reset_mock()
+
+    # Light job 2 — accepted (second light slot)
+    body = json.dumps({"queue_name": "queue:layout", "job_data": {"id": "l2"}})
+    mock_request_handler.rfile.read.return_value = body.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(202)
+    assert hs.ACTIVE_LIGHT_JOBS == 2
+
+    mock_request_handler.send_response.reset_mock()
+
+    # Light job 3 — rejected (both light slots occupied)
+    body = json.dumps({"queue_name": "queue:render", "job_data": {"id": "l3"}})
+    mock_request_handler.rfile.read.return_value = body.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(429)
+    assert hs.ACTIVE_LIGHT_JOBS == 2
+
+
+@patch("worker.health_server.WORKER_API_SECRET", "test_secret")
+@patch("worker.health_server.ACTIVE_JOBS", 0)
+@patch("worker.health_server.ACTIVE_HEAVY_JOBS", 0)
+@patch("worker.health_server.ACTIVE_LIGHT_JOBS", 0)
+@patch("worker.health_server.MAX_CONCURRENT_JOBS", 3)
+@patch("worker.health_server.MAX_HEAVY_SLOTS", 1)
+@patch("worker.health_server.MAX_LIGHT_SLOTS", 2)
+@patch("worker.health_server.threading.Thread")
+def test_default_slot_allocation_concurrent_3(mock_thread, mock_request_handler):
+    """With CONCURRENT_JOBS=3 default slots (1 heavy + 2 light), accept 1 heavy + 2 light, reject a 3rd light."""
+    mock_request_handler.check_auth = MagicMock(return_value=True)
+    mock_request_handler.command = "POST"
+    mock_request_handler.path = "/api/v1/jobs/submit"
+
+    hs.ACTIVE_JOBS = 0
+    hs.ACTIVE_HEAVY_JOBS = 0
+    hs.ACTIVE_LIGHT_JOBS = 0
+
+    # Heavy job — accepted
+    body = json.dumps({"queue_name": "queue:ocr", "job_data": {"id": "h1"}})
+    mock_request_handler.rfile = MagicMock()
+    mock_request_handler.rfile.read.return_value = body.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(202)
+    assert hs.ACTIVE_HEAVY_JOBS == 1
+    assert hs.ACTIVE_LIGHT_JOBS == 0
+
+    mock_request_handler.send_response.reset_mock()
+
+    # Light job 1 — accepted
+    body = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "l1"}})
+    mock_request_handler.rfile.read.return_value = body.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(202)
+    assert hs.ACTIVE_LIGHT_JOBS == 1
+
+    mock_request_handler.send_response.reset_mock()
+
+    # Light job 2 — accepted (second light slot)
+    body = json.dumps({"queue_name": "queue:layout", "job_data": {"id": "l2"}})
+    mock_request_handler.rfile.read.return_value = body.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(202)
+    assert hs.ACTIVE_LIGHT_JOBS == 2
+    assert hs.ACTIVE_JOBS == 3
+
+    mock_request_handler.send_response.reset_mock()
+
+    # Light job 3 — rejected (all 3 concurrent slots filled)
+    body = json.dumps({"queue_name": "queue:render", "job_data": {"id": "l3"}})
+    mock_request_handler.rfile.read.return_value = body.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(429)
+    assert hs.ACTIVE_LIGHT_JOBS == 2
+    assert hs.ACTIVE_JOBS == 3
+
+
+def test_region_redo_removed_from_heavy():
+    """Verify queue:region-redo is NOT in HEAVY_QUEUES or LIGHT_QUEUES after legacy removal."""
+    assert "queue:region-redo" not in hs.HEAVY_QUEUES
+    assert "queue:region-redo" not in hs.LIGHT_QUEUES

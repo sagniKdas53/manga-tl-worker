@@ -23,6 +23,8 @@ ACTIVE_HEAVY_JOBS = 0
 ACTIVE_LIGHT_JOBS = 0
 ACTIVE_JOBS_LOCK = threading.Lock()
 MAX_CONCURRENT_JOBS = int(os.environ.get("CONCURRENT_JOBS", os.environ.get("CONCURRENT_WORKERS", "2")))
+MAX_HEAVY_SLOTS = int(os.environ.get("MAX_HEAVY_SLOTS", "1"))
+MAX_LIGHT_SLOTS = int(os.environ.get("MAX_LIGHT_SLOTS", str(MAX_CONCURRENT_JOBS - MAX_HEAVY_SLOTS)))
 WORKER_API_SECRET = os.environ.get("WORKER_API_SECRET", "").strip()
 WORKER_API_SECRET_FILE = os.environ.get("WORKER_API_SECRET_FILE", "").strip()
 
@@ -31,7 +33,6 @@ HEAVY_QUEUES = {
     "queue:ocr",
     "queue:qa-re-ocr",
     "queue:region-redo-ocr",
-    "queue:region-redo",  # Legacy unified queue name included for backward compatibility
 }
 
 LIGHT_QUEUES = {
@@ -157,7 +158,11 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                     "queue:region-redo-tl",
                 ],
                 "max_concurrent_jobs": MAX_CONCURRENT_JOBS,
+                "max_heavy_slots": MAX_HEAVY_SLOTS,
+                "max_light_slots": MAX_LIGHT_SLOTS,
                 "active_jobs": current_active,
+                "active_heavy_jobs": ACTIVE_HEAVY_JOBS,
+                "active_light_jobs": ACTIVE_LIGHT_JOBS,
             }
             try:
                 self.send_response(200)
@@ -203,14 +208,14 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                     # Check slot-specific limits
                     is_heavy = queue_name in HEAVY_QUEUES
                     if is_heavy:
-                        if ACTIVE_HEAVY_JOBS >= 1:
+                        if ACTIVE_HEAVY_JOBS >= MAX_HEAVY_SLOTS:
                             self.send_response(429)
                             self.end_headers()
                             self.wfile.write(b"Too Many Requests: Heavy job slot occupied")
                             return
                         ACTIVE_HEAVY_JOBS += 1
                     else:
-                        if ACTIVE_LIGHT_JOBS >= 1:
+                        if ACTIVE_LIGHT_JOBS >= MAX_LIGHT_SLOTS:
                             self.send_response(429)
                             self.end_headers()
                             self.wfile.write(b"Too Many Requests: Light job slot occupied")
