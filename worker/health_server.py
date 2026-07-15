@@ -236,7 +236,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                                 print(
                                     f"[Health Server] Light slot full but global capacity available — "
                                     f"accepting light job in overflow (active: {ACTIVE_JOBS + 1}/{MAX_CONCURRENT_JOBS})",
-                                    flush=True
+                                    flush=True,
                                 )
                                 ACTIVE_LIGHT_JOBS += 1
                             else:

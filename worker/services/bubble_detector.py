@@ -201,7 +201,7 @@ def detect_bubbles_yolo(img):
         simplified_contour = cv2.approxPolyDP(contour, epsilon, True)
 
         # Exact mask polygon
-        mask_polygon = [[int(pt[0][0]), int(pt[0][1])] for pt in simplified_contour]
+        mask_polygon = [[int(pt[0][0]), int(pt[0][1])] for pt in simplified_contour]  # type: ignore
 
         # Derive eroded safe text area
         erosion_px = YOLO_MASK_EROSION

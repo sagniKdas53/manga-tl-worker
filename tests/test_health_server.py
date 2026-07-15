@@ -418,6 +418,7 @@ def test_region_redo_removed_from_heavy():
     assert "queue:region-redo" not in hs.HEAVY_QUEUES
     assert "queue:region-redo" not in hs.LIGHT_QUEUES
 
+
 @patch("worker.health_server.WORKER_API_SECRET", "test_secret")
 @patch("worker.health_server.MAX_CONCURRENT_JOBS", 2)
 @patch("worker.health_server.MAX_HEAVY_SLOTS", 1)
@@ -488,4 +489,3 @@ def test_light_overflow_disabled(mock_request_handler):
 
     hs.HealthCheckHandler.do_POST(mock_request_handler)
     mock_request_handler.send_response.assert_called_with(429)
-

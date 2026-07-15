@@ -630,7 +630,7 @@ def process_ocr(job_data):
                         crop = img[ry1:ry2, rx1:rx2]  # type: ignore
                         if crop.size > 0:
                             _, buffer = cv2.imencode(".jpg", crop)
-                            base64_image = base64.b64encode(buffer).decode("utf-8")
+                            base64_image = base64.b64encode(buffer).decode("utf-8")  # type: ignore
                             crops_payload.append({"id": f"region_{cr_idx}", "base64": base64_image})
 
                     schema = {
