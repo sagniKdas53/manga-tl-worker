@@ -156,6 +156,7 @@ def test_heavy_light_concurrency_slots(mock_thread, mock_request_handler):
 @patch("worker.health_server.ACTIVE_HEAVY_JOBS", 0)
 @patch("worker.health_server.ACTIVE_LIGHT_JOBS", 0)
 @patch("worker.health_server.MAX_CONCURRENT_JOBS", 2)
+@patch("worker.health_server.REUSE_IDLE_SLOTS", False)
 @patch("worker.health_server.threading.Thread")
 def test_scenario_three_jobs_concurrency(mock_thread, mock_request_handler):
     # Reset mock request handler
@@ -302,6 +303,7 @@ def test_configurable_heavy_slots(mock_thread, mock_request_handler):
 @patch("worker.health_server.MAX_CONCURRENT_JOBS", 3)
 @patch("worker.health_server.MAX_HEAVY_SLOTS", 1)
 @patch("worker.health_server.MAX_LIGHT_SLOTS", 2)
+@patch("worker.health_server.REUSE_IDLE_SLOTS", False)
 @patch("worker.health_server.threading.Thread")
 def test_configurable_light_slots(mock_thread, mock_request_handler):
     """With MAX_LIGHT_SLOTS=2, two light jobs should be accepted; the third should get 429."""
@@ -415,3 +417,75 @@ def test_region_redo_removed_from_heavy():
     """Verify queue:region-redo is NOT in HEAVY_QUEUES or LIGHT_QUEUES after legacy removal."""
     assert "queue:region-redo" not in hs.HEAVY_QUEUES
     assert "queue:region-redo" not in hs.LIGHT_QUEUES
+
+@patch("worker.health_server.WORKER_API_SECRET", "test_secret")
+@patch("worker.health_server.MAX_CONCURRENT_JOBS", 2)
+@patch("worker.health_server.MAX_HEAVY_SLOTS", 1)
+@patch("worker.health_server.MAX_LIGHT_SLOTS", 1)
+@patch("worker.health_server.REUSE_IDLE_SLOTS", True)
+@patch("worker.health_server.threading.Thread")
+def test_light_overflow_when_heavy_idle(mock_thread, mock_request_handler):
+    mock_request_handler.check_auth = MagicMock(return_value=True)
+    mock_request_handler.command = "POST"
+    mock_request_handler.path = "/api/v1/jobs/submit"
+
+    hs.ACTIVE_JOBS = 1
+    hs.ACTIVE_HEAVY_JOBS = 0
+    hs.ACTIVE_LIGHT_JOBS = 1
+
+    body = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "light2"}})
+    mock_request_handler.rfile = MagicMock()
+    mock_request_handler.rfile.read.return_value = body.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(202)
+    assert hs.ACTIVE_LIGHT_JOBS == 2
+    assert hs.ACTIVE_JOBS == 2
+
+
+@patch("worker.health_server.WORKER_API_SECRET", "test_secret")
+@patch("worker.health_server.MAX_CONCURRENT_JOBS", 2)
+@patch("worker.health_server.MAX_HEAVY_SLOTS", 1)
+@patch("worker.health_server.MAX_LIGHT_SLOTS", 1)
+@patch("worker.health_server.REUSE_IDLE_SLOTS", True)
+def test_light_overflow_blocked_at_global_limit(mock_request_handler):
+    mock_request_handler.check_auth = MagicMock(return_value=True)
+    mock_request_handler.command = "POST"
+    mock_request_handler.path = "/api/v1/jobs/submit"
+
+    hs.ACTIVE_JOBS = 2
+    hs.ACTIVE_HEAVY_JOBS = 1
+    hs.ACTIVE_LIGHT_JOBS = 1
+
+    body = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "light3"}})
+    mock_request_handler.rfile = MagicMock()
+    mock_request_handler.rfile.read.return_value = body.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(429)
+
+
+@patch("worker.health_server.WORKER_API_SECRET", "test_secret")
+@patch("worker.health_server.MAX_CONCURRENT_JOBS", 2)
+@patch("worker.health_server.MAX_HEAVY_SLOTS", 1)
+@patch("worker.health_server.MAX_LIGHT_SLOTS", 1)
+@patch("worker.health_server.REUSE_IDLE_SLOTS", False)
+def test_light_overflow_disabled(mock_request_handler):
+    mock_request_handler.check_auth = MagicMock(return_value=True)
+    mock_request_handler.command = "POST"
+    mock_request_handler.path = "/api/v1/jobs/submit"
+
+    hs.ACTIVE_JOBS = 1
+    hs.ACTIVE_HEAVY_JOBS = 0
+    hs.ACTIVE_LIGHT_JOBS = 1
+
+    body = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "light2"}})
+    mock_request_handler.rfile = MagicMock()
+    mock_request_handler.rfile.read.return_value = body.encode("utf-8")
+    mock_request_handler.headers["Content-Length"] = str(len(body))
+
+    hs.HealthCheckHandler.do_POST(mock_request_handler)
+    mock_request_handler.send_response.assert_called_with(429)
+

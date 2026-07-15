@@ -37,6 +37,7 @@ def _parse_env_int(key: str, default_val: int) -> int:
 MAX_CONCURRENT_JOBS = _parse_env_int("CONCURRENT_JOBS", _parse_env_int("CONCURRENT_WORKERS", 2))
 MAX_HEAVY_SLOTS = _parse_env_int("MAX_HEAVY_SLOTS", 1)
 MAX_LIGHT_SLOTS = _parse_env_int("MAX_LIGHT_SLOTS", MAX_CONCURRENT_JOBS - MAX_HEAVY_SLOTS)
+REUSE_IDLE_SLOTS = os.environ.get("REUSE_IDLE_SLOTS", "true").strip().lower() == "true"
 WORKER_API_SECRET = os.environ.get("WORKER_API_SECRET", "").strip()
 WORKER_API_SECRET_FILE = os.environ.get("WORKER_API_SECRET_FILE", "").strip()
 
@@ -172,9 +173,11 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 "max_concurrent_jobs": MAX_CONCURRENT_JOBS,
                 "max_heavy_slots": MAX_HEAVY_SLOTS,
                 "max_light_slots": MAX_LIGHT_SLOTS,
+                "reuse_idle_slots": REUSE_IDLE_SLOTS,
                 "active_jobs": current_active,
                 "active_heavy_jobs": ACTIVE_HEAVY_JOBS,
                 "active_light_jobs": ACTIVE_LIGHT_JOBS,
+                "overflow_light_jobs": max(0, ACTIVE_LIGHT_JOBS - MAX_LIGHT_SLOTS),
             }
             try:
                 self.send_response(200)
@@ -228,11 +231,21 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                         ACTIVE_HEAVY_JOBS += 1
                     else:
                         if ACTIVE_LIGHT_JOBS >= MAX_LIGHT_SLOTS:
-                            self.send_response(429)
-                            self.end_headers()
-                            self.wfile.write(b"Too Many Requests: Light job slot occupied")
-                            return
-                        ACTIVE_LIGHT_JOBS += 1
+                            # Can we overflow into idle heavy slots?
+                            if REUSE_IDLE_SLOTS and ACTIVE_JOBS < MAX_CONCURRENT_JOBS:
+                                print(
+                                    f"[Health Server] Light slot full but global capacity available — "
+                                    f"accepting light job in overflow (active: {ACTIVE_JOBS + 1}/{MAX_CONCURRENT_JOBS})",
+                                    flush=True
+                                )
+                                ACTIVE_LIGHT_JOBS += 1
+                            else:
+                                self.send_response(429)
+                                self.end_headers()
+                                self.wfile.write(b"Too Many Requests: Light job slot occupied")
+                                return
+                        else:
+                            ACTIVE_LIGHT_JOBS += 1
 
                     ACTIVE_JOBS = ACTIVE_HEAVY_JOBS + ACTIVE_LIGHT_JOBS
 
