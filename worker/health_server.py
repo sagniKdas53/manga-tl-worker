@@ -22,9 +22,21 @@ ACTIVE_JOBS = 0
 ACTIVE_HEAVY_JOBS = 0
 ACTIVE_LIGHT_JOBS = 0
 ACTIVE_JOBS_LOCK = threading.Lock()
-MAX_CONCURRENT_JOBS = int(os.environ.get("CONCURRENT_JOBS", os.environ.get("CONCURRENT_WORKERS", "2")))
-MAX_HEAVY_SLOTS = int(os.environ.get("MAX_HEAVY_SLOTS", "1"))
-MAX_LIGHT_SLOTS = int(os.environ.get("MAX_LIGHT_SLOTS", str(MAX_CONCURRENT_JOBS - MAX_HEAVY_SLOTS)))
+
+
+def _parse_env_int(key: str, default_val: int) -> int:
+    val = os.environ.get(key, "").strip()
+    if not val:
+        return default_val
+    try:
+        return int(val)
+    except ValueError:
+        return default_val
+
+
+MAX_CONCURRENT_JOBS = _parse_env_int("CONCURRENT_JOBS", _parse_env_int("CONCURRENT_WORKERS", 2))
+MAX_HEAVY_SLOTS = _parse_env_int("MAX_HEAVY_SLOTS", 1)
+MAX_LIGHT_SLOTS = _parse_env_int("MAX_LIGHT_SLOTS", MAX_CONCURRENT_JOBS - MAX_HEAVY_SLOTS)
 WORKER_API_SECRET = os.environ.get("WORKER_API_SECRET", "").strip()
 WORKER_API_SECRET_FILE = os.environ.get("WORKER_API_SECRET_FILE", "").strip()
 
