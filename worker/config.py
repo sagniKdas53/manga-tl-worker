@@ -69,6 +69,7 @@ _load_docker_secrets()
 # Connection Configs
 REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
+REDIS_DB = int(os.environ.get("REDIS_DB", 0))
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "localhost:9000")
 MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
 MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
@@ -88,6 +89,7 @@ HEALTH_PORT = int(os.environ.get("HEALTH_PORT", "8000"))
 redis_client = redis.Redis(
     host=REDIS_HOST,
     port=REDIS_PORT,
+    db=REDIS_DB,
     socket_timeout=15,
     socket_connect_timeout=5,
     socket_keepalive=True,
