@@ -164,7 +164,7 @@ def detect_bubbles_yolo(img):
         logger.info(f"[YOLO] No bubbles detected. Inference took {time.perf_counter() - start_time:.3f}s")
         return []
 
-    indices = cv2.dnn.NMSBoxes(boxes, scores, YOLO_CONF_THRESHOLD, 0.45)
+    indices = cv2.dnn.NMSBoxes(boxes, scores, 0.45, 0.45)
     if len(indices) == 0:
         logger.info(f"[YOLO] 0 bubbles survived NMS. Inference took {time.perf_counter() - start_time:.3f}s")
         return []
@@ -184,6 +184,10 @@ def detect_bubbles_yolo(img):
             class_name = "text"
         else:
             class_name = "balloon"
+
+        # Skip frame class as we don't want to process manga panels as speech bubbles
+        if class_name == "frame":
+            continue
 
         # Generate mask on 320x320 grid
         mask_grid = (coeff @ proto.reshape(32, -1)).reshape(320, 320)
