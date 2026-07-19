@@ -106,15 +106,15 @@ minio_client = Minio(
 YOLO_MODEL_PATH = os.environ.get("YOLO_MODEL_PATH", "")
 if not YOLO_MODEL_PATH:
     LOCAL_PATH = (
-        "/home/sagnik/Projects/docker-composes/manga-library/data/worker/huggingface/models/yolo11n_bubble.onnx"
+        "/home/sagnik/Projects/docker-composes/manga-library/data/worker/huggingface/models/yolo26s_manga109.onnx"
     )
-    DOCKER_PATH = "/root/.cache/huggingface/models/yolo11n_bubble.onnx"
+    DOCKER_PATH = "/root/.cache/huggingface/models/yolo26s_manga109.onnx"
     YOLO_MODEL_PATH = LOCAL_PATH if os.path.exists(LOCAL_PATH) else DOCKER_PATH
 
 YOLO_CONF_THRESHOLD = float(os.environ.get("YOLO_CONF_THRESHOLD", "0.25"))
 YOLO_INPUT_SIZE = int(os.environ.get("YOLO_INPUT_SIZE", "1280"))
 YOLO_MASK_EROSION = int(os.environ.get("YOLO_MASK_EROSION", "3"))
-YOLO_PINNED_CHECKSUM = "c9208cb610aa35b8f8dc7ef0890182322992a43399a853093ad5d04a3764af4f"
+YOLO_PINNED_CHECKSUM = "62c9ee32f21e471dc0b4004842b0c73f0d711618d97083c9ded30cfe084827c8"
 YOLO_FALLBACK_MODE = os.environ.get("YOLO_FALLBACK_MODE", "opencv").lower()
 
 

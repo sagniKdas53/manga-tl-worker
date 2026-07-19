@@ -15,14 +15,14 @@ def get_sha256(file_path):
 
 
 def main():
-    dest_dir = "/home/sagnik/Projects/docker-composes/manga-library/data/worker/huggingface/models"
+    dest_dir = "/home/sagnik/Projects/docker-composes/manga-library/unified-workers/models_backup"
     os.makedirs(dest_dir, exist_ok=True)
 
     print("Downloading best.pt from Hugging Face...")
     pt_path = hf_hub_download(
-        repo_id="juithealien/manga109-segmentation-bubble",
+        repo_id="ShadowB/Manga109-panel-balloon-text-yolov26-segmentation",
         filename="best.pt",
-        cache_dir="/home/sagnik/Projects/docker-composes/manga-library/data/worker/huggingface",
+        cache_dir="/home/sagnik/Projects/docker-composes/manga-library/unified-workers/models_backup",
     )
     print(f"Downloaded model checkpoint to {pt_path}")
 
@@ -34,7 +34,7 @@ def main():
     onnx_path_temp = model.export(format="onnx", imgsz=1280, simplify=True)
     print(f"Exported to temporary path: {onnx_path_temp}")
 
-    dest_path = os.path.join(dest_dir, "yolo11n_bubble.onnx")
+    dest_path = os.path.join(dest_dir, "yolo26s_manga109.onnx")
     shutil.move(onnx_path_temp, dest_path)
     print(f"Moved ONNX model to final path: {dest_path}")
 

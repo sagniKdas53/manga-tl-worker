@@ -11,3 +11,4 @@ ENV/
 costs.json
 coverage.xml
 pyright_output.txt
+models_backup/

@@ -50,6 +50,7 @@ TRANSLATION_JSON_SCHEMA = {
 MANGA_TRANSLATION_JSON_SYSTEM_PROMPT = """You are an expert manga translator.
 Translate the list of manga text regions into natural English.
 These regions appear in reading order. Maintain context, tone, emotion, and relationships between speakers.
+IMPORTANT: Use the provided series metadata, style guidelines, and previous context to inform tone and character voice consistency.
 
 Region type handling:
 - "speech": Translate as natural dialogue.
@@ -1179,7 +1180,7 @@ Regions with the same "conversationGroup" are part of the same dialogue exchange
 Translate each region from {src_name} to natural {tgt_name} according to its type and maintain conversational coherence within groups.
 
 Preserve:
-- tone
+- tone (ensure consistency with the provided style guidelines and character context)
 - emotional state
 - relationships
 - ongoing conversation

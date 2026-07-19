@@ -501,7 +501,7 @@ def process_ocr(job_data):
                     if not use_paddle_ocr:
                         candidate_regions.append(
                             {
-                                "type": "bubble",
+                                "type": "direct_text" if bubble.get("class_name") == "text" else "bubble",
                                 "bubble_idx": b_idx,
                                 "x": bx,
                                 "y": by,
@@ -554,7 +554,7 @@ def process_ocr(job_data):
 
                     candidate_regions.append(
                         {
-                            "type": "bubble",
+                            "type": "direct_text" if bubble.get("class_name") == "text" else "bubble",
                             "bubble_idx": b_idx,
                             "x": r_sub["x"],
                             "y": r_sub["y"],
@@ -869,9 +869,9 @@ def process_ocr(job_data):
                                         "bubbleX": r["x"],
                                         "bubbleY": r["y"],
                                         "bubbleWidth": r["width"],
-                                        "bubbleHeight": r["height"],
-                                        "bubbleId": f"direct_text_{r['direct_idx']}",
-                                        "detectionConfidence": 0.0,
+                                        "bubbleHeight": r.get("bubbleHeight", r["height"]),
+                                        "bubbleId": f"direct_text_{r.get('direct_idx', r.get('bubble_idx'))}",
+                                        "detectionConfidence": r.get("bubble", {}).get("confidence", 0.0),
                                         "maskPolygon": json.dumps(r["poly_pts"]),
                                         "safeTextX": r["safe_rect"][0],
                                         "safeTextY": r["safe_rect"][1],
@@ -932,9 +932,9 @@ def process_ocr(job_data):
                                     "bubbleX": r["x"],
                                     "bubbleY": r["y"],
                                     "bubbleWidth": r["width"],
-                                    "bubbleHeight": r["height"],
-                                    "bubbleId": f"direct_text_{r['direct_idx']}",
-                                    "detectionConfidence": 0.0,
+                                    "bubbleHeight": r.get("bubbleHeight", r["height"]),
+                                    "bubbleId": f"direct_text_{r.get('direct_idx', r.get('bubble_idx'))}",
+                                    "detectionConfidence": r.get("bubble", {}).get("confidence", 0.0),
                                     "maskPolygon": json.dumps(r["poly_pts"]),
                                     "safeTextX": r["safe_rect"][0],
                                     "safeTextY": r["safe_rect"][1],

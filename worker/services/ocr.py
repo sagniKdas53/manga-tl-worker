@@ -79,7 +79,7 @@ def parse_paddle_ocr_results(raw_results):
     return results
 
 
-def try_cloud_ocr(img_crop_bytes, provider, api_key, model):
+def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None):
     import base64
 
     base64_image = base64.b64encode(img_crop_bytes).decode("utf-8")
@@ -87,9 +87,15 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model):
         "Respond with a JSON object containing the text shown in this image "
         "and your confidence score. Use the format: "
         '{"text": "<extracted text>", "confidence": <0.0-1.0>}. '
-        'If there is no text, use {"text": "", "confidence": 0.0}. '
+        'If there is no text, or if the text is a sound effect (SFX), gibberish, an author handle, or already completely in English, return an empty string for text: {"text": "", "confidence": 0.0}. '
         "Do not add any explanations or notes outside the JSON."
     )
+    
+    if qa_feedback:
+        if qa_feedback == "user_rejected":
+            prompt += "\nNote: The user rejected the previous OCR result. Please provide a clean, accurate extraction."
+        else:
+            prompt += f"\nNote: The QA reviewer rejected the previous extraction with this feedback: '{qa_feedback}'. Please fix the issue."
 
     url = ""
     headers = {}
@@ -233,7 +239,7 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model):
     return None
 
 
-def perform_redo_ocr(img_crop_bytes, lang):
+def perform_redo_ocr(img_crop_bytes, lang, qa_feedback=None):
     from worker.config import OCR_CONFIG
 
     provider = OCR_CONFIG.provider
@@ -257,7 +263,7 @@ def perform_redo_ocr(img_crop_bytes, lang):
                     f"[OCR Redo] Trying Cloud AI OCR with provider '{provider}' and model '{current_model}'...",
                     flush=True,
                 )
-                result = try_cloud_ocr(img_crop_bytes, provider, api_key, current_model)
+                result = try_cloud_ocr(img_crop_bytes, provider, api_key, current_model, qa_feedback=qa_feedback)
                 if result:
                     text, confidence = result
                     if text and is_valid_ocr_text(text):

@@ -128,16 +128,19 @@ def detect_bubbles_yolo(img):
     boxes = []
     scores = []
     coefficients = []
+    class_ids = []
 
     for i in range(preds.shape[1]):
-        score = preds[4, i]
+        score = np.max(preds[4:7, i])
         if score >= YOLO_CONF_THRESHOLD:
+            class_id = int(np.argmax(preds[4:7, i]))
             cx, cy, w, h = preds[0:4, i]
             x = cx - w / 2
             y = cy - h / 2
             boxes.append([float(x), float(y), float(w), float(h)])
             scores.append(float(score))
-            coefficients.append(preds[5:, i].tolist())
+            coefficients.append(preds[7:, i].tolist())
+            class_ids.append(class_id)
 
     if not boxes:
         logger.info(f"[YOLO] No bubbles detected. Inference took {time.perf_counter() - start_time:.3f}s")
@@ -155,6 +158,14 @@ def detect_bubbles_yolo(img):
         box = boxes[idx]  # [x, y, w, h] in 1280x1280 padded image space
         coeff = np.array(coefficients[idx])
         score = scores[idx]
+        class_id = class_ids[idx]
+        
+        if class_id == 0:
+            class_name = "frame"
+        elif class_id == 1:
+            class_name = "text"
+        else:
+            class_name = "balloon"
 
         # Generate mask on 320x320 grid
         mask_grid = (coeff @ proto.reshape(32, -1)).reshape(320, 320)
@@ -231,6 +242,8 @@ def detect_bubbles_yolo(img):
             {
                 "bbox": [bx_clean, by_clean, bw_clean, bh_clean],
                 "confidence": float(score),
+                "class_id": class_id,
+                "class_name": class_name,
                 "mask_polygon": mask_polygon,
                 "safe_rect": [x_s, y_s, w_s, h_s],
             }

@@ -35,7 +35,7 @@ QA_JSON_SCHEMA = {
                     "regionId": {"type": "string"},
                     "qaStatus": {
                         "type": "string",
-                        "enum": ["passed", "failed", "direct_fix"],
+                        "enum": ["passed", "failed", "direct_fix", "reject_sfx"],
                     },
                     "qaScore": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                     "qaFeedback": {"type": "string"},
@@ -166,6 +166,7 @@ For each region in the provided metadata, evaluate and check if:
 Status categories:
 - "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed (e.g. translation is highly accurate, natural English).
 - "direct_fix": Small/cosmetic adjustment (e.g. minor typo fix or slightly better phrasing) that you can prescribe directly. You must supply "directFix" object with correctedText. You MUST also provide detailed reasoning in "qaFeedback".
+- "reject_sfx": The region contains a Sound Effect (SFX), background noise, gibberish, or an author handle rather than dialogue. Use this to flag the region for removal.
 - "failed": Translation error requiring a translation re-run. Specify "qaFeedback" with detailed correction notes/feedback to guide the re-translation.
 
 IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
@@ -374,6 +375,7 @@ For each region in the provided metadata, evaluate and check if:
 Status categories:
 - "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed (e.g., text fitting is perfect, translation is highly accurate, layout looks clean).
 - "direct_fix": Small/cosmetic adjustment (e.g. slight text wrap tweak or minor font size reduction) that you can prescribe directly. You must supply "directFix" object with correctedText or suggestedFontSize. You MUST also provide detailed reasoning in "qaFeedback".
+- "reject_sfx": The region contains a Sound Effect (SFX), background noise, gibberish, or an author handle rather than dialogue. Use this to flag the region for removal.
 - "failed": Major translation error or layout issue requiring a translation/typesetting re-run. Specify "qaFeedback" with detailed correction notes.
 
 IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
@@ -648,6 +650,7 @@ For each region in the provided metadata, evaluate and check if:
 Status categories:
 - "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed (e.g. translation is highly accurate, natural English).
 - "direct_fix": Small/cosmetic adjustment (e.g. minor typo fix or slightly better phrasing) that you can prescribe directly. You must supply "directFix" object with correctedText. You MUST also provide detailed reasoning in "qaFeedback".
+- "reject_sfx": The region contains a Sound Effect (SFX), background noise, gibberish, or an author handle rather than dialogue. Use this to flag the region for removal.
 - "failed": Translation error requiring a translation re-run. Specify "qaFeedback" with detailed correction notes/feedback to guide the re-translation.
 
 IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
