@@ -586,7 +586,7 @@ def process_ocr(job_data):
                     )
 
                     # Generate tight padded "virtual bubble" mask to allow typesetter inpainting / background cleaning
-                    pad = 6
+                    pad = 0
                     px1 = max(0, rx - pad)
                     py1 = max(0, ry - pad)
                     px2 = min(img_w, rx + rw + pad)
