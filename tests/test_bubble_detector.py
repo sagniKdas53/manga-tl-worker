@@ -89,8 +89,8 @@ def test_detect_bubbles_yolo_empty_predictions(mock_get_session):
     mock_session.get_inputs.return_value = [MagicMock(name="input_name")]
 
     # Mocking inference to return empty or low confidence predictions
-    # preds: [1, 37, 33600]
-    preds = np.zeros((1, 37, 100), dtype=np.float32)
+    # preds: [1, 39, 33600]
+    preds = np.zeros((1, 39, 100), dtype=np.float32)
     proto = np.zeros((1, 32, 320, 320), dtype=np.float32)
     mock_session.run.return_value = [preds, proto]
 
@@ -108,11 +108,11 @@ def test_detect_bubbles_yolo_with_predictions(mock_nms, mock_get_session):
     mock_session.get_inputs.return_value = [MagicMock(name="input_name")]
 
     # Valid prediction with confidence > threshold (e.g. 0.5)
-    preds = np.zeros((1, 37, 10), dtype=np.float32)
-    # Set one prediction to have high confidence
-    preds[0, 4, 0] = 0.9  # score
+    preds = np.zeros((1, 39, 10), dtype=np.float32)
+    # Set one prediction to have high confidence for class_id 1 ("text")
+    preds[0, 5, 0] = 0.9  # score for class 1
     preds[0, 0:4, 0] = [50, 50, 20, 20]  # cx, cy, w, h
-    preds[0, 5:, 0] = np.random.rand(32)  # coefficients
+    preds[0, 7:, 0] = np.random.rand(32)  # coefficients
 
     proto = np.random.rand(1, 32, 320, 320).astype(np.float32)
     mock_session.run.return_value = [preds, proto]

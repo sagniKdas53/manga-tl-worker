@@ -90,7 +90,7 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None):
         'If there is no text, or if the text is a sound effect (SFX), gibberish, an author handle, or already completely in English, return an empty string for text: {"text": "", "confidence": 0.0}. '
         "Do not add any explanations or notes outside the JSON."
     )
-    
+
     if qa_feedback:
         if qa_feedback == "user_rejected":
             prompt += "\nNote: The user rejected the previous OCR result. Please provide a clean, accurate extraction."

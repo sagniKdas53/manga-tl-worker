@@ -49,7 +49,7 @@ def test_detect_background_color_poly():
 
 def test_get_split_polygon():
     mask = np.zeros((100, 100), dtype=np.uint8)
-    cv2.rectangle(mask, (10, 10), (50, 50), 255, -1)
+    cv2.rectangle(mask, (10, 10), (50, 50), 255, -1)  # type: ignore
 
     poly = get_split_polygon(mask, (20, 20, 10, 10), 100, 100)
     assert poly is not None
@@ -60,7 +60,7 @@ def test_get_split_polygon():
 
 def test_detect_bubble_contour():
     img = np.zeros((100, 100, 3), dtype=np.uint8)
-    cv2.circle(img, (50, 50), 30, (255, 255, 255), -1)
+    cv2.circle(img, (50, 50), 30, (255, 255, 255), -1)  # type: ignore
 
     _ = detect_bubble_contour(img, 45, 45, 10, 10)
     # the function is just returning None or contour bbox depending on if it finds white background contour

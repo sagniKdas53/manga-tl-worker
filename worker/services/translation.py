@@ -461,8 +461,8 @@ def try_cloud_ai(provider, api_key, model, prompt, response_schema=None, request
 
         except Exception as e:
             logger.error(f"{req_prefix}Cloud LLM Translation failed: {e}")
-            if "response" in locals() and hasattr(response, "text"):
-                logger.error(f"Response text: {response.text}")
+            if "response" in locals() and hasattr(response, "text"):  # type: ignore
+                logger.error(f"Response text: {response.text}")  # type: ignore
             return None
 
 
@@ -608,8 +608,8 @@ def try_cloud_ai_vision(
 
         except Exception as e:
             logger.error(f"{req_prefix}Vision Translation failed: {e}")
-            if "response" in locals() and hasattr(response, "text"):
-                logger.error(f"Response text: {response.text}")
+            if "response" in locals() and hasattr(response, "text"):  # type: ignore
+                logger.error(f"Response text: {response.text}")  # type: ignore
             return None
 
 
@@ -764,8 +764,8 @@ def try_cloud_ai_vision_batch(
 
         except Exception as e:
             logger.error(f"{req_prefix}Vision Batch OCR failed: {e}")
-            if "response" in locals() and hasattr(response, "text"):
-                logger.error(f"Response text: {response.text}")
+            if "response" in locals() and hasattr(response, "text"):  # type: ignore
+                logger.error(f"Response text: {response.text}")  # type: ignore
             return None
 
 
@@ -828,8 +828,8 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
             return data.get("choices", [{}])[0].get("message", {}).get("content", "")
         except Exception as e:
             logger.error(f"{req_prefix}Local AI connection failed for '{endpoint}': {e}")
-            if "response" in locals() and hasattr(response, "text"):
-                logger.error(f"Response text: {response.text}")
+            if "response" in locals() and hasattr(response, "text"):  # type: ignore
+                logger.error(f"Response text: {response.text}")  # type: ignore
 
     return None
 

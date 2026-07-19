@@ -159,7 +159,7 @@ def detect_bubbles_yolo(img):
         coeff = np.array(coefficients[idx])
         score = scores[idx]
         class_id = class_ids[idx]
-        
+
         if class_id == 0:
             class_name = "frame"
         elif class_id == 1:
@@ -201,7 +201,7 @@ def detect_bubbles_yolo(img):
 
         # Get Contour
         contours, _ = cv2.findContours(cleaned_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
+        if not contours:  # type: ignore
             continue
 
         # Use the largest contour

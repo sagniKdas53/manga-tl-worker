@@ -811,7 +811,7 @@ def process_ocr(job_data):
 
                     # Create regions list
                     for cr_idx, r in enumerate(candidate_regions):
-                        entry = transcriptions.get(f"region_{cr_idx}", {})
+                        entry = transcriptions.get(f"region_{cr_idx}", {})  # type: ignore
                         final_text = entry.get("text", "").strip()
                         model_conf = entry.get("confidence", 0.99)
                         if final_text:
