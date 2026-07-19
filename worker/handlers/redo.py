@@ -100,7 +100,7 @@ def process_region_redo(job_data):
                 _is_success, buffer = cv2.imencode(".jpg", crop)
                 crop_bytes = buffer.tobytes()
 
-                text, confidence = perform_redo_ocr(crop_bytes, region["detectedLanguage"])
+                text, confidence = perform_redo_ocr(crop_bytes, region["detectedLanguage"], "user_rejected")
                 detected_lang = detect_language(text)
                 callback_payload["text"] = text
                 callback_payload["confidence"] = confidence

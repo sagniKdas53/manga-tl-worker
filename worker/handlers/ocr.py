@@ -670,7 +670,8 @@ def process_ocr(job_data):
                         lang_name = LANG_MAP.get(source_language.lower(), source_language)
                         sys_prompt = (
                             f"You are an expert manga OCR system. Perform OCR on each of the provided image crops. "
-                            f"The source language is {lang_name}. Return ONLY a valid JSON object matching the schema."
+                            f"The source language is {lang_name}. Return ONLY a valid JSON object matching the schema. "
+                            "If the text is a sound effect (SFX), gibberish, an author handle, or already completely in English, return an empty string for the text field."
                         )
 
                         transcriptions = {}

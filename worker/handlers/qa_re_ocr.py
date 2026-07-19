@@ -65,7 +65,8 @@ def process_qa_re_ocr(job_data):
                     _is_success, buffer = cv2.imencode(".jpg", crop)
                     crop_bytes = buffer.tobytes()
 
-                    text, confidence = perform_redo_ocr(crop_bytes, region["detectedLanguage"])
+                    qa_feedback = region.get("qaFeedback")
+                    text, confidence = perform_redo_ocr(crop_bytes, region["detectedLanguage"], qa_feedback)
                     detected_lang = detect_language(text)
 
                     results.append(

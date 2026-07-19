@@ -35,7 +35,7 @@ QA_JSON_SCHEMA = {
                     "regionId": {"type": "string"},
                     "qaStatus": {
                         "type": "string",
-                        "enum": ["passed", "failed", "direct_fix"],
+                        "enum": ["passed", "failed", "direct_fix", "reject_sfx"],
                     },
                     "qaScore": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                     "qaFeedback": {"type": "string"},
@@ -99,6 +99,11 @@ def process_qa(job_data):
         f"[QA] Processing image: {image_id}{progress_str} (mode={qa_mode_resolved})",
         flush=True,
     )
+
+    if job_data.get("qaAttempt", 0) > 0:
+        print("[QA] Skipping QA because qaAttempt > 0 (One pass only to prevent loops)", flush=True)
+        _auto_pass_all(job_data)
+        return
 
     if qa_mode_resolved == "none":
         _auto_pass_all(job_data)
@@ -164,9 +169,10 @@ For each region in the provided metadata, evaluate and check if:
 4. The reading order/bubble sequence is incorrect (flag with orderBad=true and provide suggestedReadingOrderIndex).
 
 Status categories:
-- "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed (e.g. translation is highly accurate, natural English).
-- "direct_fix": Small/cosmetic adjustment (e.g. minor typo fix or slightly better phrasing) that you can prescribe directly. You must supply "directFix" object with correctedText. You MUST also provide detailed reasoning in "qaFeedback".
-- "failed": Translation error requiring a translation re-run. Specify "qaFeedback" with detailed correction notes/feedback to guide the re-translation.
+- "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed.
+- "direct_fix": If you have a better translation, output it directly. You must supply "directFix" object with correctedText. You MUST also provide detailed reasoning in "qaFeedback".
+- "reject_sfx": If the region is a sound effect (SFX) or gibberish that shouldn't be translated, set this status (downstream will hide the element).
+- "failed": Translation error requiring a translation re-run. Specify "qaFeedback" with detailed correction notes/feedback to guide the re-translation. Your output must be strictly better. Do not send back the exact same text if flagging an error.
 
 IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
 
@@ -372,9 +378,10 @@ For each region in the provided metadata, evaluate and check if:
 5. The reading order/bubble sequence is incorrect (flag with orderBad=true and provide suggestedReadingOrderIndex).
 
 Status categories:
-- "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed (e.g., text fitting is perfect, translation is highly accurate, layout looks clean).
-- "direct_fix": Small/cosmetic adjustment (e.g. slight text wrap tweak or minor font size reduction) that you can prescribe directly. You must supply "directFix" object with correctedText or suggestedFontSize. You MUST also provide detailed reasoning in "qaFeedback".
-- "failed": Major translation error or layout issue requiring a translation/typesetting re-run. Specify "qaFeedback" with detailed correction notes.
+- "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed.
+- "direct_fix": If you have a better translation, output it directly. You must supply "directFix" object with correctedText or suggestedFontSize. You MUST also provide detailed reasoning in "qaFeedback".
+- "reject_sfx": If the region is a sound effect (SFX) or gibberish that shouldn't be translated, set this status (downstream will hide the element).
+- "failed": Major translation error or layout issue requiring a translation/typesetting re-run. Specify "qaFeedback" with detailed correction notes. Your output must be strictly better. Do not send back the exact same text if flagging an error.
 
 IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
 
@@ -646,9 +653,10 @@ For each region in the provided metadata, evaluate and check if:
 4. The reading order/bubble sequence is incorrect (flag with orderBad=true and provide suggestedReadingOrderIndex).
 
 Status categories:
-- "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed (e.g. translation is highly accurate, natural English).
-- "direct_fix": Small/cosmetic adjustment (e.g. minor typo fix or slightly better phrasing) that you can prescribe directly. You must supply "directFix" object with correctedText. You MUST also provide detailed reasoning in "qaFeedback".
-- "failed": Translation error requiring a translation re-run. Specify "qaFeedback" with detailed correction notes/feedback to guide the re-translation.
+- "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed.
+- "direct_fix": If you have a better translation, output it directly. You must supply "directFix" object with correctedText. You MUST also provide detailed reasoning in "qaFeedback".
+- "reject_sfx": If the region is a sound effect (SFX) or gibberish that shouldn't be translated, set this status (downstream will hide the element).
+- "failed": Translation error requiring a translation re-run. Specify "qaFeedback" with detailed correction notes/feedback to guide the re-translation. Your output must be strictly better. Do not send back the exact same text if flagging an error.
 
 IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
 
@@ -897,9 +905,10 @@ For each region in the provided metadata, evaluate and check if:
 5. The reading order/bubble sequence is incorrect (flag with orderBad=true and provide suggestedReadingOrderIndex).
 
 Status categories:
-- "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed (e.g., text fitting is perfect, translation is highly accurate, layout looks clean).
-- "direct_fix": Small/cosmetic adjustment (e.g. slight text wrap tweak or minor font size reduction) that you can prescribe directly. You must supply "directFix" object with correctedText or suggestedFontSize. You MUST also provide detailed reasoning in "qaFeedback".
-- "failed": Major translation error or layout issue requiring a translation/typesetting re-run. Specify "qaFeedback" with detailed correction notes.
+- "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed.
+- "direct_fix": If you have a better translation, output it directly. You must supply "directFix" object with correctedText or suggestedFontSize. You MUST also provide detailed reasoning in "qaFeedback".
+- "reject_sfx": If the region is a sound effect (SFX) or gibberish that shouldn't be translated, set this status (downstream will hide the element).
+- "failed": Major translation error or layout issue requiring a translation/typesetting re-run. Specify "qaFeedback" with detailed correction notes. Your output must be strictly better. Do not send back the exact same text if flagging an error.
 
 IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
 

@@ -31,3 +31,7 @@ def test_excessive_repetition_translation():
     assert is_valid_translation("あそこ", "Over there Over there Over there Over there") is False
     # Normal repeated words are fine if context allows
     assert is_valid_translation("バイバイ", "Bye bye") is True
+
+def test_identical_translation():
+    assert is_valid_translation("hello", "hello") is True
+    assert is_valid_translation("こんにちは", "こんにちは") is False
