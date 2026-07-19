@@ -130,17 +130,35 @@ def detect_bubbles_yolo(img):
     coefficients = []
     class_ids = []
 
-    for i in range(preds.shape[1]):
-        score = np.max(preds[4:7, i])
-        if score >= YOLO_CONF_THRESHOLD:
-            class_id = int(np.argmax(preds[4:7, i]))
-            cx, cy, w, h = preds[0:4, i]
-            x = cx - w / 2
-            y = cy - h / 2
-            boxes.append([float(x), float(y), float(w), float(h)])
-            scores.append(float(score))
-            coefficients.append(preds[7:, i].tolist())
-            class_ids.append(class_id)
+    is_nms_exported = (len(preds.shape) == 2 and preds.shape[1] == 38)
+    
+    if is_nms_exported:
+        # NMS is built-in: [max_det, 38] -> [x1, y1, x2, y2, score, class_id, mask_0..31]
+        for i in range(preds.shape[0]):
+            score = float(preds[i, 4])
+            if score >= YOLO_CONF_THRESHOLD:
+                x1, y1, x2, y2 = preds[i, 0:4]
+                w, h = x2 - x1, y2 - y1
+                class_id = int(preds[i, 5])
+                boxes.append([float(x1), float(y1), float(w), float(h)])
+                scores.append(score)
+                coefficients.append(preds[i, 6:38].tolist())
+                class_ids.append(class_id)
+    else:
+        # Standard format: [channels, anchors] -> [cx, cy, w, h, class_0..n, mask_0..31]
+        for i in range(preds.shape[1]):
+            num_classes = preds.shape[0] - 36  # 4 box + 32 mask
+            cls_scores = preds[4:4+num_classes, i]
+            score = np.max(cls_scores)
+            if score >= YOLO_CONF_THRESHOLD:
+                class_id = int(np.argmax(cls_scores))
+                cx, cy, w, h = preds[0:4, i]
+                x = cx - w / 2
+                y = cy - h / 2
+                boxes.append([float(x), float(y), float(w), float(h)])
+                scores.append(float(score))
+                coefficients.append(preds[4+num_classes:, i].tolist())
+                class_ids.append(class_id)
 
     if not boxes:
         logger.info(f"[YOLO] No bubbles detected. Inference took {time.perf_counter() - start_time:.3f}s")
