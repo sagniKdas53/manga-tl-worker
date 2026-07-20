@@ -92,7 +92,8 @@ def update_model_costs(models=None):
     try:
         keys = redis_client.keys("model_cost:*")
         for key in keys:
-            model = key.decode("utf-8").split(":", 1)[1]
+            key_text = key.decode("utf-8") if isinstance(key, bytes) else key
+            model = key_text.split(":", 1)[1]
             data = redis_client.get(key)
             if data:
                 parsed = json.loads(data)

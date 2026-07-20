@@ -722,7 +722,7 @@ def render_image_core(image_id):
 
         # Save local copy in render cache
         from worker.config import RENDER_CACHE_DIR
-        
+
         if os.environ.get("ENABLE_QA_AUDIT_CACHE", "false").lower() in ("true", "1", "yes"):
             os.makedirs(RENDER_CACHE_DIR, exist_ok=True)
             cache_path = os.path.join(RENDER_CACHE_DIR, f"{image_id}.png")

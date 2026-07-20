@@ -619,6 +619,7 @@ def process_ocr(job_data):
                     )
                     provider = job_data.get("ocrProvider") or OCR_CONFIG.provider
                     api_key = OCR_CONFIG.resolve_key(provider)
+                    routing_strategy = job_data.get("routingStrategy") or "lowest-cost"
 
                     # Generate base64 crops for all candidate regions
                     crops_payload = []
@@ -700,6 +701,7 @@ def process_ocr(job_data):
                                 and api_key
                             ):
                                 from worker.config import OCR_CONFIG
+
                                 user_model = vlm_model or OCR_CONFIG.vlm_model
                                 try:
                                     chunk_res = try_cloud_ai_vision_batch(
@@ -709,6 +711,7 @@ def process_ocr(job_data):
                                         chunk,
                                         schema,
                                         system_prompt=sys_prompt,
+                                        routing_strategy=routing_strategy,
                                     )
                                     if chunk_res:
                                         parsed = json.loads(
@@ -721,13 +724,16 @@ def process_ocr(job_data):
                                                 flush=True,
                                             )
                                             vlm_model_used = user_model
-                                            
+
                                     if not chunk_res or not results_list:
                                         # Fallback to global default model
                                         global_model = OCR_CONFIG.vlm_model
                                         global_provider = OCR_CONFIG.provider
                                         if global_provider == provider and global_model and global_model != user_model:
-                                            print(f"[OCR] Falling back to global default VLM model '{global_model}'...", flush=True)
+                                            print(
+                                                f"[OCR] Falling back to global default VLM model '{global_model}'...",
+                                                flush=True,
+                                            )
                                             chunk_res = try_cloud_ai_vision_batch(
                                                 provider,
                                                 api_key,
@@ -735,10 +741,14 @@ def process_ocr(job_data):
                                                 chunk,
                                                 schema,
                                                 system_prompt=sys_prompt,
+                                                routing_strategy=routing_strategy,
                                             )
                                             if chunk_res:
                                                 parsed = json.loads(
-                                                    chunk_res.strip().removeprefix("```json").removesuffix("```").strip()
+                                                    chunk_res.strip()
+                                                    .removeprefix("```json")
+                                                    .removesuffix("```")
+                                                    .strip()
                                                 )
                                                 results_list = parsed.get("results", [])
                                                 if results_list:
@@ -748,7 +758,10 @@ def process_ocr(job_data):
                                                     )
                                                     vlm_model_used = global_model
                                         else:
-                                            print(f"[OCR] No fallback applied (global provider different or model identical).", flush=True)
+                                            print(
+                                                "[OCR] No fallback applied (global provider different or model identical).",
+                                                flush=True,
+                                            )
 
                                 except Exception as parse_err:
                                     print(

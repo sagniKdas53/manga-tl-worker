@@ -183,6 +183,7 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     provider = job_data.get("qaProvider") or QA_CONFIG.provider
     api_key = QA_CONFIG.resolve_key(provider)
+    routing_strategy = job_data.get("routingStrategy") or "lowest-cost"
 
     qa_response = None
 
@@ -191,7 +192,9 @@ You MUST return a JSON object containing a "results" key with an array of object
         if prov == "openrouter" and api_key:
             llm_model = user_model if user_model else "meta-llama/llama-3-8b-instruct:free"
             try:
-                return try_cloud_ai("openrouter", api_key, llm_model, prompt, QA_JSON_SCHEMA, routing_strategy=routing_strategy)
+                return try_cloud_ai(
+                    "openrouter", api_key, llm_model, prompt, QA_JSON_SCHEMA, routing_strategy=routing_strategy
+                )
             except Exception as e:
                 print(
                     f"[QA] LLM QA via OpenRouter with model '{llm_model}' failed: {e}",
@@ -219,18 +222,18 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     # Try preferred provider/models
     if provider:
-        user_model = job_data.get("qaLlmModel") or getattr(QA_CONFIG, "llm_model")
+        user_model = job_data.get("qaLlmModel") or QA_CONFIG.llm_model
         qa_response = attempt_llm(provider, user_model)
-        
+
         if not qa_response:
             # Fallback to global default model
-            global_model = getattr(QA_CONFIG, "llm_model")
-            global_provider = getattr(QA_CONFIG, "provider")
+            global_model = QA_CONFIG.llm_model
+            global_provider = QA_CONFIG.provider
             if global_provider == provider and global_model and global_model != user_model:
                 print(f"[QA] Falling back to global default model '{global_model}'...", flush=True)
                 qa_response = attempt_llm(provider, global_model)
             else:
-                print(f"[QA] No fallback applied (global provider different or model identical).", flush=True)
+                print("[QA] No fallback applied (global provider different or model identical).", flush=True)
 
     local_llm_model = os.environ.get("LOCAL_LLM_MODEL", "").strip()
     disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
@@ -332,9 +335,11 @@ You MUST return a JSON object containing a "results" key with an array of object
         combined_buf = io.BytesIO()
         combined_img.save(combined_buf, format="JPEG", quality=85)
         combined_base64 = base64.b64encode(combined_buf.getvalue()).decode("utf-8")
-        
-        from worker.config import ENABLE_QA_AUDIT_CACHE, QA_AUDIT_CACHE_DIR
+
         import time
+
+        from worker.config import ENABLE_QA_AUDIT_CACHE, QA_AUDIT_CACHE_DIR
+
         if ENABLE_QA_AUDIT_CACHE:
             try:
                 os.makedirs(QA_AUDIT_CACHE_DIR, exist_ok=True)
@@ -392,6 +397,7 @@ Region Metadata:
 You MUST return a JSON object containing a "results" key with an array of objects conforming to the requested schema. No other text."""
 
     vlm_api_key = QA_CONFIG.resolve_key(provider)
+    routing_strategy = job_data.get("routingStrategy") or "lowest-cost"
     qa_response_vlm = None
 
     def attempt_vlm(prov, model_override=None):
@@ -406,6 +412,7 @@ You MUST return a JSON object containing a "results" key with an array of object
                     prompt_vlm,
                     combined_base64,
                     QA_JSON_SCHEMA,
+                    routing_strategy=routing_strategy,
                 )
             except Exception as e:
                 print(
@@ -422,6 +429,7 @@ You MUST return a JSON object containing a "results" key with an array of object
                     prompt_vlm,
                     combined_base64,
                     QA_JSON_SCHEMA,
+                    routing_strategy=routing_strategy,
                 )
             except Exception as e:
                 print(
@@ -438,6 +446,7 @@ You MUST return a JSON object containing a "results" key with an array of object
                     prompt_vlm,
                     combined_base64,
                     QA_JSON_SCHEMA,
+                    routing_strategy=routing_strategy,
                 )
             except Exception as e:
                 print(
@@ -449,7 +458,7 @@ You MUST return a JSON object containing a "results" key with an array of object
     if provider:
         user_model = job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
         qa_response_vlm = attempt_vlm(provider, user_model)
-        
+
         if not qa_response_vlm:
             global_model = QA_CONFIG.vlm_model
             global_provider = QA_CONFIG.provider
@@ -457,7 +466,7 @@ You MUST return a JSON object containing a "results" key with an array of object
                 print(f"[QA] Falling back to global default VLM model '{global_model}'...", flush=True)
                 qa_response_vlm = attempt_vlm(provider, global_model)
             else:
-                print(f"[QA] No fallback applied (global provider different or model identical).", flush=True)
+                print("[QA] No fallback applied (global provider different or model identical).", flush=True)
 
     local_vlm_model = os.environ.get("LOCAL_VLM_MODEL", "").strip()
 
@@ -658,6 +667,7 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     provider = job_data.get("qaProvider") or QA_CONFIG.provider
     api_key = QA_CONFIG.resolve_key(provider)
+    routing_strategy = job_data.get("routingStrategy") or "lowest-cost"
 
     qa_response = None
 
@@ -666,7 +676,9 @@ You MUST return a JSON object containing a "results" key with an array of object
         if prov == "openrouter" and api_key:
             llm_model = user_model if user_model else "meta-llama/llama-3-8b-instruct:free"
             try:
-                return try_cloud_ai("openrouter", api_key, llm_model, prompt, QA_JSON_SCHEMA, routing_strategy=routing_strategy)
+                return try_cloud_ai(
+                    "openrouter", api_key, llm_model, prompt, QA_JSON_SCHEMA, routing_strategy=routing_strategy
+                )
             except Exception as e:
                 print(
                     f"[QA] LLM QA via OpenRouter with model '{llm_model}' failed: {e}",
@@ -705,7 +717,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         if provider:
             user_model = job_data.get("qaLlmModel") or QA_CONFIG.llm_model
             qa_response = attempt_llm(provider, user_model)
-            
+
             if not qa_response:
                 global_model = QA_CONFIG.llm_model
                 global_provider = QA_CONFIG.provider
@@ -713,7 +725,7 @@ You MUST return a JSON object containing a "results" key with an array of object
                     print(f"[QA] Falling back to global default LLM model '{global_model}'...", flush=True)
                     qa_response = attempt_llm(provider, global_model)
                 else:
-                    print(f"[QA] No fallback applied (global provider different or model identical).", flush=True)
+                    print("[QA] No fallback applied (global provider different or model identical).", flush=True)
 
     results = []
     if logger.isEnabledFor(logging.DEBUG) and qa_response:
@@ -838,9 +850,11 @@ def _process_qa_vlm(job_data):
         combined_buf = io.BytesIO()
         combined_img.save(combined_buf, format="JPEG", quality=85)
         combined_base64 = base64.b64encode(combined_buf.getvalue()).decode("utf-8")
-        
-        from worker.config import ENABLE_QA_AUDIT_CACHE, QA_AUDIT_CACHE_DIR
+
         import time
+
+        from worker.config import ENABLE_QA_AUDIT_CACHE, QA_AUDIT_CACHE_DIR
+
         if ENABLE_QA_AUDIT_CACHE:
             try:
                 os.makedirs(QA_AUDIT_CACHE_DIR, exist_ok=True)
@@ -903,6 +917,7 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     provider = job_data.get("qaProvider") or QA_CONFIG.provider
     api_key = QA_CONFIG.resolve_key(provider)
+    routing_strategy = job_data.get("routingStrategy") or "lowest-cost"
 
     qa_response = None
 
@@ -918,6 +933,7 @@ You MUST return a JSON object containing a "results" key with an array of object
                     prompt,
                     combined_base64,
                     QA_JSON_SCHEMA,
+                    routing_strategy=routing_strategy,
                 )
             except Exception as e:
                 print(
@@ -934,6 +950,7 @@ You MUST return a JSON object containing a "results" key with an array of object
                     prompt,
                     combined_base64,
                     QA_JSON_SCHEMA,
+                    routing_strategy=routing_strategy,
                 )
             except Exception as e:
                 print(
@@ -950,6 +967,7 @@ You MUST return a JSON object containing a "results" key with an array of object
                     prompt,
                     combined_base64,
                     QA_JSON_SCHEMA,
+                    routing_strategy=routing_strategy,
                 )
             except Exception as e:
                 print(
@@ -971,7 +989,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         if provider:
             user_model = job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
             qa_response = attempt_vlm(provider, user_model)
-            
+
             if not qa_response:
                 global_model = QA_CONFIG.vlm_model
                 global_provider = QA_CONFIG.provider
@@ -979,7 +997,7 @@ You MUST return a JSON object containing a "results" key with an array of object
                     print(f"[QA] Falling back to global default VLM model '{global_model}'...", flush=True)
                     qa_response = attempt_vlm(provider, global_model)
                 else:
-                    print(f"[QA] No fallback applied (global provider different or model identical).", flush=True)
+                    print("[QA] No fallback applied (global provider different or model identical).", flush=True)
 
     # VLM Evaluation Fail-Safe Fallback:
     # If all configured/active VLM options fail to return a parseable response,

@@ -311,20 +311,17 @@ def parse_and_validate_batch(response_text, unmatched_regions):
 PROVIDER_COOLDOWNS = {}
 
 
-
 def _inject_openrouter_routing(provider, routing_strategy, payload):
     if provider == "openrouter":
         if routing_strategy == "lowest-cost":
             payload["provider"] = {
                 "allow_fallbacks": False,
                 "sort": "price",
-                "order": ["StreamLake", "NovitaAI", "Baidu Qianfan", "Decart"]
+                "order": ["StreamLake", "NovitaAI", "Baidu Qianfan", "Decart"],
             }
         elif routing_strategy == "highest-throughput":
-            payload["provider"] = {
-                "allow_fallbacks": True,
-                "sort": "throughput"
-            }
+            payload["provider"] = {"allow_fallbacks": True, "sort": "throughput"}
+
 
 def wait_for_cooldown(provider, max_wait=60):
     global PROVIDER_COOLDOWNS
@@ -423,7 +420,6 @@ def try_cloud_ai(provider, api_key, model, prompt, response_schema=None, request
                 if provider == "openrouter":
                     payload["plugins"] = [{"id": "response-healing"}]
 
-
     _inject_openrouter_routing(provider, routing_strategy, payload)
     max_retries = 3
     base_backoff = 2.0
@@ -482,10 +478,14 @@ def try_cloud_ai(provider, api_key, model, prompt, response_schema=None, request
 
         except requests.exceptions.RequestException as e:
             status_code = getattr(e.response, "status_code", None) if hasattr(e, "response") else None
-            is_transient = isinstance(e, requests.exceptions.Timeout) or isinstance(e, requests.exceptions.ConnectionError) or status_code in (429, 500, 502, 503, 504)
+            is_transient = isinstance(
+                e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
+            ) or status_code in (429, 500, 502, 503, 504)
             if is_transient and attempt < max_retries:
                 sleep_time = base_backoff * (2**attempt)
-                logger.warning(f"{req_prefix}Provider '{provider}' transient error: {e}. Retrying in {sleep_time:.2f}s...")
+                logger.warning(
+                    f"{req_prefix}Provider '{provider}' transient error: {e}. Retrying in {sleep_time:.2f}s..."
+                )
                 time.sleep(sleep_time)
                 continue
             logger.error(f"{req_prefix}Cloud LLM Translation failed: {e}")
@@ -506,6 +506,7 @@ def try_cloud_ai_vision(
     response_schema=None,
     system_prompt=None,
     request_id=None,
+    routing_strategy=None,
 ):
     req_prefix = f"[{request_id}] " if request_id else ""
     global PROVIDER_COOLDOWNS
@@ -586,7 +587,6 @@ def try_cloud_ai_vision(
                 if provider == "openrouter":
                     payload["plugins"] = [{"id": "response-healing"}]
 
-
     _inject_openrouter_routing(provider, routing_strategy, payload)
     max_retries = 3
     base_backoff = 2.0
@@ -642,10 +642,14 @@ def try_cloud_ai_vision(
 
         except requests.exceptions.RequestException as e:
             status_code = getattr(e.response, "status_code", None) if hasattr(e, "response") else None
-            is_transient = isinstance(e, requests.exceptions.Timeout) or isinstance(e, requests.exceptions.ConnectionError) or status_code in (429, 500, 502, 503, 504)
+            is_transient = isinstance(
+                e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
+            ) or status_code in (429, 500, 502, 503, 504)
             if is_transient and attempt < max_retries:
                 sleep_time = base_backoff * (2**attempt)
-                logger.warning(f"{req_prefix}Provider '{provider}' transient error: {e}. Retrying in {sleep_time:.2f}s...")
+                logger.warning(
+                    f"{req_prefix}Provider '{provider}' transient error: {e}. Retrying in {sleep_time:.2f}s..."
+                )
                 time.sleep(sleep_time)
                 continue
             logger.error(f"{req_prefix}Vision Translation failed: {e}")
@@ -665,6 +669,7 @@ def try_cloud_ai_vision_batch(
     response_schema,
     system_prompt=None,
     request_id=None,
+    routing_strategy=None,
 ):
     req_prefix = f"[{request_id}] " if request_id else ""
     global PROVIDER_COOLDOWNS
@@ -753,7 +758,6 @@ def try_cloud_ai_vision_batch(
                 if provider == "openrouter":
                     payload["plugins"] = [{"id": "response-healing"}]
 
-
     _inject_openrouter_routing(provider, routing_strategy, payload)
     max_retries = 3
     base_backoff = 2.0
@@ -811,10 +815,14 @@ def try_cloud_ai_vision_batch(
 
         except requests.exceptions.RequestException as e:
             status_code = getattr(e.response, "status_code", None) if hasattr(e, "response") else None
-            is_transient = isinstance(e, requests.exceptions.Timeout) or isinstance(e, requests.exceptions.ConnectionError) or status_code in (429, 500, 502, 503, 504)
+            is_transient = isinstance(
+                e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
+            ) or status_code in (429, 500, 502, 503, 504)
             if is_transient and attempt < max_retries:
                 sleep_time = base_backoff * (2**attempt)
-                logger.warning(f"{req_prefix}Provider '{provider}' transient error: {e}. Retrying in {sleep_time:.2f}s...")
+                logger.warning(
+                    f"{req_prefix}Provider '{provider}' transient error: {e}. Retrying in {sleep_time:.2f}s..."
+                )
                 time.sleep(sleep_time)
                 continue
             logger.error(f"{req_prefix}Vision Batch OCR failed: {e}")
@@ -1048,7 +1056,7 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
                 cleaned = clean_translated_text(translated)
                 if is_valid_translation(text, cleaned, request_id=request_id):
                     return cleaned
-            
+
             # Fallback to global default model
             global_model = TL_CONFIG.llm_model
             global_provider = TL_CONFIG.provider
@@ -1198,7 +1206,7 @@ Input:
             )
             if res:
                 return res
-            
+
             # Fallback to global default model
             global_model = TL_CONFIG.llm_model
             global_provider = TL_CONFIG.provider

@@ -54,12 +54,12 @@ def seed_models():
             raise e
 
 
-
 def cleanup_audit_cache():
     import glob
     import os
     import time
-    from worker.config import QA_AUDIT_CACHE_DIR, ENABLE_QA_AUDIT_CACHE
+
+    from worker.config import ENABLE_QA_AUDIT_CACHE, QA_AUDIT_CACHE_DIR
 
     if ENABLE_QA_AUDIT_CACHE:
         print("[Unified Worker] Cleaning up old QA audit cache files...", flush=True)
@@ -71,13 +71,13 @@ def cleanup_audit_cache():
                 files = glob.glob(os.path.join(QA_AUDIT_CACHE_DIR, "*.jpg"))
                 count = 0
                 for f in files:
-                    if os.path.isfile(f):
-                        if (now - os.path.getmtime(f)) > max_age:
-                            os.remove(f)
-                            count += 1
+                    if os.path.isfile(f) and (now - os.path.getmtime(f)) > max_age:
+                        os.remove(f)
+                        count += 1
                 print(f"[Unified Worker] Cleaned up {count} old files in {QA_AUDIT_CACHE_DIR}.", flush=True)
         except Exception as e:
             print(f"[Unified Worker] Error cleaning up QA audit cache: {e}", flush=True)
+
 
 def main():  # pylint: disable=too-many-locals
     """Main daemon loop running worker processes and dispatching Redis tasks."""
