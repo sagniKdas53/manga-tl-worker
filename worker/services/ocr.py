@@ -79,7 +79,7 @@ def parse_paddle_ocr_results(raw_results):
     return results
 
 
-def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None):
+def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None, routing_strategy=None):
     import base64
 
     base64_image = base64.b64encode(img_crop_bytes).decode("utf-8")
@@ -218,7 +218,7 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None):
         return None
 
     try:
-        res = requests.post(url, json=payload, headers=headers, timeout=12)
+        res = requests.post(url, json=payload, headers=headers, timeout=(10, 45))
         if res.status_code == 200:
             res_json = res.json()
             if provider == "gemini":

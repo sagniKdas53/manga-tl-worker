@@ -700,41 +700,61 @@ def process_ocr(job_data):
                                 and api_key
                             ):
                                 from worker.config import OCR_CONFIG
-
-                                models_to_try = []
-                                if vlm_model:
-                                    models_to_try.append(vlm_model)
-                                for m in getattr(OCR_CONFIG, "vlm_model_list", []):
-                                    if m not in models_to_try:
-                                        models_to_try.append(m)
-
-                                for current_model in models_to_try:
-                                    try:
-                                        chunk_res = try_cloud_ai_vision_batch(
-                                            provider,
-                                            api_key,
-                                            current_model,
-                                            chunk,
-                                            schema,
-                                            system_prompt=sys_prompt,
+                                user_model = vlm_model or OCR_CONFIG.vlm_model
+                                try:
+                                    chunk_res = try_cloud_ai_vision_batch(
+                                        provider,
+                                        api_key,
+                                        user_model,
+                                        chunk,
+                                        schema,
+                                        system_prompt=sys_prompt,
+                                    )
+                                    if chunk_res:
+                                        parsed = json.loads(
+                                            chunk_res.strip().removeprefix("```json").removesuffix("```").strip()
                                         )
-                                        if chunk_res:
-                                            parsed = json.loads(
-                                                chunk_res.strip().removeprefix("```json").removesuffix("```").strip()
+                                        results_list = parsed.get("results", [])
+                                        if results_list:
+                                            print(
+                                                f"[OCR] Successfully processed chunk {chunk_idx + 1} using model '{user_model}'",
+                                                flush=True,
                                             )
-                                            results_list = parsed.get("results", [])
-                                            if results_list:
-                                                print(
-                                                    f"[OCR] Successfully processed chunk {chunk_idx + 1} using model '{current_model}'",
-                                                    flush=True,
+                                            vlm_model_used = user_model
+                                            
+                                    if not chunk_res or not results_list:
+                                        # Fallback to global default model
+                                        global_model = OCR_CONFIG.vlm_model
+                                        global_provider = OCR_CONFIG.provider
+                                        if global_provider == provider and global_model and global_model != user_model:
+                                            print(f"[OCR] Falling back to global default VLM model '{global_model}'...", flush=True)
+                                            chunk_res = try_cloud_ai_vision_batch(
+                                                provider,
+                                                api_key,
+                                                global_model,
+                                                chunk,
+                                                schema,
+                                                system_prompt=sys_prompt,
+                                            )
+                                            if chunk_res:
+                                                parsed = json.loads(
+                                                    chunk_res.strip().removeprefix("```json").removesuffix("```").strip()
                                                 )
-                                                vlm_model_used = current_model
-                                                break
-                                    except Exception as parse_err:
-                                        print(
-                                            f"[OCR] Failed for model '{current_model}' on chunk {chunk_idx + 1}: {parse_err}",
-                                            flush=True,
-                                        )
+                                                results_list = parsed.get("results", [])
+                                                if results_list:
+                                                    print(
+                                                        f"[OCR] Successfully processed chunk {chunk_idx + 1} using global fallback model '{global_model}'",
+                                                        flush=True,
+                                                    )
+                                                    vlm_model_used = global_model
+                                        else:
+                                            print(f"[OCR] No fallback applied (global provider different or model identical).", flush=True)
+
+                                except Exception as parse_err:
+                                    print(
+                                        f"[OCR] Failed for model on chunk {chunk_idx + 1}: {parse_err}",
+                                        flush=True,
+                                    )
                             else:
                                 local_model = job_data.get("ocrModel") or os.environ.get("LOCAL_VLM_MODEL", "").strip()
                                 if local_model:

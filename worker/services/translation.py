@@ -311,6 +311,14 @@ def parse_and_validate_batch(response_text, unmatched_regions):
 PROVIDER_COOLDOWNS = {}
 
 
+
+def _inject_openrouter_routing(provider, routing_strategy, payload):
+    if provider == "openrouter" and routing_strategy == "lowest-cost":
+        payload["provider"] = {
+            "allow_fallbacks": False,
+            "order": ["StreamLake", "NovitaAI", "Baidu Qianfan", "Decart"]
+        }
+
 def wait_for_cooldown(provider, max_wait=60):
     global PROVIDER_COOLDOWNS
     cooldown_until = PROVIDER_COOLDOWNS.get(provider, 0.0)
@@ -355,7 +363,7 @@ def _get_api_url_and_headers(provider, api_key, model):
     return url, headers, actual_model
 
 
-def try_cloud_ai(provider, api_key, model, prompt, response_schema=None, request_id=None):
+def try_cloud_ai(provider, api_key, model, prompt, response_schema=None, request_id=None, routing_strategy=None):
     req_prefix = f"[{request_id}] " if request_id else ""
     global PROVIDER_COOLDOWNS
 
@@ -404,9 +412,12 @@ def try_cloud_ai(provider, api_key, model, prompt, response_schema=None, request
                         "strict": True,
                     },
                 }
+
                 if provider == "openrouter":
                     payload["plugins"] = [{"id": "response-healing"}]
 
+
+    _inject_openrouter_routing(provider, routing_strategy, payload)
     max_retries = 3
     base_backoff = 2.0
 
@@ -421,7 +432,7 @@ def try_cloud_ai(provider, api_key, model, prompt, response_schema=None, request
                 url,
                 headers=headers,
                 json=payload,
-                timeout=90 if provider == "nvidia" else 60,
+                timeout=(10, 45),
             )
 
             if response.status_code == 429:
@@ -462,10 +473,20 @@ def try_cloud_ai(provider, api_key, model, prompt, response_schema=None, request
 
             return content
 
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
+            status_code = getattr(e.response, "status_code", None) if hasattr(e, "response") else None
+            is_transient = isinstance(e, requests.exceptions.Timeout) or isinstance(e, requests.exceptions.ConnectionError) or status_code in (429, 500, 502, 503, 504)
+            if is_transient and attempt < max_retries:
+                sleep_time = base_backoff * (2**attempt)
+                logger.warning(f"{req_prefix}Provider '{provider}' transient error: {e}. Retrying in {sleep_time:.2f}s...")
+                time.sleep(sleep_time)
+                continue
             logger.error(f"{req_prefix}Cloud LLM Translation failed: {e}")
             if "response" in locals() and hasattr(response, "text"):
                 logger.error(f"Response text: {response.text}")
+            return None
+        except Exception as e:
+            logger.error(f"{req_prefix}Cloud LLM Translation failed: {e}")
             return None
 
 
@@ -554,9 +575,12 @@ def try_cloud_ai_vision(
                         "strict": True,
                     },
                 }
+
                 if provider == "openrouter":
                     payload["plugins"] = [{"id": "response-healing"}]
 
+
+    _inject_openrouter_routing(provider, routing_strategy, payload)
     max_retries = 3
     base_backoff = 2.0
 
@@ -567,7 +591,7 @@ def try_cloud_ai_vision(
             )
             start = time.perf_counter()
 
-            response = requests.post(url, headers=headers, json=payload, timeout=90)
+            response = requests.post(url, headers=headers, json=payload, timeout=(10, 45))
 
             if response.status_code == 429:
                 # Trigger temporary 5s cooldown immediately on first 429
@@ -609,10 +633,20 @@ def try_cloud_ai_vision(
 
             return content
 
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
+            status_code = getattr(e.response, "status_code", None) if hasattr(e, "response") else None
+            is_transient = isinstance(e, requests.exceptions.Timeout) or isinstance(e, requests.exceptions.ConnectionError) or status_code in (429, 500, 502, 503, 504)
+            if is_transient and attempt < max_retries:
+                sleep_time = base_backoff * (2**attempt)
+                logger.warning(f"{req_prefix}Provider '{provider}' transient error: {e}. Retrying in {sleep_time:.2f}s...")
+                time.sleep(sleep_time)
+                continue
             logger.error(f"{req_prefix}Vision Translation failed: {e}")
             if "response" in locals() and hasattr(response, "text"):
                 logger.error(f"Response text: {response.text}")
+            return None
+        except Exception as e:
+            logger.error(f"{req_prefix}Vision Translation failed: {e}")
             return None
 
 
@@ -708,9 +742,12 @@ def try_cloud_ai_vision_batch(
                         "strict": True,
                     },
                 }
+
                 if provider == "openrouter":
                     payload["plugins"] = [{"id": "response-healing"}]
 
+
+    _inject_openrouter_routing(provider, routing_strategy, payload)
     max_retries = 3
     base_backoff = 2.0
 
@@ -721,7 +758,7 @@ def try_cloud_ai_vision_batch(
             )
             start = time.perf_counter()
 
-            response = requests.post(url, headers=headers, json=payload, timeout=120)
+            response = requests.post(url, headers=headers, json=payload, timeout=(10, 60))
 
             if response.status_code == 429:
                 # Trigger temporary 5s cooldown immediately on first 429
@@ -765,10 +802,20 @@ def try_cloud_ai_vision_batch(
 
             return content
 
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
+            status_code = getattr(e.response, "status_code", None) if hasattr(e, "response") else None
+            is_transient = isinstance(e, requests.exceptions.Timeout) or isinstance(e, requests.exceptions.ConnectionError) or status_code in (429, 500, 502, 503, 504)
+            if is_transient and attempt < max_retries:
+                sleep_time = base_backoff * (2**attempt)
+                logger.warning(f"{req_prefix}Provider '{provider}' transient error: {e}. Retrying in {sleep_time:.2f}s...")
+                time.sleep(sleep_time)
+                continue
             logger.error(f"{req_prefix}Vision Batch OCR failed: {e}")
             if "response" in locals() and hasattr(response, "text"):
                 logger.error(f"Response text: {response.text}")
+            return None
+        except Exception as e:
+            logger.error(f"{req_prefix}Vision Batch OCR failed: {e}")
             return None
 
 
@@ -982,108 +1029,29 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
         logger.info(f"{req_prefix}LOCAL_ONLY mode (provider='{provider}') — skipping cloud AI tiers.")
     else:
         # 1. Cloud LLM Layer
-        if provider == "openrouter" and api_key:
-            preferred = TL_CONFIG.llm_model or "meta-llama/llama-3-8b-instruct:free"
-            models_to_try = [preferred]
-            for m in getattr(TL_CONFIG, "llm_model_list", []):
-                if m not in models_to_try:
-                    models_to_try.append(m)
-            for current_model in models_to_try:
-                try:
-                    translated = try_cloud_ai(
-                        "openrouter",
-                        api_key,
-                        current_model,
-                        prompt,
-                        request_id=request_id,
-                    )
-                    if translated:
-                        cleaned = clean_translated_text(translated)
-                        if is_valid_translation(text, cleaned, request_id=request_id):
-                            return cleaned
-                except Exception as e:
-                    logger.error(f"{req_prefix}OpenRouter translation with model '{current_model}' failed: {e}")
-
-        elif provider == "gemini" and api_key:
-            # Direct Gemini API fallback
-            preferred = TL_CONFIG.llm_model or "gemini-1.5-pro"
-            models_to_try = [preferred]
-            for m in getattr(TL_CONFIG, "llm_model_list", []):
-                if m not in models_to_try:
-                    models_to_try.append(m)
-            for current_model in models_to_try:
-                try:
-                    translated = try_cloud_ai("gemini", api_key, current_model, prompt, request_id=request_id)
-                    if translated:
-                        cleaned = clean_translated_text(translated)
-                        if is_valid_translation(text, cleaned, request_id=request_id):
-                            return cleaned
-                except Exception as e:
-                    logger.error(f"{req_prefix}Gemini translation with model '{current_model}' failed: {e}")
-        elif provider == "openai" and api_key:
-            openai_model = TL_CONFIG.llm_model or "gpt-4o-mini"
-            models_to_try = [openai_model]
-            for m in getattr(TL_CONFIG, "llm_model_list", []):
-                if m not in models_to_try:
-                    models_to_try.append(m)
-            for current_model in models_to_try:
-                try:
-                    translated = try_cloud_ai(
-                        "openai",
-                        api_key,
-                        current_model,
-                        prompt,
-                        request_id=request_id,
-                    )
-                    if translated:
-                        cleaned = clean_translated_text(translated)
-                        if is_valid_translation(text, cleaned, request_id=request_id):
-                            return cleaned
-                except Exception as e:
-                    logger.error(f"{req_prefix}OpenAI translation with model '{current_model}' failed: {e}")
-        elif provider == "nvidia" and api_key:
-            nvidia_model = TL_CONFIG.llm_model or "google/gemma-3n-e4b-it"
-            models_to_try = [nvidia_model]
-            for m in getattr(TL_CONFIG, "llm_model_list", []):
-                if m not in models_to_try:
-                    models_to_try.append(m)
-            for current_model in models_to_try:
-                try:
-                    translated = try_cloud_ai(
-                        "nvidia",
-                        api_key,
-                        current_model,
-                        prompt,
-                        request_id=request_id,
-                    )
-                    if translated:
-                        cleaned = clean_translated_text(translated)
-                        if is_valid_translation(text, cleaned, request_id=request_id):
-                            return cleaned
-                except Exception as e:
-                    logger.error(f"{req_prefix}Nvidia translation with model '{current_model}' failed: {e}")
-
-        elif provider == "anthropic" and api_key:
-            anthropic_model = TL_CONFIG.llm_model or "claude-3-5-sonnet-20241022"
-            models_to_try = [anthropic_model]
-            for m in getattr(TL_CONFIG, "llm_model_list", []):
-                if m not in models_to_try:
-                    models_to_try.append(m)
-            for current_model in models_to_try:
-                try:
-                    translated = try_cloud_ai(
-                        "anthropic",
-                        api_key,
-                        current_model,
-                        prompt,
-                        request_id=request_id,
-                    )
-                    if translated:
-                        cleaned = clean_translated_text(translated)
-                        if is_valid_translation(text, cleaned, request_id=request_id):
-                            return cleaned
-                except Exception as e:
-                    logger.error(f"{req_prefix}Anthropic translation with model '{current_model}' failed: {e}")
+        if api_key:
+            user_model = TL_CONFIG.llm_model
+            logger.info(f"{req_prefix}Trying provider '{provider}' with model '{user_model}'...")
+            translated = try_cloud_ai(provider, api_key, user_model, prompt, request_id=request_id)
+            if translated:
+                cleaned = clean_translated_text(translated)
+                if is_valid_translation(text, cleaned, request_id=request_id):
+                    return cleaned
+            
+            # Fallback to global default model
+            global_model = TL_CONFIG.llm_model
+            global_provider = TL_CONFIG.provider
+            if global_provider == provider and global_model and global_model != user_model:
+                logger.info(f"{req_prefix}Falling back to global default model '{global_model}'...")
+                translated = try_cloud_ai(provider, api_key, global_model, prompt, request_id=request_id)
+                if translated:
+                    cleaned = clean_translated_text(translated)
+                    if is_valid_translation(text, cleaned, request_id=request_id):
+                        return cleaned
+                else:
+                    logger.error(f"{req_prefix}Translation with global fallback model '{global_model}' failed.")
+            else:
+                logger.info(f"{req_prefix}No fallback applied (global provider different or model identical).")
 
     # 2. Local Ollama/LMStudio Layer
     disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
@@ -1245,123 +1213,24 @@ Input:
     if local_only:
         logger.info(f"{req_prefix}Batch: LOCAL_ONLY mode (provider='{provider}') — skipping cloud AI tiers.")
     else:
-        if provider == "openrouter" and api_key:
-            preferred = user_model or TL_CONFIG.llm_model or "meta-llama/llama-3-8b-instruct:free"
-            models_to_try = [preferred]
-            for m in getattr(TL_CONFIG, "llm_model_list", []):
-                if m not in models_to_try:
-                    models_to_try.append(m)
-            for current_model in models_to_try:
-                logger.info(f"{req_prefix}Batch: Trying OpenRouter ({current_model})...")
-                try:
-                    res = try_cloud_ai(
-                        "openrouter",
-                        api_key,
-                        current_model,
-                        prompt,
-                        response_schema,
-                        request_id=request_id,
-                    )
-                    if res:
-                        return res
-                except Exception as e:
-                    logger.error(f"{req_prefix}OpenRouter batch translation with model '{current_model}' failed: {e}")
-
-        elif provider == "gemini" and api_key:
-            # Try Direct Gemini API
-            preferred = user_model or TL_CONFIG.llm_model or "gemini-1.5-pro"
-            models_to_try = [preferred]
-            for m in getattr(TL_CONFIG, "llm_model_list", []):
-                if m not in models_to_try:
-                    models_to_try.append(m)
-            for current_model in models_to_try:
-                logger.info(f"{req_prefix}Batch: Trying Gemini ({current_model}) Direct...")
-                try:
-                    res = try_cloud_ai(
-                        "gemini",
-                        api_key,
-                        current_model,
-                        prompt,
-                        response_schema,
-                        request_id=request_id,
-                    )
-                    if res:
-                        return res
-                except Exception as e:
-                    logger.error(
-                        f"{req_prefix}Gemini Direct batch translation with model '{current_model}' failed: {e}"
-                    )
-
-        elif provider == "openai" and api_key:
-            preferred = user_model or TL_CONFIG.llm_model or "gpt-4o-mini"
-            models_to_try = [preferred]
-            for m in getattr(TL_CONFIG, "llm_model_list", []):
-                if m not in models_to_try:
-                    models_to_try.append(m)
-            for current_model in models_to_try:
-                logger.info(f"{req_prefix}Batch: Trying OpenAI ({current_model}) Direct...")
-                try:
-                    res = try_cloud_ai(
-                        "openai",
-                        api_key,
-                        current_model,
-                        prompt,
-                        response_schema,
-                        request_id=request_id,
-                    )
-                    if res:
-                        return res
-                except Exception as e:
-                    logger.error(
-                        f"{req_prefix}OpenAI Direct batch translation with model '{current_model}' failed: {e}"
-                    )
-
-        elif provider == "anthropic" and api_key:
-            preferred = user_model or TL_CONFIG.llm_model or "claude-3-5-sonnet-20241022"
-            models_to_try = [preferred]
-            for m in getattr(TL_CONFIG, "llm_model_list", []):
-                if m not in models_to_try:
-                    models_to_try.append(m)
-            for current_model in models_to_try:
-                logger.info(f"{req_prefix}Batch: Trying Anthropic ({current_model}) Direct...")
-                try:
-                    res = try_cloud_ai(
-                        "anthropic",
-                        api_key,
-                        current_model,
-                        prompt,
-                        response_schema,
-                        request_id=request_id,
-                    )
-                    if res:
-                        return res
-                except Exception as e:
-                    logger.error(
-                        f"{req_prefix}Anthropic Direct batch translation with model '{current_model}' failed: {e}"
-                    )
-
-        # Try Nvidia NIM
-        elif provider == "nvidia" and api_key:
-            nvidia_model = user_model or TL_CONFIG.llm_model or "google/gemma-3n-e4b-it"
-            models_to_try = [nvidia_model]
-            for m in getattr(TL_CONFIG, "llm_model_list", []):
-                if m not in models_to_try:
-                    models_to_try.append(m)
-            for current_model in models_to_try:
-                logger.info(f"{req_prefix}Batch: Trying Nvidia model {current_model}...")
-                try:
-                    res = try_cloud_ai(
-                        "nvidia",
-                        api_key,
-                        current_model,
-                        prompt,
-                        response_schema,
-                        request_id=request_id,
-                    )
-                    if res:
-                        return res
-                except Exception as e:
-                    logger.error(f"{req_prefix}Nvidia batch translation with model '{current_model}' failed: {e}")
+        if api_key:
+            logger.info(f"{req_prefix}Batch: Trying provider '{provider}' with model '{user_model}'...")
+            res = try_cloud_ai(provider, api_key, user_model, prompt, response_schema, request_id=request_id)
+            if res:
+                return res
+            
+            # Fallback to global default model
+            global_model = TL_CONFIG.llm_model
+            global_provider = TL_CONFIG.provider
+            if global_provider == provider and global_model and global_model != user_model:
+                logger.info(f"{req_prefix}Batch: Falling back to global default model '{global_model}'...")
+                res = try_cloud_ai(provider, api_key, global_model, prompt, response_schema, request_id=request_id)
+                if res:
+                    return res
+                else:
+                    logger.error(f"{req_prefix}Batch translation with global fallback model '{global_model}' failed.")
+            else:
+                logger.info(f"{req_prefix}Batch: No fallback applied (global provider different or model identical).")
 
     # Try Local LLM (Ollama/LMStudio)
     disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
@@ -1442,7 +1311,7 @@ def try_local_vlm_vision(
         with acquire_lock("local-llm"):
             logger.info(f"{req_prefix}Sending local VLM request to {local_endpoint} using model {model}...")
             start = time.perf_counter()
-            response = requests.post(local_endpoint, json=payload, timeout=90)
+            response = requests.post(local_endpoint, json=payload, timeout=(10, 45))
             elapsed = time.perf_counter() - start
             logger.info(f"{req_prefix}Local VLM query completed in {elapsed:.2f}s")
 

@@ -87,14 +87,20 @@ def update_model_costs(models=None):
     if not models:
         return
 
-    # Load existing costs
+    # Load existing costs (now only from Redis, local file deprecated Phase E.3)
     persisted_costs = {}
-    if os.path.exists(COSTS_FILE):
-        try:
-            with open(COSTS_FILE) as f:
-                persisted_costs = json.load(f)
-        except Exception as e:
-            logger.warning(f"Failed to read {COSTS_FILE}: {e}")
+    try:
+        keys = redis_client.keys("model_cost:*")
+        for key in keys:
+            model = key.decode("utf-8").split(":", 1)[1]
+            data = redis_client.get(key)
+            if data:
+                parsed = json.loads(data)
+                # Keep timestamp hack by using current time if it's cached in redis
+                parsed["timestamp"] = time.time()
+                persisted_costs[model] = parsed
+    except Exception as e:
+        logger.warning(f"Failed to read from Redis: {e}")
 
     now = time.time()
     one_week = 7 * 24 * 3600
@@ -201,12 +207,8 @@ def update_model_costs(models=None):
             except Exception as e:
                 logger.error(f"Error fetching cost for {model}: {e}")
     finally:
-        # Save persisted costs
-        try:
-            with open(COSTS_FILE, "w") as f:
-                json.dump(persisted_costs, f, indent=2)
-        except Exception as e:
-            logger.warning(f"Failed to write {COSTS_FILE}: {e}")
+        # Saving to costs.json removed as part of Phase E.3
+        pass
 
 
 def get_job_costs():
@@ -276,13 +278,8 @@ def estimate_cost(model, prompt_tokens, completion_tokens, provider=None):
             in_rate = float(cost_data.get("prompt", 0))
             out_rate = float(cost_data.get("completion", 0))
         else:
-            # Fallback to checking costs.json
-            if os.path.exists(COSTS_FILE):
-                with open(COSTS_FILE) as f:
-                    persisted = json.load(f)
-                    if model_lower in persisted:
-                        in_rate = float(persisted[model_lower].get("prompt", 0))
-                        out_rate = float(persisted[model_lower].get("completion", 0))
+            # Removed costs.json fallback as part of Phase E.3
+            pass
     except Exception:
         pass
 

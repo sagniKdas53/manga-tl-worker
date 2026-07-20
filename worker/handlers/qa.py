@@ -191,7 +191,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         if prov == "openrouter" and api_key:
             llm_model = user_model if user_model else "meta-llama/llama-3-8b-instruct:free"
             try:
-                return try_cloud_ai("openrouter", api_key, llm_model, prompt, QA_JSON_SCHEMA)
+                return try_cloud_ai("openrouter", api_key, llm_model, prompt, QA_JSON_SCHEMA, routing_strategy=routing_strategy)
             except Exception as e:
                 print(
                     f"[QA] LLM QA via OpenRouter with model '{llm_model}' failed: {e}",
@@ -219,27 +219,18 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     # Try preferred provider/models
     if provider:
-        if provider in ("openai", "openrouter", "gemini", "nvidia", "anthropic"):
-            user_model = job_data.get("qaLlmModel") or QA_CONFIG.llm_model
-            models_to_try = []
-            if user_model:
-                models_to_try.append(user_model)
-            for m in getattr(
-                QA_CONFIG,
-                ("qa_llm_model_list" if hasattr(QA_CONFIG, "qa_llm_model_list") else "llm_model_list"),
-                [],
-            ):
-                if m not in models_to_try:
-                    models_to_try.append(m)
-            if not models_to_try:
-                models_to_try.append("")
-
-            for current_model in models_to_try:
-                qa_response = attempt_llm(provider, current_model)
-                if qa_response:
-                    break
-        else:
-            qa_response = attempt_llm(provider)
+        user_model = job_data.get("qaLlmModel") or getattr(QA_CONFIG, "llm_model")
+        qa_response = attempt_llm(provider, user_model)
+        
+        if not qa_response:
+            # Fallback to global default model
+            global_model = getattr(QA_CONFIG, "llm_model")
+            global_provider = getattr(QA_CONFIG, "provider")
+            if global_provider == provider and global_model and global_model != user_model:
+                print(f"[QA] Falling back to global default model '{global_model}'...", flush=True)
+                qa_response = attempt_llm(provider, global_model)
+            else:
+                print(f"[QA] No fallback applied (global provider different or model identical).", flush=True)
 
     local_llm_model = os.environ.get("LOCAL_LLM_MODEL", "").strip()
     disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
@@ -446,27 +437,17 @@ You MUST return a JSON object containing a "results" key with an array of object
         return None
 
     if provider:
-        if provider in ("openai", "openrouter", "gemini", "nvidia", "anthropic"):
-            user_model = job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
-            models_to_try = []
-            if user_model:
-                models_to_try.append(user_model)
-            for m in getattr(
-                QA_CONFIG,
-                ("qa_vlm_model_list" if hasattr(QA_CONFIG, "qa_vlm_model_list") else "vlm_model_list"),
-                [],
-            ):
-                if m not in models_to_try:
-                    models_to_try.append(m)
-            if not models_to_try:
-                models_to_try.append("")
-
-            for current_model in models_to_try:
-                qa_response_vlm = attempt_vlm(provider, current_model)
-                if qa_response_vlm:
-                    break
-        else:
-            qa_response_vlm = attempt_vlm(provider)
+        user_model = job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
+        qa_response_vlm = attempt_vlm(provider, user_model)
+        
+        if not qa_response_vlm:
+            global_model = QA_CONFIG.vlm_model
+            global_provider = QA_CONFIG.provider
+            if global_provider == provider and global_model and global_model != user_model:
+                print(f"[QA] Falling back to global default VLM model '{global_model}'...", flush=True)
+                qa_response_vlm = attempt_vlm(provider, global_model)
+            else:
+                print(f"[QA] No fallback applied (global provider different or model identical).", flush=True)
 
     local_vlm_model = os.environ.get("LOCAL_VLM_MODEL", "").strip()
 
@@ -675,7 +656,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         if prov == "openrouter" and api_key:
             llm_model = user_model if user_model else "meta-llama/llama-3-8b-instruct:free"
             try:
-                return try_cloud_ai("openrouter", api_key, llm_model, prompt, QA_JSON_SCHEMA)
+                return try_cloud_ai("openrouter", api_key, llm_model, prompt, QA_JSON_SCHEMA, routing_strategy=routing_strategy)
             except Exception as e:
                 print(
                     f"[QA] LLM QA via OpenRouter with model '{llm_model}' failed: {e}",
@@ -703,27 +684,17 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     # Try the preferred provider first
     if provider:
-        if provider in ("openai", "openrouter", "gemini", "nvidia", "anthropic"):
-            user_model = job_data.get("qaLlmModel") or QA_CONFIG.llm_model
-            models_to_try = []
-            if user_model:
-                models_to_try.append(user_model)
-            for m in getattr(
-                QA_CONFIG,
-                ("qa_llm_model_list" if hasattr(QA_CONFIG, "qa_llm_model_list") else "llm_model_list"),
-                [],
-            ):
-                if m not in models_to_try:
-                    models_to_try.append(m)
-            if not models_to_try:
-                models_to_try.append("")
-
-            for current_model in models_to_try:
-                qa_response = attempt_llm(provider, current_model)
-                if qa_response:
-                    break
-        else:
-            qa_response = attempt_llm(provider)
+        user_model = job_data.get("qaLlmModel") or QA_CONFIG.llm_model
+        qa_response = attempt_llm(provider, user_model)
+        
+        if not qa_response:
+            global_model = QA_CONFIG.llm_model
+            global_provider = QA_CONFIG.provider
+            if global_provider == provider and global_model and global_model != user_model:
+                print(f"[QA] Falling back to global default LLM model '{global_model}'...", flush=True)
+                qa_response = attempt_llm(provider, global_model)
+            else:
+                print(f"[QA] No fallback applied (global provider different or model identical).", flush=True)
 
     local_llm_model = os.environ.get("LOCAL_LLM_MODEL", "").strip()
     disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
@@ -976,27 +947,17 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     # Try the preferred provider first
     if provider:
-        if provider in ("openai", "openrouter", "gemini", "nvidia", "anthropic"):
-            user_model = job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
-            models_to_try = []
-            if user_model:
-                models_to_try.append(user_model)
-            for m in getattr(
-                QA_CONFIG,
-                ("qa_vlm_model_list" if hasattr(QA_CONFIG, "qa_vlm_model_list") else "vlm_model_list"),
-                [],
-            ):
-                if m not in models_to_try:
-                    models_to_try.append(m)
-            if not models_to_try:
-                models_to_try.append("")
-
-            for current_model in models_to_try:
-                qa_response = attempt_vlm(provider, current_model)
-                if qa_response:
-                    break
-        else:
-            qa_response = attempt_vlm(provider)
+        user_model = job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
+        qa_response = attempt_vlm(provider, user_model)
+        
+        if not qa_response:
+            global_model = QA_CONFIG.vlm_model
+            global_provider = QA_CONFIG.provider
+            if global_provider == provider and global_model and global_model != user_model:
+                print(f"[QA] Falling back to global default VLM model '{global_model}'...", flush=True)
+                qa_response = attempt_vlm(provider, global_model)
+            else:
+                print(f"[QA] No fallback applied (global provider different or model identical).", flush=True)
 
     # Fallback to Local VLM:
     # Attempted only if cloud VLM calls failed (e.g. key missing, or provider is cooled down on 429).

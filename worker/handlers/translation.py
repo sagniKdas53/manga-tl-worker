@@ -80,7 +80,8 @@ def process_translation(job_data):
         batch_mapping = {}
 
         provider = job_data.get("tlProvider") or TL_CONFIG.provider
-        tl_model = job_data.get("tlModel") or TL_CONFIG.llm_model
+        tl_model = job_data.get("tlModel")
+    routing_strategy = job_data.get("routingStrategy") or TL_CONFIG.llm_model
         local_only = provider in ("ollama", "lmstudio")
         max_batch_size = 5 if local_only else 8
 
