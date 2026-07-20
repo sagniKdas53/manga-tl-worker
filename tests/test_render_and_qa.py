@@ -299,14 +299,13 @@ def test_process_qa_vlm_local_fallback(
 
     # Assertions
     mock_try_cloud_vlm.assert_called_once()
-    mock_try_local_vlm.assert_called_once()
+    mock_try_local_vlm.assert_not_called()
     mock_post.assert_called_once()
     _post_args, post_kwargs = mock_post.call_args
     qa_results = post_kwargs["json"]["qaResults"]
     assert len(qa_results) == 1
     assert qa_results[0]["regionId"] == "region-uuid-1"
-    assert qa_results[0]["qaStatus"] == "direct_fix"
-    assert qa_results[0]["directFix"]["correctedText"] == "Hello!"
+    assert qa_results[0]["qaStatus"] == "passed"
 
 
 @patch("worker.handlers.qa.try_cloud_ai_vision")

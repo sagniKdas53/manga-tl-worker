@@ -146,15 +146,15 @@ def test_try_google_translate(mock_get):
 @patch("worker.services.translation.try_google_translate")
 @patch("worker.services.translation.os.environ.get")
 def test_translate_text(mock_env, mock_google, mock_cloud, mock_deepl):
-    # fallback to google
+    # Cross-provider translation fallbacks are intentionally disabled.
     mock_deepl.return_value = None
     mock_cloud.return_value = None
     mock_google.return_value = "hello from google"
 
     res = translate_text("test")
-    assert res == "hello from google"
+    assert res is None
 
-    # Deepl preferred
+    # DeepL is no longer part of the strict fallback chain.
     mock_deepl.return_value = "hello deepl"
 
     def env_get(k, default=""):
@@ -165,7 +165,7 @@ def test_translate_text(mock_env, mock_google, mock_cloud, mock_deepl):
     mock_env.side_effect = env_get
 
     res = translate_text("test")
-    assert res == "hello deepl"
+    assert res is None
 
 
 @patch("worker.services.translation.try_cloud_ai")

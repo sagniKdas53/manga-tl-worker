@@ -48,11 +48,13 @@ def test_update_model_costs(mock_redis, mock_req, tmp_path):
 
         update_model_costs(["meta-llama/llama-3-8b-instruct:free"])
 
-        assert cost_file.exists()
-        costs = json.loads(cost_file.read_text())
-        assert "meta-llama/llama-3-8b-instruct:free" in costs
+        assert not cost_file.exists()
+        mock_redis.set.assert_called_with(
+            "model_cost:meta-llama/llama-3-8b-instruct:free",
+            json.dumps({"prompt": 0.0, "completion": 0.0}),
+        )
 
-        # Test 404
+        # A paid model with no available endpoint is still surfaced as an error.
         mock_res.status_code = 404
         with pytest.raises(ValueError):
             update_model_costs(["unknown/model"])
