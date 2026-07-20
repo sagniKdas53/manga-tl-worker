@@ -81,7 +81,7 @@ def process_translation(job_data):
 
         provider = job_data.get("tlProvider") or TL_CONFIG.provider
         tl_model = job_data.get("tlModel")
-    routing_strategy = job_data.get("routingStrategy") or TL_CONFIG.llm_model
+        routing_strategy = job_data.get("routingStrategy") or "lowest-cost"
         local_only = provider in ("ollama", "lmstudio")
         max_batch_size = 5 if local_only else 8
 
@@ -131,6 +131,7 @@ def process_translation(job_data):
                     target_lang=target_lang,
                     provider=provider,
                     llm_model=tl_model,
+                    routing_strategy=routing_strategy,
                 )
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(f"{req_prefix}translate_batch_llm output: {batch_res}")
@@ -195,6 +196,7 @@ def process_translation(job_data):
                         target_lang=target_lang,
                         provider=provider,
                         llm_model=tl_model,
+                        routing_strategy=routing_strategy,
                     )
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(f"{req_prefix}Retry translate_batch_llm output: {retry_res}")

@@ -69,6 +69,7 @@ def test_process_translation_gemini(mock_tl_config, mock_post, mock_get, mock_tr
     assert args[0] == "gemini"
     assert args[1] == "fake-gemini-key"
     assert args[2] == "gemini-1.5-pro"
+    assert _kwargs["routing_strategy"] == "lowest-cost"
 
     mock_post.assert_called_once()
     post_args, post_kwargs = mock_post.call_args

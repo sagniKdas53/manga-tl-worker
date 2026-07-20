@@ -98,6 +98,9 @@ redis_client = redis.Redis(
     socket_timeout=15,
     socket_connect_timeout=5,
     socket_keepalive=True,
+    # Valkey 8 supports RESP2; redis-py 8 otherwise enables Redis-only
+    # maintenance notifications through RESP3 during connection setup.
+    protocol=2,
 )
 
 minio_client = Minio(

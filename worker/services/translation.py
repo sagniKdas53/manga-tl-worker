@@ -1082,6 +1082,7 @@ def translate_batch_llm(
     target_lang="en",
     provider=None,
     llm_model=None,
+    routing_strategy=None,
 ):
     if not request_id:
         request_id = str(uuid.uuid4())[:8]
@@ -1186,7 +1187,15 @@ Input:
     else:
         if api_key:
             logger.info(f"{req_prefix}Batch: Trying provider '{provider}' with model '{user_model}'...")
-            res = try_cloud_ai(provider, api_key, user_model, prompt, response_schema, request_id=request_id)
+            res = try_cloud_ai(
+                provider,
+                api_key,
+                user_model,
+                prompt,
+                response_schema,
+                request_id=request_id,
+                routing_strategy=routing_strategy,
+            )
             if res:
                 return res
             
@@ -1195,7 +1204,15 @@ Input:
             global_provider = TL_CONFIG.provider
             if global_provider == provider and global_model and global_model != user_model:
                 logger.info(f"{req_prefix}Batch: Falling back to global default model '{global_model}'...")
-                res = try_cloud_ai(provider, api_key, global_model, prompt, response_schema, request_id=request_id)
+                res = try_cloud_ai(
+                    provider,
+                    api_key,
+                    global_model,
+                    prompt,
+                    response_schema,
+                    request_id=request_id,
+                    routing_strategy=routing_strategy,
+                )
                 if res:
                     return res
                 else:
