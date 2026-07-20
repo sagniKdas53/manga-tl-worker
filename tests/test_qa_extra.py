@@ -142,6 +142,7 @@ def test_process_qa_vlm_mode(mock_dl, mock_cloud_vision, mock_redis, mock_reques
     mock_requests.post.assert_called()
     assert mock_requests.post.call_args[1]["json"]["qaResults"][0]["qaStatus"] == "passed"
 
+
 @patch("worker.handlers.qa.requests")
 @patch("worker.handlers.qa.redis_client")
 def test_process_qa_skips_on_attempt_greater_than_zero(mock_redis, mock_requests):
@@ -159,6 +160,7 @@ def test_process_qa_skips_on_attempt_greater_than_zero(mock_redis, mock_requests
     assert mock_requests.post.call_args[1]["json"]["qaResults"][0]["qaStatus"] == "passed"
     assert mock_requests.post.call_args[1]["json"]["qaResults"][0]["qaFeedback"] == "Auto-passed (QA bypassed)"
 
+
 @patch("worker.handlers.qa.requests")
 @patch("worker.handlers.qa.redis_client")
 @patch("worker.handlers.qa.try_cloud_ai")
@@ -169,9 +171,7 @@ def test_process_qa_reject_sfx(mock_cloud, mock_redis, mock_requests):
     mock_res.json.return_value = {"ocrRegions": [{"id": "1", "text": "boom", "translatedText": "boom"}]}
     mock_requests.get.return_value = mock_res
 
-    mock_cloud.return_value = (
-        '{"results": [{"regionId": "1", "qaStatus": "reject_sfx", "qaScore": 1.0, "qaFeedback": "It is a sound effect"}]}'
-    )
+    mock_cloud.return_value = '{"results": [{"regionId": "1", "qaStatus": "reject_sfx", "qaScore": 1.0, "qaFeedback": "It is a sound effect"}]}'
 
     with patch("worker.handlers.qa.QA_MODE", "llm"), patch("worker.handlers.qa.QA_CONFIG") as mock_qa:
         mock_qa.provider = "openrouter"

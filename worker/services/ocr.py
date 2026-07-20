@@ -87,7 +87,9 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None):
     feedback_instruction = ""
     if qa_feedback:
         if qa_feedback.lower() == "user_rejected":
-            feedback_instruction = " The user rejected the previous OCR result. Please provide a clean, accurate extraction."
+            feedback_instruction = (
+                " The user rejected the previous OCR result. Please provide a clean, accurate extraction."
+            )
         else:
             feedback_instruction = f" The QA reviewer rejected the previous extraction with this feedback: '{qa_feedback}'. Please fix the issue."
 
@@ -95,7 +97,7 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None):
         "Respond with a JSON object containing the text shown in this image "
         "and your confidence score. Use the format: "
         '{"text": "<extracted text>", "confidence": <0.0-1.0>}. '
-        'If the text is a sound effect (SFX), gibberish, an author handle, or already completely in English, return an empty string for text. '
+        "If the text is a sound effect (SFX), gibberish, an author handle, or already completely in English, return an empty string for text. "
         'If there is no valid text to extract, use {"text": "", "confidence": 0.0}. '
         "Do not add any explanations or notes outside the JSON."
         f"{feedback_instruction}"
