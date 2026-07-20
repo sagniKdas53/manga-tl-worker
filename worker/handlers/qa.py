@@ -332,6 +332,16 @@ You MUST return a JSON object containing a "results" key with an array of object
         combined_buf = io.BytesIO()
         combined_img.save(combined_buf, format="JPEG", quality=85)
         combined_base64 = base64.b64encode(combined_buf.getvalue()).decode("utf-8")
+        
+        from worker.config import ENABLE_QA_AUDIT_CACHE, QA_AUDIT_CACHE_DIR
+        import time
+        if ENABLE_QA_AUDIT_CACHE:
+            try:
+                os.makedirs(QA_AUDIT_CACHE_DIR, exist_ok=True)
+                audit_path = os.path.join(QA_AUDIT_CACHE_DIR, f"{image_id}_{int(time.time())}.jpg")
+                combined_img.save(audit_path, format="JPEG", quality=85)
+            except Exception as e:
+                print(f"[QA] Failed to write QA audit cache image: {e}", flush=True)
     except Exception as e:
         print(f"[QA] Error combining images: {e}", flush=True)
         raise
@@ -682,35 +692,28 @@ You MUST return a JSON object containing a "results" key with an array of object
                 )
         return None
 
-    # Try the preferred provider first
-    if provider:
-        user_model = job_data.get("qaLlmModel") or QA_CONFIG.llm_model
-        qa_response = attempt_llm(provider, user_model)
-        
-        if not qa_response:
-            global_model = QA_CONFIG.llm_model
-            global_provider = QA_CONFIG.provider
-            if global_provider == provider and global_model and global_model != user_model:
-                print(f"[QA] Falling back to global default LLM model '{global_model}'...", flush=True)
-                qa_response = attempt_llm(provider, global_model)
-            else:
-                print(f"[QA] No fallback applied (global provider different or model identical).", flush=True)
-
-    local_llm_model = os.environ.get("LOCAL_LLM_MODEL", "").strip()
-    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
-        "true",
-        "1",
-        "yes",
-    )
-    is_explicit_local = provider in ("ollama", "lmstudio")
-
-    if not qa_response and local_llm_model and (is_explicit_local or not disable_local):
-        try:
-            qa_response = try_local_ai(prompt, json.dumps(regions_metadata), QA_JSON_SCHEMA)
-        except Exception as e:
-            print(f"[QA] LLM QA via Local LLM failed: {e}", flush=True)
-    elif not qa_response and local_llm_model and disable_local and not is_explicit_local:
-        print("[QA] Local LLM QA skipped (disabled via environment).", flush=True)
+    local_only = provider in ("ollama", "lmstudio")
+    if local_only:
+        local_llm_model = os.environ.get("LOCAL_LLM_MODEL", "").strip()
+        if local_llm_model:
+            try:
+                qa_response = try_local_ai(prompt, json.dumps(regions_metadata), QA_JSON_SCHEMA)
+            except Exception as e:
+                print(f"[QA] LLM QA via Local LLM failed: {e}", flush=True)
+    else:
+        # Try the preferred provider first
+        if provider:
+            user_model = job_data.get("qaLlmModel") or QA_CONFIG.llm_model
+            qa_response = attempt_llm(provider, user_model)
+            
+            if not qa_response:
+                global_model = QA_CONFIG.llm_model
+                global_provider = QA_CONFIG.provider
+                if global_provider == provider and global_model and global_model != user_model:
+                    print(f"[QA] Falling back to global default LLM model '{global_model}'...", flush=True)
+                    qa_response = attempt_llm(provider, global_model)
+                else:
+                    print(f"[QA] No fallback applied (global provider different or model identical).", flush=True)
 
     results = []
     if logger.isEnabledFor(logging.DEBUG) and qa_response:
@@ -835,6 +838,16 @@ def _process_qa_vlm(job_data):
         combined_buf = io.BytesIO()
         combined_img.save(combined_buf, format="JPEG", quality=85)
         combined_base64 = base64.b64encode(combined_buf.getvalue()).decode("utf-8")
+        
+        from worker.config import ENABLE_QA_AUDIT_CACHE, QA_AUDIT_CACHE_DIR
+        import time
+        if ENABLE_QA_AUDIT_CACHE:
+            try:
+                os.makedirs(QA_AUDIT_CACHE_DIR, exist_ok=True)
+                audit_path = os.path.join(QA_AUDIT_CACHE_DIR, f"{image_id}_{int(time.time())}.jpg")
+                combined_img.save(audit_path, format="JPEG", quality=85)
+            except Exception as e:
+                print(f"[QA] Failed to write QA audit cache image: {e}", flush=True)
     except Exception as e:
         print(f"[QA] Error combining images: {e}", flush=True)
         raise
@@ -945,38 +958,28 @@ You MUST return a JSON object containing a "results" key with an array of object
                 )
         return None
 
-    # Try the preferred provider first
-    if provider:
-        user_model = job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
-        qa_response = attempt_vlm(provider, user_model)
-        
-        if not qa_response:
-            global_model = QA_CONFIG.vlm_model
-            global_provider = QA_CONFIG.provider
-            if global_provider == provider and global_model and global_model != user_model:
-                print(f"[QA] Falling back to global default VLM model '{global_model}'...", flush=True)
-                qa_response = attempt_vlm(provider, global_model)
-            else:
-                print(f"[QA] No fallback applied (global provider different or model identical).", flush=True)
-
-    # Fallback to Local VLM:
-    # Attempted only if cloud VLM calls failed (e.g. key missing, or provider is cooled down on 429).
-    # Explicitly respects the DISABLE_LOCAL_LLM environment variable bypass.
-    local_vlm_model = os.environ.get("LOCAL_VLM_MODEL", "").strip()
-    disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
-        "true",
-        "1",
-        "yes",
-    )
-    is_explicit_local = provider in ("ollama", "lmstudio")
-
-    if not qa_response and local_vlm_model and (is_explicit_local or not disable_local):
-        try:
-            qa_response = try_local_vlm_vision(local_vlm_model, prompt, combined_base64, QA_JSON_SCHEMA)
-        except Exception as e:
-            print(f"[QA] VLM QA via Local VLM failed: {e}", flush=True)
-    elif not qa_response and local_vlm_model and disable_local and not is_explicit_local:
-        print("[QA] Local VLM QA skipped (disabled via environment).", flush=True)
+    local_only = provider in ("ollama", "lmstudio")
+    if local_only:
+        local_vlm_model = os.environ.get("LOCAL_VLM_MODEL", "").strip()
+        if local_vlm_model:
+            try:
+                qa_response = try_local_vlm_vision(local_vlm_model, prompt, combined_base64, QA_JSON_SCHEMA)
+            except Exception as e:
+                print(f"[QA] VLM QA via Local VLM failed: {e}", flush=True)
+    else:
+        # Try the preferred provider first
+        if provider:
+            user_model = job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
+            qa_response = attempt_vlm(provider, user_model)
+            
+            if not qa_response:
+                global_model = QA_CONFIG.vlm_model
+                global_provider = QA_CONFIG.provider
+                if global_provider == provider and global_model and global_model != user_model:
+                    print(f"[QA] Falling back to global default VLM model '{global_model}'...", flush=True)
+                    qa_response = attempt_vlm(provider, global_model)
+                else:
+                    print(f"[QA] No fallback applied (global provider different or model identical).", flush=True)
 
     # VLM Evaluation Fail-Safe Fallback:
     # If all configured/active VLM options fail to return a parseable response,

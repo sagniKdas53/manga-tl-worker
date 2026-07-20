@@ -73,6 +73,11 @@ REDIS_DB = int(os.environ.get("REDIS_DB", 0))
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "localhost:9000")
 MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
 MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
+MINIO_SECURE = os.environ.get("MINIO_SECURE", "false").lower() == "true"
+RENDER_CACHE_DIR = os.environ.get("RENDER_CACHE_DIR", "/app/data/rendered_cache")
+
+ENABLE_QA_AUDIT_CACHE = os.environ.get("ENABLE_QA_AUDIT_CACHE", "false").lower() in ("true", "1", "yes")
+QA_AUDIT_CACHE_DIR = os.environ.get("QA_AUDIT_CACHE_DIR", "/app/data/qa_audit")
 
 # Callback & Auth Configs
 CALLBACK_URL = os.environ.get("BACKEND_CALLBACK_URL", "http://localhost:8080/api/internal/jobs/callback")
