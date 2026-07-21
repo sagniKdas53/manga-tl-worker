@@ -82,6 +82,7 @@ def process_translation(job_data):
         provider = job_data.get("tlProvider") or TL_CONFIG.provider
         tl_model = job_data.get("tlModel")
         routing_strategy = job_data.get("routingStrategy") or "lowest-cost"
+        use_fallback_models = job_data.get("useFallbackModels", True)
         local_only = provider in ("ollama", "lmstudio")
         max_batch_size = 5 if local_only else 8
 
@@ -132,6 +133,7 @@ def process_translation(job_data):
                     provider=provider,
                     llm_model=tl_model,
                     routing_strategy=routing_strategy,
+                    use_fallback_models=use_fallback_models,
                 )
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(f"{req_prefix}translate_batch_llm output: {batch_res}")
@@ -197,6 +199,7 @@ def process_translation(job_data):
                         provider=provider,
                         llm_model=tl_model,
                         routing_strategy=routing_strategy,
+                        use_fallback_models=use_fallback_models,
                     )
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(f"{req_prefix}Retry translate_batch_llm output: {retry_res}")
@@ -235,7 +238,7 @@ def process_translation(job_data):
                     still_failed_regions.append(r)
 
             # 4. Individual fallback for still-failed regions
-            if still_failed_regions:
+            if still_failed_regions and use_fallback_models:
                 from worker.services.translation import wait_for_cooldown
 
                 wait_for_cooldown(provider)

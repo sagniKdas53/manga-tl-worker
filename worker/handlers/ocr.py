@@ -620,6 +620,7 @@ def process_ocr(job_data):
                     provider = job_data.get("ocrProvider") or OCR_CONFIG.provider
                     api_key = OCR_CONFIG.resolve_key(provider)
                     routing_strategy = job_data.get("routingStrategy") or "lowest-cost"
+                    use_fallback_models = job_data.get("useFallbackModels", True)
 
                     # Generate base64 crops for all candidate regions
                     crops_payload = []
@@ -726,10 +727,10 @@ def process_ocr(job_data):
                                             vlm_model_used = user_model
 
                                     if not chunk_res or not results_list:
-                                        # Fallback to global default model
+                                        # Fallback to global default model (only if use_fallback_models is True)
                                         global_model = OCR_CONFIG.vlm_model
                                         global_provider = OCR_CONFIG.provider
-                                        if global_provider == provider and global_model and global_model != user_model:
+                                        if use_fallback_models and global_provider == provider and global_model and global_model != user_model:
                                             print(
                                                 f"[OCR] Falling back to global default VLM model '{global_model}'...",
                                                 flush=True,

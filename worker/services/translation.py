@@ -314,13 +314,18 @@ PROVIDER_COOLDOWNS = {}
 def _inject_openrouter_routing(provider, routing_strategy, payload):
     if provider == "openrouter":
         if routing_strategy == "lowest-cost":
-            payload["provider"] = {
+            provider_block = {
                 "allow_fallbacks": False,
                 "sort": "price",
                 "order": ["StreamLake", "NovitaAI", "Baidu Qianfan", "Decart"],
             }
+            payload["provider"] = provider_block
+            logger.info(
+                f"Routing: strategy=lowest-cost provider_order={provider_block['order']} allow_fallbacks=False"
+            )
         elif routing_strategy == "highest-throughput":
             payload["provider"] = {"allow_fallbacks": True, "sort": "throughput"}
+            logger.info("Routing: strategy=highest-throughput allow_fallbacks=True")
 
 
 def wait_for_cooldown(provider, max_wait=60):
@@ -450,6 +455,20 @@ def try_cloud_ai(provider, api_key, model, prompt, response_schema=None, request
                     logger.warning(f"{req_prefix}Provider '{provider}' returned 429. Initiating 60s cooldown.")
                     PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
                     return None
+
+            if response.status_code == 400 and attempt < max_retries:
+                # Some budget providers (e.g. StreamLake via OpenRouter lowest-cost) do not support
+                # json_schema response_format. Degrade to json_object and retry.
+                current_rf = payload.get("response_format", {})
+                if current_rf.get("type") == "json_schema":
+                    logger.warning(
+                        f"{req_prefix}Provider '{provider}' returned 400 with json_schema format. "
+                        "Degrading to json_object and retrying (consumes one retry attempt)."
+                    )
+                    if "response" in locals() and hasattr(response, "text"):
+                        logger.warning(f"400 response: {response.text}")
+                    payload["response_format"] = {"type": "json_object"}
+                    continue
 
             response.raise_for_status()
             data = response.json()
@@ -788,6 +807,18 @@ def try_cloud_ai_vision_batch(
                     PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
                     return None
 
+            if response.status_code == 400 and attempt < max_retries:
+                current_rf = payload.get("response_format", {})
+                if current_rf.get("type") == "json_schema":
+                    logger.warning(
+                        f"{req_prefix}Vision batch provider '{provider}' returned 400 with json_schema format. "
+                        "Degrading to json_object and retrying (consumes one retry attempt)."
+                    )
+                    if hasattr(response, "text"):
+                        logger.warning(f"400 response: {response.text}")
+                    payload["response_format"] = {"type": "json_object"}
+                    continue
+
             response.raise_for_status()
             data = response.json()
 
@@ -1091,6 +1122,7 @@ def translate_batch_llm(
     provider=None,
     llm_model=None,
     routing_strategy=None,
+    use_fallback_models=True,
 ):
     if not request_id:
         request_id = str(uuid.uuid4())[:8]
@@ -1207,11 +1239,12 @@ Input:
             if res:
                 return res
 
-            # Fallback to global default model
+            # Fallback to global default model (only if use_fallback_models is True)
             global_model = TL_CONFIG.llm_model
             global_provider = TL_CONFIG.provider
-            if global_provider == provider and global_model and global_model != user_model:
+            if use_fallback_models and global_provider == provider and global_model and global_model != user_model:
                 logger.info(f"{req_prefix}Batch: Falling back to global default model '{global_model}'...")
+
                 res = try_cloud_ai(
                     provider,
                     api_key,
