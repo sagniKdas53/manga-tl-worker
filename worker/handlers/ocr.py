@@ -1089,14 +1089,17 @@ def process_ocr(job_data):
         if vlm_model_used:
             model_identifier += f" + {vlm_model_used}"
 
+        page_id = job_data.get("pageId")
         callback_payload = {
             "imageId": image_id,
+            "pageId": page_id,
             "modelIdentifier": model_identifier,
             "confidence": avg_conf,
             "sourceLanguage": source_language,
             "readingDirection": reading_direction,
             "regions": ordered_regions,
         }
+
 
         try:
             from worker.utils.rate_limit import get_job_costs

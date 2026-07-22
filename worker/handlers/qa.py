@@ -119,14 +119,18 @@ def process_qa(job_data):
 
 
 def _process_qa_hybrid(job_data):
-    image_id = job_data["imageId"]
-    print(f"[QA] Processing Hybrid QA check for image: {image_id}", flush=True)
+    image_id = job_data.get("imageId")
+    page_id = job_data.get("pageId")
+    print(f"[QA] Processing Hybrid QA check for page: {page_id or image_id}", flush=True)
 
     try:
-        backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
+        if page_id:
+            backend_url = CALLBACK_URL.replace("/jobs/callback", f"/pages/{page_id}/details")
+        else:
+            backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
-            print(f"[QA] Failed to get image info: {res.status_code}", flush=True)
+            print(f"[QA] Failed to get page/image info: {res.status_code}", flush=True)
             return
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
@@ -137,6 +141,7 @@ def _process_qa_hybrid(job_data):
     except Exception as e:
         print(f"[QA] Error fetching image details: {e}", flush=True)
         raise
+
 
     # Build region metadata list to seed the LLM
     regions_metadata = []

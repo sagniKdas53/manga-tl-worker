@@ -6,7 +6,8 @@ from worker.services.layout import classify_region_type, group_conversations
 
 def process_layout(job_data):
     """Layout analysis: classify region types and group conversations."""
-    image_id = job_data["imageId"]
+    image_id = job_data.get("imageId")
+    page_id = job_data.get("pageId")
 
     page_num = job_data.get("pageNumber")
     chapter_num = job_data.get("chapterNumber")
@@ -19,14 +20,17 @@ def process_layout(job_data):
             progress_str += f" of Chapter {chapter_num}"
         progress_str += f" (Queue: {queue_len} remaining)"
 
-    print(f"[Layout] Processing image: {image_id}{progress_str}", flush=True)
+    print(f"[Layout] Processing page: {page_id or image_id}{progress_str}", flush=True)
 
     # 1. Fetch OCR regions + panels from backend
     try:
-        backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
+        if page_id:
+            backend_url = CALLBACK_URL.replace("/jobs/callback", f"/pages/{page_id}/details")
+        else:
+            backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
-            print(f"[Layout] Failed to get image info: {res.status_code}", flush=True)
+            print(f"[Layout] Failed to get page/image info: {res.status_code}", flush=True)
             return
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
@@ -38,7 +42,7 @@ def process_layout(job_data):
     if not ocr_regions:
         print("[Layout] No OCR regions found, skipping layout analysis.", flush=True)
         # Still send callback so pipeline continues
-        callback_payload = {"imageId": image_id, "regionTypes": [], "conversations": []}
+        callback_payload = {"imageId": image_id, "pageId": page_id, "regionTypes": [], "conversations": []}
         try:
             res = requests.post(f"{CALLBACK_URL}/layout", json=callback_payload, headers=BACKEND_HEADERS)
             print(f"[Layout] Callback status code: {res.status_code}", flush=True)
@@ -120,6 +124,7 @@ def process_layout(job_data):
     # 4. Send enriched layout callback
     callback_payload = {
         "imageId": image_id,
+        "pageId": page_id,
         "regionTypes": region_types,
         "conversations": [
             {
@@ -134,3 +139,4 @@ def process_layout(job_data):
         print(f"[Layout] Callback status code: {res.status_code}", flush=True)
     except Exception as e:
         print(f"[Layout] Failed to post callback to backend: {e}", flush=True)
+

@@ -27,7 +27,8 @@ def process_translation(job_data):
     from worker.utils.rate_limit import reset_job_costs
 
     reset_job_costs()
-    image_id = job_data["imageId"]
+    image_id = job_data.get("imageId")
+    page_id = job_data.get("pageId")
     request_id = str(uuid.uuid4())[:8]
     req_prefix = f"[{request_id}] "
 
@@ -49,14 +50,17 @@ def process_translation(job_data):
         progress_str += f" (Queue: {queue_len} remaining)"
 
     logger.info(
-        f"{req_prefix}Processing translation for image: {image_id} ({source_lang} -> {target_lang}){progress_str}"
+        f"{req_prefix}Processing translation for page: {page_id or image_id} ({source_lang} -> {target_lang}){progress_str}"
     )
 
     try:
-        backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
+        if page_id:
+            backend_url = CALLBACK_URL.replace("/jobs/callback", f"/pages/{page_id}/details")
+        else:
+            backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
-            raise Exception(f"Failed to get image info: {res.status_code}")
+            raise Exception(f"Failed to get page/image info: {res.status_code}")
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
         conversations = image_info.get("conversations", [])
@@ -306,7 +310,8 @@ def process_translation(job_data):
         )
         logger.info(f"{req_prefix}Final: '{text}' ({lang}) -> '{translated_text}' (failed={translated_text is None})")
 
-    callback_payload = {"imageId": image_id, "translations": translations}
+    callback_payload = {"imageId": image_id, "pageId": page_id, "translations": translations}
+
     from worker.utils.rate_limit import format_cost, get_job_costs
 
     costs = get_job_costs()
