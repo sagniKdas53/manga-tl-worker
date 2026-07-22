@@ -267,6 +267,7 @@ def process_ocr(job_data):
     reading_direction = (job_data.get("readingDirection") or "rtl").strip().lower()
 
     vlm_model_used = None
+    transcriptions: dict = {}
 
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(f"[OCR] Inputs: job_data={job_data}")

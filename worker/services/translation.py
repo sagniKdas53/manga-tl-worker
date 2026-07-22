@@ -429,6 +429,7 @@ def try_cloud_ai(provider, api_key, model, prompt, response_schema=None, request
     max_retries = 3
     base_backoff = 2.0
 
+    response = None
     for attempt in range(max_retries + 1):
         try:
             logger.info(
@@ -465,7 +466,7 @@ def try_cloud_ai(provider, api_key, model, prompt, response_schema=None, request
                         f"{req_prefix}Provider '{provider}' returned 400 with json_schema format. "
                         "Degrading to json_object and retrying (consumes one retry attempt)."
                     )
-                    if "response" in locals() and hasattr(response, "text"):
+                    if "response" in locals() and response is not None and hasattr(response, "text"):
                         logger.warning(f"400 response: {response.text}")
                     payload["response_format"] = {"type": "json_object"}
                     continue
@@ -508,7 +509,7 @@ def try_cloud_ai(provider, api_key, model, prompt, response_schema=None, request
                 time.sleep(sleep_time)
                 continue
             logger.error(f"{req_prefix}Cloud LLM Translation failed: {e}")
-            if "response" in locals() and hasattr(response, "text"):
+            if "response" in locals() and response is not None and hasattr(response, "text"):
                 logger.error(f"Response text: {response.text}")
             return None
         except Exception as e:
@@ -610,6 +611,7 @@ def try_cloud_ai_vision(
     max_retries = 3
     base_backoff = 2.0
 
+    response = None
     for attempt in range(max_retries + 1):
         try:
             logger.info(
@@ -672,7 +674,7 @@ def try_cloud_ai_vision(
                 time.sleep(sleep_time)
                 continue
             logger.error(f"{req_prefix}Vision Translation failed: {e}")
-            if "response" in locals() and hasattr(response, "text"):
+            if "response" in locals() and response is not None and hasattr(response, "text"):
                 logger.error(f"Response text: {response.text}")
             return None
         except Exception as e:
@@ -781,6 +783,7 @@ def try_cloud_ai_vision_batch(
     max_retries = 3
     base_backoff = 2.0
 
+    response = None
     for attempt in range(max_retries + 1):
         try:
             logger.info(
@@ -857,7 +860,7 @@ def try_cloud_ai_vision_batch(
                 time.sleep(sleep_time)
                 continue
             logger.error(f"{req_prefix}Vision Batch OCR failed: {e}")
-            if "response" in locals() and hasattr(response, "text"):
+            if "response" in locals() and response is not None and hasattr(response, "text"):
                 logger.error(f"Response text: {response.text}")
             return None
         except Exception as e:
@@ -907,6 +910,7 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
         else:
             payload["response_format"] = {"type": "json_object"}
 
+    response = None
     for endpoint in endpoints_to_try:
         try:
             logger.info(f"{req_prefix}Trying Local AI endpoint '{endpoint}' using model '{model}'...")
@@ -924,7 +928,7 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
             return data.get("choices", [{}])[0].get("message", {}).get("content", "")
         except Exception as e:
             logger.error(f"{req_prefix}Local AI connection failed for '{endpoint}': {e}")
-            if "response" in locals() and hasattr(response, "text"):
+            if "response" in locals() and response is not None and hasattr(response, "text"):
                 logger.error(f"Response text: {response.text}")
 
     return None
@@ -1002,7 +1006,7 @@ def try_google_translate(text, source_lang="auto", target_lang="en", request_id=
     return None
 
 
-def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
+def translate_text(text, source_lang="auto", target_lang="en", request_id=None, use_fallback_models=True):
     if not request_id:
         request_id = str(uuid.uuid4())[:8]
     req_prefix = f"[{request_id}] "

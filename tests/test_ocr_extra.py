@@ -1,9 +1,7 @@
-import contextlib
 
+import cv2
 import numpy as np
 
-with contextlib.suppress(Exception):
-    import cv2
 from worker.handlers.ocr import (
     detect_background_color,
     detect_background_color_poly,

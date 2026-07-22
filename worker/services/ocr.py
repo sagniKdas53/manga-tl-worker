@@ -285,6 +285,7 @@ def perform_redo_ocr(img_crop_bytes, lang, qa_feedback=None):
                 )
 
     # Try local PaddleOCR first — use the lazy-init reader for the region's language
+    _redo_paddle_reader = None
     if not api_key or provider == "paddleocr":
         _redo_paddle_reader = model_manager.get_paddle_ocr_reader(lang)
 
