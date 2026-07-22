@@ -1091,7 +1091,7 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
             # Fallback to global default model
             global_model = TL_CONFIG.llm_model
             global_provider = TL_CONFIG.provider
-            if global_provider == provider and global_model and global_model != user_model:
+            if use_fallback_models and global_provider == provider and global_model and global_model != user_model:
                 logger.info(f"{req_prefix}Falling back to global default model '{global_model}'...")
                 translated = try_cloud_ai(provider, api_key, global_model, prompt, request_id=request_id)
                 if translated:
@@ -1101,12 +1101,7 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None):
                 else:
                     logger.error(f"{req_prefix}Translation with global fallback model '{global_model}' failed.")
             else:
-                logger.info(f"{req_prefix}No fallback applied (global provider different or model identical).")
-
-    logger.error(f"{req_prefix}All translation tiers failed for text: '{text}'")
-    return None
-
-    # DeepL and Google Translate fallbacks removed per Phase E.1 strict fallback logic
+                logger.info(f"{req_prefix}No fallback applied (global provider different, model identical, or fallback disabled).")
 
     logger.error(f"{req_prefix}All translation tiers failed for text: '{text}'")
     return None
