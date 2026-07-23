@@ -311,7 +311,20 @@ def process_translation(job_data):
         )
         logger.info(f"{req_prefix}Final: '{text}' ({lang}) -> '{translated_text}' (failed={translated_text is None})")
 
-    callback_payload = {"imageId": image_id, "pageId": page_id, "translations": translations}
+    # Check if all translations failed
+    failed_count = sum(1 for t in translations if t.get("translationFailed"))
+    all_failed = failed_count > 0 and failed_count == len(translations)
+    if all_failed:
+        logger.error(f"{req_prefix}All {failed_count} translation(s) failed — reporting error to backend")
+
+    callback_payload = {
+        "imageId": image_id,
+        "pageId": page_id,
+        "translations": translations,
+        "allFailed": all_failed,
+        "failedCount": failed_count,
+        "totalCount": len(translations),
+    }
 
     from worker.utils.rate_limit import format_cost, get_job_costs
 

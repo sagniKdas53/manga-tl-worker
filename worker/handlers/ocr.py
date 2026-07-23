@@ -1098,6 +1098,7 @@ def process_ocr(job_data):
             "confidence": avg_conf,
             "sourceLanguage": source_language,
             "readingDirection": reading_direction,
+            "regionCount": len(ordered_regions),
             "regions": ordered_regions,
         }
 
