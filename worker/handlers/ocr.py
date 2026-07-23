@@ -731,7 +731,12 @@ def process_ocr(job_data):
                                         # Fallback to global default model (only if use_fallback_models is True)
                                         global_model = OCR_CONFIG.vlm_model
                                         global_provider = OCR_CONFIG.provider
-                                        if use_fallback_models and global_provider == provider and global_model and global_model != user_model:
+                                        if (
+                                            use_fallback_models
+                                            and global_provider == provider
+                                            and global_model
+                                            and global_model != user_model
+                                        ):
                                             print(
                                                 f"[OCR] Falling back to global default VLM model '{global_model}'...",
                                                 flush=True,
@@ -1101,7 +1106,6 @@ def process_ocr(job_data):
             "regionCount": len(ordered_regions),
             "regions": ordered_regions,
         }
-
 
         try:
             from worker.utils.rate_limit import get_job_costs

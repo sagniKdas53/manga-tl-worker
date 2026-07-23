@@ -800,4 +800,3 @@ def process_render(job_data):
         print(f"[Render] Callback status code: {res.status_code}", flush=True)
     except Exception as e:
         print(f"[Render] Failed to post callback: {e}", flush=True)
-

@@ -320,9 +320,7 @@ def _inject_openrouter_routing(provider, routing_strategy, payload):
                 "order": ["StreamLake", "NovitaAI", "Baidu Qianfan", "Decart"],
             }
             payload["provider"] = provider_block
-            logger.info(
-                f"Routing: strategy=lowest-cost provider_order={provider_block['order']} allow_fallbacks=False"
-            )
+            logger.info(f"Routing: strategy=lowest-cost provider_order={provider_block['order']} allow_fallbacks=False")
         elif routing_strategy == "highest-throughput":
             payload["provider"] = {"allow_fallbacks": True, "sort": "throughput"}
             logger.info("Routing: strategy=highest-throughput allow_fallbacks=True")
@@ -1105,7 +1103,9 @@ def translate_text(text, source_lang="auto", target_lang="en", request_id=None, 
                 else:
                     logger.error(f"{req_prefix}Translation with global fallback model '{global_model}' failed.")
             else:
-                logger.info(f"{req_prefix}No fallback applied (global provider different, model identical, or fallback disabled).")
+                logger.info(
+                    f"{req_prefix}No fallback applied (global provider different, model identical, or fallback disabled)."
+                )
 
     logger.error(f"{req_prefix}All translation tiers failed for text: '{text}'")
     return None

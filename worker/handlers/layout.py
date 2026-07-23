@@ -139,4 +139,3 @@ def process_layout(job_data):
         print(f"[Layout] Callback status code: {res.status_code}", flush=True)
     except Exception as e:
         print(f"[Layout] Failed to post callback to backend: {e}", flush=True)
-

@@ -142,7 +142,6 @@ def _process_qa_hybrid(job_data):
         print(f"[QA] Error fetching image details: {e}", flush=True)
         raise
 
-
     # Build region metadata list to seed the LLM
     regions_metadata = []
     for r in ocr_regions:
