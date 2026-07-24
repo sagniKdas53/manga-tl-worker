@@ -99,7 +99,9 @@ def test_process_job_rq_stale(mock_update, mock_stale):
 @patch("worker.rq_tasks.requests.get")
 @patch("worker.rq_tasks.process_panel_detection")
 @patch("worker.rq_tasks.time.sleep")
-def test_process_job_rq_retry_logic(mock_sleep, mock_panel, mock_get, mock_update, mock_stale):
+def test_process_job_rq_retry_logic(
+    mock_sleep, mock_panel, mock_get, mock_update, mock_stale
+):
     # Setup mocks
     mock_stale.return_value = False
 
@@ -132,7 +134,9 @@ def test_process_job_rq_retry_logic(mock_sleep, mock_panel, mock_get, mock_updat
 @patch("worker.rq_tasks.requests.get")
 @patch("worker.rq_tasks.process_panel_detection")
 @patch("worker.rq_tasks.time.sleep")
-def test_process_job_rq_max_attempts(mock_sleep, mock_panel, mock_get, mock_update, mock_stale):
+def test_process_job_rq_max_attempts(
+    mock_sleep, mock_panel, mock_get, mock_update, mock_stale
+):
     # Setup mocks
     mock_stale.return_value = False
 

@@ -42,7 +42,11 @@ def test_update_model_costs(mock_redis, mock_req, tmp_path):
         mock_res = MagicMock()
         mock_res.status_code = 200
         mock_res.json.return_value = {
-            "data": {"endpoints": [{"pricing": {"prompt": "0.000001", "completion": "0.000002"}}]}
+            "data": {
+                "endpoints": [
+                    {"pricing": {"prompt": "0.000001", "completion": "0.000002"}}
+                ]
+            }
         }
         mock_req.get.return_value = mock_res
 

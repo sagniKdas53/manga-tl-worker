@@ -20,7 +20,9 @@ def test_load_font_registry_hit():
         mock_tt.return_value = mock_font
         font = load_font(12, "Comic Neue", bold=True)
         assert font == mock_font
-        mock_tt.assert_called_with("/usr/share/fonts/opentype/comic-neue/ComicNeue-Bold.otf", 12)
+        mock_tt.assert_called_with(
+            "/usr/share/fonts/opentype/comic-neue/ComicNeue-Bold.otf", 12
+        )
 
 
 def test_load_font_registry_miss_fallback():
@@ -37,7 +39,9 @@ def test_load_font_registry_miss_fallback():
 def test_load_font_default_fallback():
     with (
         patch("worker.handlers.render.os.path.exists", return_value=False),
-        patch("worker.handlers.render.ImageFont.truetype", side_effect=Exception("error")),
+        patch(
+            "worker.handlers.render.ImageFont.truetype", side_effect=Exception("error")
+        ),
         patch("worker.handlers.render.ImageFont.load_default") as mock_def,
     ):
         mock_font = MagicMock()
@@ -118,7 +122,9 @@ def test_process_render_qa_mode_llm(mock_render_core, mock_redis, mock_requests)
 @patch("worker.handlers.render.download_image")
 @patch("worker.handlers.render.os.makedirs")
 @patch("builtins.open")
-def test_process_render_success(mock_open, mock_makedirs, mock_download, mock_minio, mock_requests):
+def test_process_render_success(
+    mock_open, mock_makedirs, mock_download, mock_minio, mock_requests
+):
     from PIL import Image
 
     mock_redis = MagicMock()
@@ -180,5 +186,8 @@ def test_process_render_fail_api(mock_requests):
     mock_res = MagicMock()
     mock_res.status_code = 500
     mock_requests.get.return_value = mock_res
-    with patch("worker.config.QA_MODE", "normal"), pytest.raises(Exception, match=r".*"):
+    with (
+        patch("worker.config.QA_MODE", "normal"),
+        pytest.raises(Exception, match=r".*"),
+    ):
         process_render({"imageId": "123"})

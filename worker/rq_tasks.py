@@ -39,7 +39,9 @@ def check_stale_job(queue_name, job_data):
                 # If image exists we can proceed. Future logic for specific cancellation can go here.
                 return False
             elif res.status_code == 404:
-                print(f"[RQ Task] Image {image_id} not found, aborting job.", flush=True)
+                print(
+                    f"[RQ Task] Image {image_id} not found, aborting job.", flush=True
+                )
                 return True
         except Exception:
             pass

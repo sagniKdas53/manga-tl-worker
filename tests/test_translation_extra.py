@@ -19,7 +19,9 @@ from worker.services.translation import (
 
 def test_validate_translation_response():
     # test dict format
-    data = {"translations": [{"id": "1", "translation": "hello", "translationScore": 0.9}]}
+    data = {
+        "translations": [{"id": "1", "translation": "hello", "translationScore": 0.9}]
+    }
     res = validate_translation_response(data)
     assert "1" in res  # type: ignore
     assert res["1"]["translatedText"] == "hello"  # type: ignore
@@ -103,7 +105,9 @@ def test_try_cloud_ai_vision(mock_post):
     mock_resp.json.return_value = {"content": [{"text": "hello vision"}]}
     mock_post.return_value = mock_resp
 
-    res = try_cloud_ai_vision("anthropic", "key", "claude", "prompt", "base64", system_prompt="sys")
+    res = try_cloud_ai_vision(
+        "anthropic", "key", "claude", "prompt", "base64", system_prompt="sys"
+    )
     assert res == "hello vision"
 
 
@@ -198,7 +202,9 @@ def test_translate_batch_deepl(mock_env, mock_post):
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
-    mock_resp.json.return_value = {"translations": [{"text": "hello deepl 1"}, {"text": "hello deepl 2"}]}
+    mock_resp.json.return_value = {
+        "translations": [{"text": "hello deepl 1"}, {"text": "hello deepl 2"}]
+    }
     mock_post.return_value = mock_resp
 
     regions = [{"id": "1", "text": "j1"}, {"id": "2", "text": "j2"}]

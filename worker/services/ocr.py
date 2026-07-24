@@ -79,7 +79,9 @@ def parse_paddle_ocr_results(raw_results):
     return results
 
 
-def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None, routing_strategy=None):
+def try_cloud_ocr(
+    img_crop_bytes, provider, api_key, model, qa_feedback=None, routing_strategy=None
+):
     import base64
 
     base64_image = base64.b64encode(img_crop_bytes).decode("utf-8")
@@ -87,9 +89,7 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None, ro
     feedback_instruction = ""
     if qa_feedback:
         if qa_feedback.lower() == "user_rejected":
-            feedback_instruction = (
-                " The user rejected the previous OCR result. Please provide a clean, accurate extraction."
-            )
+            feedback_instruction = " The user rejected the previous OCR result. Please provide a clean, accurate extraction."
         else:
             feedback_instruction = f" The QA reviewer rejected the previous extraction with this feedback: '{qa_feedback}'. Please fix the issue."
 
@@ -122,7 +122,9 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None, ro
                         {"type": "text", "text": prompt},
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            },
                         },
                     ],
                 }
@@ -151,7 +153,9 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None, ro
                         {"type": "text", "text": prompt},
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            },
                         },
                     ],
                 }
@@ -269,7 +273,9 @@ def perform_redo_ocr(img_crop_bytes, lang, qa_feedback=None):
                     f"[OCR Redo] Trying Cloud AI OCR with provider '{provider}' and model '{current_model}'...",
                     flush=True,
                 )
-                result = try_cloud_ocr(img_crop_bytes, provider, api_key, current_model, qa_feedback)
+                result = try_cloud_ocr(
+                    img_crop_bytes, provider, api_key, current_model, qa_feedback
+                )
                 if result:
                     text, confidence = result
                     if text and is_valid_ocr_text(text):
@@ -302,14 +308,18 @@ def perform_redo_ocr(img_crop_bytes, lang, qa_feedback=None):
                 gc.collect()
                 parsed_crop_results = parse_paddle_ocr_results(crop_results)
                 if parsed_crop_results:
-                    text = " ".join(line[1] for line in parsed_crop_results if line[1].strip())
+                    text = " ".join(
+                        line[1] for line in parsed_crop_results if line[1].strip()
+                    )
                     if not is_valid_ocr_text(text):
                         print(
                             f"[OCR Redo] PaddleOCR result rejected by validation: '{text}'",
                             flush=True,
                         )
                         text = ""
-                    confidence = float(np.mean([line[2] for line in parsed_crop_results]))
+                    confidence = float(
+                        np.mean([line[2] for line in parsed_crop_results])
+                    )
                     print(
                         f"[OCR Redo] PaddleOCR Success: '{text}' (conf={confidence})",
                         flush=True,

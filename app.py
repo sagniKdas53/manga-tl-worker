@@ -74,7 +74,10 @@ def cleanup_audit_cache():
                     if os.path.isfile(f) and (now - os.path.getmtime(f)) > max_age:
                         os.remove(f)
                         count += 1
-                print(f"[Unified Worker] Cleaned up {count} old files in {QA_AUDIT_CACHE_DIR}.", flush=True)
+                print(
+                    f"[Unified Worker] Cleaned up {count} old files in {QA_AUDIT_CACHE_DIR}.",
+                    flush=True,
+                )
         except Exception as e:
             print(f"[Unified Worker] Error cleaning up QA audit cache: {e}", flush=True)
 

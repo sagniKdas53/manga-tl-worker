@@ -122,7 +122,9 @@ def detect_background_color_poly(img, mask_polygon):
     if img is None or not mask_polygon:
         return "#ffffff"
     try:
-        pts = json.loads(mask_polygon) if isinstance(mask_polygon, str) else mask_polygon
+        pts = (
+            json.loads(mask_polygon) if isinstance(mask_polygon, str) else mask_polygon
+        )
         if not isinstance(pts, list) or len(pts) < 3:
             return "#ffffff"
 
@@ -164,7 +166,9 @@ def get_split_polygon(mask, bbox, img_w, img_h, margin=20):
         crop_mask = np.zeros_like(mask)
         crop_mask[y1:y2, x1:x2] = mask[y1:y2, x1:x2]
 
-        contours, _ = cv2.findContours(crop_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(
+            crop_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
         if not contours:
             return None
 
@@ -320,7 +324,11 @@ def process_ocr(job_data):
             "yes",
         )
 
-        provider = (job_data.get("ocrProvider") or OCR_CONFIG.provider or "local").lower().strip()
+        provider = (
+            (job_data.get("ocrProvider") or OCR_CONFIG.provider or "local")
+            .lower()
+            .strip()
+        )
         use_paddle_ocr = (provider == "local") and not disable_local_ocr
 
         # WARNING: Even when using Cloud VLM OCR (where transcription is offloaded), local models
@@ -330,8 +338,16 @@ def process_ocr(job_data):
         # dedicated machines are supported, allowing parallel detection and full OCR job queues.
         with acquire_lock("ocr"):
             # Try PaddleOCR (PP-OCRv5) first — reader is lazily created per language
-            paddle_ocr_reader = model_manager.get_paddle_ocr_reader(source_language) if use_paddle_ocr else None
-            paddle_ocr_detector = model_manager.get_paddle_ocr_detector(source_language) if not use_paddle_ocr else None
+            paddle_ocr_reader = (
+                model_manager.get_paddle_ocr_reader(source_language)
+                if use_paddle_ocr
+                else None
+            )
+            paddle_ocr_detector = (
+                model_manager.get_paddle_ocr_detector(source_language)
+                if not use_paddle_ocr
+                else None
+            )
 
             if use_paddle_ocr and paddle_ocr_reader is None:
                 raise RuntimeError(
@@ -345,8 +361,12 @@ def process_ocr(job_data):
 
             if paddle_ocr_reader is not None:
                 try:
-                    det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det").strip()
-                    rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
+                    det_model = os.environ.get(
+                        "PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det"
+                    ).strip()
+                    rec_model = os.environ.get(
+                        "PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec"
+                    ).strip()
                     print(
                         f"[OCR] Running PaddleOCR ({det_model}/{rec_model}, lang={source_language}).",
                         flush=True,
@@ -363,7 +383,9 @@ def process_ocr(job_data):
                     nparr = np.frombuffer(img_bytes, np.uint8)
                     img_original = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-                    img_decoded, ocr_upscale = downscale_for_ocr(img_original, max_dim=1024)
+                    img_decoded, ocr_upscale = downscale_for_ocr(
+                        img_original, max_dim=1024
+                    )
 
                     if ocr_upscale != 1.0:
                         print(
@@ -393,14 +415,18 @@ def process_ocr(job_data):
 
             if paddle_ocr_detector is not None:
                 try:
-                    det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det").strip()
+                    det_model = os.environ.get(
+                        "PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det"
+                    ).strip()
                     print(
                         f"[OCR] Running PaddleOCR Detector ({det_model}, lang={source_language}).",
                         flush=True,
                     )
                     nparr = np.frombuffer(img_bytes, np.uint8)
                     img_original = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                    img_decoded, ocr_upscale = downscale_for_ocr(img_original, max_dim=1024)
+                    img_decoded, ocr_upscale = downscale_for_ocr(
+                        img_original, max_dim=1024
+                    )
                     del nparr
                     if img_decoded is not None:
                         raw_results = paddle_ocr_detector.predict(img_decoded)
@@ -495,7 +521,9 @@ def process_ocr(job_data):
             for b_idx, bubble in enumerate(detected_bubbles):
                 bx, by, bw, bh = bubble["bbox"]
                 bubble_mask = bubble_masks[b_idx]
-                assigned_frags = [f for f in raw_fragments if f.get("bubble_idx", -1) == b_idx]
+                assigned_frags = [
+                    f for f in raw_fragments if f.get("bubble_idx", -1) == b_idx
+                ]
 
                 if not assigned_frags:
                     # If Cloud VLM is active, we STILL want to crop and VLM-OCR empty bubbles to be safe!
@@ -518,7 +546,9 @@ def process_ocr(job_data):
                     continue
 
                 # Run proximity merging inside the bubble to separate multiple semantic bubbles
-                merged_bubble_regions = merge_ocr_regions(assigned_frags, reading_direction, threshold_ratio=2.0)
+                merged_bubble_regions = merge_ocr_regions(
+                    assigned_frags, reading_direction, threshold_ratio=2.0
+                )
 
                 for r_sub in merged_bubble_regions:
                     if len(merged_bubble_regions) == 1:
@@ -533,12 +563,16 @@ def process_ocr(job_data):
                             r_sub["width"],
                             r_sub["height"],
                         ]
-                        poly_pts = get_split_polygon(bubble_mask, r_box, img_w, img_h, margin=20)
+                        poly_pts = get_split_polygon(
+                            bubble_mask, r_box, img_w, img_h, margin=20
+                        )
                         if not poly_pts:
                             poly_pts = bubble["mask_polygon"]
 
                         # 2. Bounding box of the split polygon
-                        sp_x, sp_y, sp_w, sp_h = cv2.boundingRect(np.array(poly_pts, dtype=np.int32))
+                        sp_x, sp_y, sp_w, sp_h = cv2.boundingRect(
+                            np.array(poly_pts, dtype=np.int32)
+                        )
 
                         # 3. Bounding box of the eroded mask (safe area)
                         split_mask = np.zeros((img_h, img_w), dtype=np.uint8)
@@ -548,7 +582,9 @@ def process_ocr(job_data):
                             cv2.MORPH_ELLIPSE,
                             (2 * erosion_px + 1, 2 * erosion_px + 1),
                         )
-                        eroded_split_mask = cv2.erode(split_mask, kernel_erode, iterations=1)
+                        eroded_split_mask = cv2.erode(
+                            split_mask, kernel_erode, iterations=1
+                        )
                         if cv2.countNonZero(eroded_split_mask) == 0:
                             eroded_split_mask = split_mask
                         sx, sy, sw, sh = cv2.boundingRect(eroded_split_mask)
@@ -574,7 +610,9 @@ def process_ocr(job_data):
                     )
 
             # 5. Add unmatched fragments as merged standalone regions (direct text / SFX)
-            unmatched_frags = [f for f in raw_fragments if f.get("bubble_idx", -1) == -1]
+            unmatched_frags = [
+                f for f in raw_fragments if f.get("bubble_idx", -1) == -1
+            ]
             if unmatched_frags:
                 merged_unmatched = merge_ocr_regions(unmatched_frags, reading_direction)
 
@@ -634,7 +672,9 @@ def process_ocr(job_data):
                         if crop.size > 0:
                             _, buffer = cv2.imencode(".jpg", crop)
                             base64_image = base64.b64encode(buffer).decode("utf-8")  # type: ignore
-                            crops_payload.append({"id": f"region_{cr_idx}", "base64": base64_image})
+                            crops_payload.append(
+                                {"id": f"region_{cr_idx}", "base64": base64_image}
+                            )
 
                     schema = {
                         "type": "object",
@@ -670,7 +710,9 @@ def process_ocr(job_data):
                             elif provider == "nvidia":
                                 vlm_model = "nvidia/nemotron-nano-12b-v2-vl"
 
-                        lang_name = LANG_MAP.get(source_language.lower(), source_language)
+                        lang_name = LANG_MAP.get(
+                            source_language.lower(), source_language
+                        )
                         sys_prompt = (
                             f"You are an expert manga OCR system. Perform OCR on each of the provided image crops. "
                             f"The source language is {lang_name}. Return ONLY a valid JSON object matching the schema. "
@@ -717,7 +759,10 @@ def process_ocr(job_data):
                                     )
                                     if chunk_res:
                                         parsed = json.loads(
-                                            chunk_res.strip().removeprefix("```json").removesuffix("```").strip()
+                                            chunk_res.strip()
+                                            .removeprefix("```json")
+                                            .removesuffix("```")
+                                            .strip()
                                         )
                                         results_list = parsed.get("results", [])
                                         if results_list:
@@ -776,9 +821,14 @@ def process_ocr(job_data):
                                         flush=True,
                                     )
                             else:
-                                local_model = job_data.get("ocrModel") or os.environ.get("LOCAL_VLM_MODEL", "").strip()
+                                local_model = (
+                                    job_data.get("ocrModel")
+                                    or os.environ.get("LOCAL_VLM_MODEL", "").strip()
+                                )
                                 if local_model:
-                                    user_prompt = "Extract the text from this speech bubble."
+                                    user_prompt = (
+                                        "Extract the text from this speech bubble."
+                                    )
                                     crop_schema = {
                                         "type": "object",
                                         "properties": {
@@ -814,8 +864,12 @@ def process_ocr(job_data):
                                                     results_list.append(
                                                         {
                                                             "id": crop_info["id"],
-                                                            "text": parsed.get("text", ""),
-                                                            "confidence": parsed.get("confidence", 0.99),
+                                                            "text": parsed.get(
+                                                                "text", ""
+                                                            ),
+                                                            "confidence": parsed.get(
+                                                                "confidence", 0.99
+                                                            ),
                                                         }
                                                     )
                                                     vlm_model_used = local_model
@@ -834,7 +888,9 @@ def process_ocr(job_data):
                                             )
                             return results_list
 
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        with concurrent.futures.ThreadPoolExecutor(
+                            max_workers=1
+                        ) as executor:
                             futures = {
                                 executor.submit(process_crop_chunk, idx, chunk): chunk
                                 for idx, chunk in enumerate(crop_chunks)
@@ -882,9 +938,13 @@ def process_ocr(job_data):
                                         "bubbleX": r.get("bubbleX", r["x"]),
                                         "bubbleY": r.get("bubbleY", r["y"]),
                                         "bubbleWidth": r.get("bubbleWidth", r["width"]),
-                                        "bubbleHeight": r.get("bubbleHeight", r["height"]),
+                                        "bubbleHeight": r.get(
+                                            "bubbleHeight", r["height"]
+                                        ),
                                         "bubbleId": f"bubble_{r['bubble_idx']}",
-                                        "detectionConfidence": r["bubble"]["confidence"],
+                                        "detectionConfidence": r["bubble"][
+                                            "confidence"
+                                        ],
                                         "maskPolygon": json.dumps(r["poly_pts"]),
                                         "safeTextX": r["safe_rect"][0],
                                         "safeTextY": r["safe_rect"][1],
@@ -931,7 +991,11 @@ def process_ocr(job_data):
                             regions.append(
                                 {
                                     "text": final_text,
-                                    "detectedLanguage": (detect_language(final_text) if final_text else "ja"),
+                                    "detectedLanguage": (
+                                        detect_language(final_text)
+                                        if final_text
+                                        else "ja"
+                                    ),
                                     "confidence": r["confidence"],
                                     "rotation": 0.0,
                                     "x": r["x"],
@@ -959,7 +1023,9 @@ def process_ocr(job_data):
                                 {
                                     "text": final_text,
                                     "detectedLanguage": (
-                                        detect_language(final_text) if final_text else r["detectedLanguage"]
+                                        detect_language(final_text)
+                                        if final_text
+                                        else r["detectedLanguage"]
                                     ),
                                     "confidence": r["confidence"],
                                     "rotation": 0.0,
@@ -996,7 +1062,9 @@ def process_ocr(job_data):
                 bubble_box = detect_bubble_contour(img, x, y, width, height)
 
                 use_bubble_contour = (
-                    bubble_box and bubble_box["width"] <= width * 2.5 and bubble_box["height"] <= height * 2.5
+                    bubble_box
+                    and bubble_box["width"] <= width * 2.5
+                    and bubble_box["height"] <= height * 2.5
                 )
                 if use_bubble_contour:
                     bx, by, bw, bh = (
@@ -1034,7 +1102,9 @@ def process_ocr(job_data):
                         "bubbleHeight": bh,
                         "bubbleId": None,
                         "detectionConfidence": 0.0,
-                        "maskPolygon": (json.dumps(mask_polygon) if mask_polygon else None),
+                        "maskPolygon": (
+                            json.dumps(mask_polygon) if mask_polygon else None
+                        ),
                         "safeTextX": bx,
                         "safeTextY": by,
                         "safeTextW": bw,
@@ -1064,7 +1134,9 @@ def process_ocr(job_data):
                 unmapped_regions.append(r)
 
         ordered_regions = []
-        sorted_panel_indices = sorted(panel_regions_map.keys(), key=lambda idx: panels[idx]["readingOrder"])
+        sorted_panel_indices = sorted(
+            panel_regions_map.keys(), key=lambda idx: panels[idx]["readingOrder"]
+        )
 
         # Curry the reading direction into the comparator so sort is direction-aware
         def _bubble_cmp(a, b):
@@ -1088,7 +1160,11 @@ def process_ocr(job_data):
             flush=True,
         )
 
-        avg_conf = sum(r["confidence"] for r in ordered_regions) / len(ordered_regions) if ordered_regions else 1.0
+        avg_conf = (
+            sum(r["confidence"] for r in ordered_regions) / len(ordered_regions)
+            if ordered_regions
+            else 1.0
+        )
 
         rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
         model_identifier = f"PaddleOCR({rec_model})"
@@ -1117,7 +1193,9 @@ def process_ocr(job_data):
                     "breakdown": costs,
                     "prompt_tokens": sum(c.get("prompt_tokens", 0) for c in costs),
                     "estimated_cost": sum(c.get("estimated_cost", 0.0) for c in costs),
-                    "completion_tokens": sum(c.get("completion_tokens", 0) for c in costs),
+                    "completion_tokens": sum(
+                        c.get("completion_tokens", 0) for c in costs
+                    ),
                 }
                 callback_payload["cost"] = cost_payload
         except Exception as e:

@@ -68,7 +68,9 @@ def test_perform_redo_ocr_cloud(mock_ocr_config, mock_post):
 
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.json.return_value = {"choices": [{"message": {"content": "Cloud OCR text"}}]}
+    mock_response.json.return_value = {
+        "choices": [{"message": {"content": "Cloud OCR text"}}]
+    }
     mock_post.return_value = mock_response
 
     text, conf = perform_redo_ocr(b"dummy_image_bytes", "en")

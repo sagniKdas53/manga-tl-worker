@@ -73,7 +73,9 @@ def test_process_region_redo_ocr(mock_post, mock_get, mock_perform_ocr, mock_dow
 @patch("worker.handlers.redo.translate_text")
 @patch("worker.handlers.redo.requests.get")
 @patch("worker.handlers.redo.requests.post")
-def test_process_region_redo_translation(mock_post, mock_get, mock_translate, mock_download):
+def test_process_region_redo_translation(
+    mock_post, mock_get, mock_translate, mock_download
+):
     mock_image_info = {
         "id": "image-uuid-1",
         "storagePath": "originals/page1.png",

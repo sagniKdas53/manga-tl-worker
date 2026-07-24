@@ -16,7 +16,11 @@ def retry_with_backoff(func, max_retries=3, base_delay=2.0):
             return func()
         except requests.exceptions.RequestException as e:
             # Determine if it's transient
-            status_code = getattr(e.response, "status_code", None) if hasattr(e, "response") else None
+            status_code = (
+                getattr(e.response, "status_code", None)
+                if hasattr(e, "response")
+                else None
+            )
             is_transient = isinstance(
                 e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
             ) or status_code in (429, 500, 502, 503, 504)

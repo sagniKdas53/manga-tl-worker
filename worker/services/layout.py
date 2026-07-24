@@ -46,7 +46,9 @@ def classify_region_type(region, panel, image_width, image_height):
     cleaned = re.sub(r"[\s！？\?!\.\,\-\_\"]", "", text.strip())
     is_kana_only = False
     if cleaned:
-        is_kana_only = bool(re.match(r"^[\u3040-\u309F\u30A0-\u30FF\u30FC\uFF66-\uFF9F]+$", cleaned))
+        is_kana_only = bool(
+            re.match(r"^[\u3040-\u309F\u30A0-\u30FF\u30FC\uFF66-\uFF9F]+$", cleaned)
+        )
 
     # --- SFX detection ---
     # Kana-only text or very tall narrow region (vertical SFX)
@@ -158,12 +160,18 @@ def group_conversations(regions, panels, reading_direction="rtl"):
             if region_type in ("narration", "sfx", "caption", "sign"):
                 # Flush current dialogue group
                 if current_group:
-                    conversations.append(_finish_conversation_group(current_group, current_panel_ids))
+                    conversations.append(
+                        _finish_conversation_group(current_group, current_panel_ids)
+                    )
                     current_group = []
                     current_panel_ids = set()
 
                 # Single-region group for narration/sfx
-                scene = "narration" if region_type in ("narration", "caption") else "sfx_cluster"
+                scene = (
+                    "narration"
+                    if region_type in ("narration", "caption")
+                    else "sfx_cluster"
+                )
                 conversations.append(
                     {
                         "regionIds": [rid],
@@ -182,7 +190,9 @@ def group_conversations(regions, panels, reading_direction="rtl"):
                 gap = ry - last_bottom
                 if gap > proximity_threshold:
                     # Start new group
-                    conversations.append(_finish_conversation_group(current_group, current_panel_ids))
+                    conversations.append(
+                        _finish_conversation_group(current_group, current_panel_ids)
+                    )
                     current_group = []
                     current_panel_ids = set()
 
@@ -191,7 +201,9 @@ def group_conversations(regions, panels, reading_direction="rtl"):
 
         # Flush remaining group
         if current_group:
-            conversations.append(_finish_conversation_group(current_group, current_panel_ids))
+            conversations.append(
+                _finish_conversation_group(current_group, current_panel_ids)
+            )
 
     # Handle unmapped regions (outside all panels)
     for r in unmapped:

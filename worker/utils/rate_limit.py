@@ -112,7 +112,9 @@ def update_model_costs(models=None):
                 model_key = model.lower()
 
                 # For free models, initialize price to zero directly
-                is_free = ":free" in model_key or "-free" in model_key or "free" in model_key
+                is_free = (
+                    ":free" in model_key or "-free" in model_key or "free" in model_key
+                )
                 if is_free:
                     cost_data = {
                         "prompt": 0.0,
@@ -166,7 +168,9 @@ def update_model_costs(models=None):
 
                 if res.status_code == 200:
                     if not endpoints:
-                        raise ValueError(f"Model {model} is not available on OpenRouter (no endpoints returned).")
+                        raise ValueError(
+                            f"Model {model} is not available on OpenRouter (no endpoints returned)."
+                        )
 
                     prompt_costs = []
                     completion_costs = []
@@ -200,9 +204,13 @@ def update_model_costs(models=None):
                             f"Updated average cost for {model}: Prompt=${(avg_prompt * 1e6):.4f}/M, Completion=${(avg_comp * 1e6):.4f}/M"
                         )
                 elif res.status_code == 404:
-                    raise ValueError(f"Model {model} is not available on OpenRouter (404 Not Found).")
+                    raise ValueError(
+                        f"Model {model} is not available on OpenRouter (404 Not Found)."
+                    )
                 else:
-                    logger.warning(f"Failed to fetch endpoints for {model}: {res.status_code}")
+                    logger.warning(
+                        f"Failed to fetch endpoints for {model}: {res.status_code}"
+                    )
             except ValueError as ve:
                 raise ve
             except Exception as e:
@@ -251,7 +259,12 @@ def estimate_cost(model, prompt_tokens, completion_tokens, provider=None):
         "google_translate",
         "free_api",
     )
-    is_free = ":free" in model_lower or "-free" in model_lower or "free" in model_lower or "free" in provider_lower
+    is_free = (
+        ":free" in model_lower
+        or "-free" in model_lower
+        or "free" in model_lower
+        or "free" in provider_lower
+    )
 
     if is_local or is_free:
         cost_info = {

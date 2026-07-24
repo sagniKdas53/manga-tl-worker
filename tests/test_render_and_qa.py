@@ -205,7 +205,9 @@ def test_process_qa_vlm_cloud_success(
 
     # Assertions
     mock_try_cloud_vlm.assert_called_once()
-    mock_minio.get_object.assert_called_once_with("manga-library", "rendered/image-uuid-1.png")
+    mock_minio.get_object.assert_called_once_with(
+        "manga-library", "rendered/image-uuid-1.png"
+    )
     mock_post.assert_called_once()
     _post_args, post_kwargs = mock_post.call_args
     qa_results = post_kwargs["json"]["qaResults"]
@@ -314,7 +316,9 @@ def test_process_qa_vlm_local_fallback(
 @patch("worker.handlers.qa.requests.get")
 @patch("worker.handlers.qa.requests.post")
 @patch("worker.handlers.qa.QA_MODE", "vlm")
-def test_process_qa_vlm_empty_ocr_regions(mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm):
+def test_process_qa_vlm_empty_ocr_regions(
+    mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm
+):
     # Setup mock image info with empty ocrRegions
     mock_image_info = {"id": "image-uuid-1", "ocrRegions": []}
     mock_get_res = MagicMock()
