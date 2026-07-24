@@ -13,3 +13,4 @@ pytest-cov
 pytest-mock
 ruff
 pyright
+pydantic

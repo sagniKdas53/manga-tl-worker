@@ -205,11 +205,19 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 post_data = self.rfile.read(content_length)
                 payload = json.loads(post_data.decode("utf-8"))
 
-                queue_name = payload.get("queue_name")
-                job_data = payload.get("job_data")
+                from worker.schemas import JobSubmitRequest
+                from pydantic import ValidationError
 
-                if not queue_name or not job_data:
-                    raise ValueError("Missing queue_name or job_data")
+                try:
+                    job_request = JobSubmitRequest.model_validate(payload)
+                except ValidationError as ve:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(f"Validation Error: {ve}".encode())
+                    return
+
+                queue_name = job_request.queue_name
+                job_data = job_request.job_data.model_dump(exclude_unset=True)
 
                 global ACTIVE_JOBS, ACTIVE_HEAVY_JOBS, ACTIVE_LIGHT_JOBS
                 with ACTIVE_JOBS_LOCK:
