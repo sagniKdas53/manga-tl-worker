@@ -43,9 +43,7 @@ def cleanup_audit_cache():
             if os.path.exists(QA_AUDIT_CACHE_DIR):
                 files = glob.glob(os.path.join(QA_AUDIT_CACHE_DIR, "*.jpg"))
                 count = sum(
-                    1
-                    for f in files
-                    if os.path.isfile(f) and (now - os.path.getmtime(f)) > max_age and not os.remove(f)
+                    1 for f in files if os.path.isfile(f) and (now - os.path.getmtime(f)) > max_age and not os.remove(f)
                 )
                 print(f"[Worker] Cleaned up {count} old files in {QA_AUDIT_CACHE_DIR}.", flush=True)
         except Exception as e:

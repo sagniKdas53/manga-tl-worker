@@ -28,6 +28,7 @@ async def lifespan(app: FastAPI):
         conc.set_seeding_complete(True)
     except Exception as e:
         import sys
+
         print(f"[Worker] Seeding failed, exiting. Error: {e}", flush=True)
         sys.exit(1)
 
@@ -47,6 +48,7 @@ async def lifespan(app: FastAPI):
 async def _periodic_maintenance():
     """Periodically unload expired models and log status. Replaces app.py's while True loop."""
     import time as _time
+
     last_status_time = 0.0
     status_interval = 300.0  # 5 minutes
 

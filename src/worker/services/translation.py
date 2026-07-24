@@ -309,7 +309,6 @@ def parse_and_validate_batch(response_text, unmatched_regions):
     return None
 
 
-
 def _inject_openrouter_routing(provider, routing_strategy, payload):
     if provider == "openrouter":
         if routing_strategy == "lowest-cost":
