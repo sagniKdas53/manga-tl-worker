@@ -27,9 +27,7 @@ def process_layout(job_data):
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
-            print(
-                f"[Layout] Failed to get page/image info: {res.status_code}", flush=True
-            )
+            print(f"[Layout] Failed to get page/image info: {res.status_code}", flush=True)
             return
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
@@ -48,9 +46,7 @@ def process_layout(job_data):
             "conversations": [],
         }
         try:
-            res = requests.post(
-                f"{CALLBACK_URL}/layout", json=callback_payload, headers=BACKEND_HEADERS
-            )
+            res = requests.post(f"{CALLBACK_URL}/layout", json=callback_payload, headers=BACKEND_HEADERS)
             print(f"[Layout] Callback status code: {res.status_code}", flush=True)
         except Exception as e:
             print(f"[Layout] Failed to post callback: {e}", flush=True)
@@ -59,15 +55,11 @@ def process_layout(job_data):
     # Get image dimensions from the first panel or estimate from regions
     image_width = max(
         (p.get("bboxX", 0) + p.get("bboxW", 0) for p in panels),
-        default=max(
-            (r.get("bboxX", 0) + r.get("bboxW", 0) for r in ocr_regions), default=1000
-        ),
+        default=max((r.get("bboxX", 0) + r.get("bboxW", 0) for r in ocr_regions), default=1000),
     )
     image_height = max(
         (p.get("bboxY", 0) + p.get("bboxH", 0) for p in panels),
-        default=max(
-            (r.get("bboxY", 0) + r.get("bboxH", 0) for r in ocr_regions), default=1400
-        ),
+        default=max((r.get("bboxY", 0) + r.get("bboxH", 0) for r in ocr_regions), default=1400),
     )
 
     # Build panel lookup by ID
@@ -124,12 +116,9 @@ def process_layout(job_data):
                 text = reg.get("text", "").strip().replace("\n", " ")
                 rtype = reg.get("regionType") or reg.get("region_type") or "speech"
                 region_details.append(f"[{rtype}] '{text}'")
-        panel_info = (
-            f"panels={conv['panelIds']}" if conv.get("panelIds") else "unmapped"
-        )
+        panel_info = f"panels={conv['panelIds']}" if conv.get("panelIds") else "unmapped"
         print(
-            f"[Layout] Conversation #{idx + 1} ({conv['sceneType']}, {panel_info}): "
-            + " -> ".join(region_details),
+            f"[Layout] Conversation #{idx + 1} ({conv['sceneType']}, {panel_info}): " + " -> ".join(region_details),
             flush=True,
         )
     print("[Layout] -------------------------------------", flush=True)
@@ -148,9 +137,7 @@ def process_layout(job_data):
         ],
     }
     try:
-        res = requests.post(
-            f"{CALLBACK_URL}/layout", json=callback_payload, headers=BACKEND_HEADERS
-        )
+        res = requests.post(f"{CALLBACK_URL}/layout", json=callback_payload, headers=BACKEND_HEADERS)
         print(f"[Layout] Callback status code: {res.status_code}", flush=True)
     except Exception as e:
         print(f"[Layout] Failed to post callback to backend: {e}", flush=True)

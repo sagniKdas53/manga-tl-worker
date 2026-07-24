@@ -1,6 +1,5 @@
-from unittest.mock import MagicMock, patch
-import json
 import copy
+from unittest.mock import MagicMock, patch
 
 from worker.services.translation import translate_batch_llm, try_cloud_ai_vision_batch
 
@@ -78,6 +77,4 @@ def test_try_cloud_ai_vision_batch_degrade_json_schema(mock_sleep, mock_post):
 
             # Check second request degraded to json_object
             second_call_kwargs = call_kwargs_history[1]
-            assert (
-                second_call_kwargs["json"]["response_format"]["type"] == "json_object"
-            )
+            assert second_call_kwargs["json"]["response_format"]["type"] == "json_object"

@@ -54,9 +54,7 @@ def test_process_ocr_vlm_gemini(
             "safe_rect": [15, 25, 90, 70],
         }
     ]
-    mock_try_cloud_vlm.return_value = json.dumps(
-        {"results": [{"id": "region_0", "text": "Hello from Gemini VLM OCR"}]}
-    )
+    mock_try_cloud_vlm.return_value = json.dumps({"results": [{"id": "region_0", "text": "Hello from Gemini VLM OCR"}]})
 
     mock_image_info = {"id": "image-uuid-1", "panels": []}
     mock_get_res = MagicMock()
@@ -200,9 +198,7 @@ def test_process_ocr_vlm_nvidia(
             "safe_rect": [15, 25, 90, 70],
         }
     ]
-    mock_try_cloud_vlm.return_value = json.dumps(
-        {"results": [{"id": "region_0", "text": "Hello from Nvidia VLM OCR"}]}
-    )
+    mock_try_cloud_vlm.return_value = json.dumps({"results": [{"id": "region_0", "text": "Hello from Nvidia VLM OCR"}]})
 
     mock_image_info = {"id": "image-uuid-1", "panels": []}
     mock_get_res = MagicMock()

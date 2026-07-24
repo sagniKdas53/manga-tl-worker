@@ -87,9 +87,7 @@ def process_translation(job_data):
         local_only = provider in ("ollama", "lmstudio")
         max_batch_size = 5 if local_only else 8
 
-        logger.info(
-            f"{req_prefix}Batch size set to {max_batch_size} (local_only={local_only})"
-        )
+        logger.info(f"{req_prefix}Batch size set to {max_batch_size} (local_only={local_only})")
 
         # Build context string
         import json
@@ -102,24 +100,20 @@ def process_translation(job_data):
             page_manifest_entries.append(
                 {
                     "id": r["id"],
-                    "regionType": r.get("regionType")
-                    or r.get("region_type")
-                    or "speech",
+                    "regionType": r.get("regionType") or r.get("region_type") or "speech",
                     "readingOrder": r.get("bubbleReadingOrder") or 0,
                     "conversationGroup": r.get("conversationId") or None,
                     "text": r["text"],
                 }
             )
-        page_manifest_str = json.dumps(
-            page_manifest_entries, ensure_ascii=False, indent=2
+        page_manifest_str = json.dumps(page_manifest_entries, ensure_ascii=False, indent=2)
+        manifest_context = (
+            f"Full Page Region Manifest (for conversational flow and context):\n{page_manifest_str}\n---\n"
         )
-        manifest_context = f"Full Page Region Manifest (for conversational flow and context):\n{page_manifest_str}\n---\n"
         context_str = manifest_context + context_str
 
         # Chunk regions respecting conversation grouping
-        unmatched_chunks = chunk_regions_by_conversation(
-            unmatched_regions, conversations, max_batch_size
-        )
+        unmatched_chunks = chunk_regions_by_conversation(unmatched_regions, conversations, max_batch_size)
 
         def process_chunk(idx, chunk):
             logger.info(
@@ -127,12 +121,8 @@ def process_translation(job_data):
             )
             try:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        f"{req_prefix}translate_batch_llm input chunk: {chunk}"
-                    )
-                    logger.debug(
-                        f"{req_prefix}translate_batch_llm prompt context: {context_str}"
-                    )
+                    logger.debug(f"{req_prefix}translate_batch_llm input chunk: {chunk}")
+                    logger.debug(f"{req_prefix}translate_batch_llm prompt context: {context_str}")
 
                 batch_res = translate_batch_llm(
                     chunk,
@@ -151,16 +141,11 @@ def process_translation(job_data):
 
                 return parse_and_validate_batch(batch_res, chunk)
             except Exception as e:
-                logger.error(
-                    f"{req_prefix}Standard batch translation failed for chunk {idx + 1}: {e}"
-                )
+                logger.error(f"{req_prefix}Standard batch translation failed for chunk {idx + 1}: {e}")
                 return None
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            futures = {
-                executor.submit(process_chunk, idx, chunk): chunk
-                for idx, chunk in enumerate(unmatched_chunks)
-            }
+            futures = {executor.submit(process_chunk, idx, chunk): chunk for idx, chunk in enumerate(unmatched_chunks)}
             for future in concurrent.futures.as_completed(futures):
                 chunk_mapping = future.result()
                 if chunk_mapping:
@@ -180,9 +165,7 @@ def process_translation(job_data):
                 translated_text = translated
 
             # Run sanity check
-            if translated_text and is_valid_translation(
-                r["text"], translated_text, request_id=request_id
-            ):
+            if translated_text and is_valid_translation(r["text"], translated_text, request_id=request_id):
                 resolved_translations[rid] = translated
             else:
                 failed_batch_regions.append(r)
@@ -197,9 +180,7 @@ def process_translation(job_data):
             logger.info(
                 f"{req_prefix}Retrying {len(failed_batch_regions)} failed items in batch (max {LOCAL_AI_MAX_BATCH_RETRIES} retry pass)..."
             )
-            retry_chunks = chunk_regions_by_conversation(
-                failed_batch_regions, conversations, max_batch_size
-            )
+            retry_chunks = chunk_regions_by_conversation(failed_batch_regions, conversations, max_batch_size)
 
             def process_retry_chunk(idx, r_chunk):
                 logger.info(
@@ -207,9 +188,7 @@ def process_translation(job_data):
                 )
                 try:
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            f"{req_prefix}Retry translate_batch_llm input chunk: {r_chunk}"
-                        )
+                        logger.debug(f"{req_prefix}Retry translate_batch_llm input chunk: {r_chunk}")
 
                     retry_res = translate_batch_llm(
                         r_chunk,
@@ -224,15 +203,11 @@ def process_translation(job_data):
                         use_fallback_models=use_fallback_models,
                     )
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            f"{req_prefix}Retry translate_batch_llm output: {retry_res}"
-                        )
+                        logger.debug(f"{req_prefix}Retry translate_batch_llm output: {retry_res}")
 
                     return parse_and_validate_batch(retry_res, r_chunk)
                 except Exception as e:
-                    logger.error(
-                        f"{req_prefix}Retry batch chunk {idx + 1} translation failed: {e}"
-                    )
+                    logger.error(f"{req_prefix}Retry batch chunk {idx + 1} translation failed: {e}")
                     return None
 
             retry_mapping = {}
@@ -258,9 +233,7 @@ def process_translation(job_data):
                 elif isinstance(translated, str):
                     translated_text = translated
 
-                if translated_text and is_valid_translation(
-                    r["text"], translated_text, request_id=request_id
-                ):
+                if translated_text and is_valid_translation(r["text"], translated_text, request_id=request_id):
                     resolved_translations[rid] = translated
                 else:
                     still_failed_regions.append(r)
@@ -286,9 +259,7 @@ def process_translation(job_data):
                         request_id=request_id,
                         use_fallback_models=use_fallback_models,
                     )
-                    if translated and is_valid_translation(
-                        text, translated, request_id=request_id
-                    ):
+                    if translated and is_valid_translation(text, translated, request_id=request_id):
                         resolved_translations[rid] = {
                             "translatedText": translated,
                             "translationNotes": "Individual translation fallback",
@@ -296,9 +267,7 @@ def process_translation(job_data):
                             "tone": "",
                         }
                     else:
-                        logger.warning(
-                            f"{req_prefix}Giving up on '{text}' after 3 attempts."
-                        )
+                        logger.warning(f"{req_prefix}Giving up on '{text}' after 3 attempts.")
                         resolved_translations[rid] = None
 
     # Format the final callback response
@@ -337,17 +306,13 @@ def process_translation(job_data):
                 "confidence": translation_score,
             }
         )
-        logger.info(
-            f"{req_prefix}Final: '{text}' ({lang}) -> '{translated_text}' (failed={translated_text is None})"
-        )
+        logger.info(f"{req_prefix}Final: '{text}' ({lang}) -> '{translated_text}' (failed={translated_text is None})")
 
     # Check if all translations failed
     failed_count = sum(1 for t in translations if t.get("translationFailed"))
     all_failed = failed_count > 0 and failed_count == len(translations)
     if all_failed:
-        logger.error(
-            f"{req_prefix}All {failed_count} translation(s) failed — reporting error to backend"
-        )
+        logger.error(f"{req_prefix}All {failed_count} translation(s) failed — reporting error to backend")
 
     callback_payload = {
         "imageId": image_id,
@@ -363,9 +328,7 @@ def process_translation(job_data):
     costs = get_job_costs()
     if costs:
         has_na = any(c.get("estimated_cost") is None for c in costs)
-        total_estimated_cost = (
-            None if has_na else sum(c.get("estimated_cost", 0.0) or 0.0 for c in costs)
-        )
+        total_estimated_cost = None if has_na else sum(c.get("estimated_cost", 0.0) or 0.0 for c in costs)
         total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
         total_completion_tokens = sum(c.get("completion_tokens", 0) or 0 for c in costs)
 
@@ -386,9 +349,7 @@ def process_translation(job_data):
             f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
         )
     if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(
-            f"{req_prefix}Translation Outputs: callback_payload={callback_payload}"
-        )
+        logger.debug(f"{req_prefix}Translation Outputs: callback_payload={callback_payload}")
     try:
         res = requests.post(
             f"{CALLBACK_URL}/translation",

@@ -97,9 +97,7 @@ PROMPT_VERSION = "batch-v3"
 def is_valid_translation(source, translated, request_id=None):
     req_prefix = f"[{request_id}] " if request_id else ""
     if not translated:
-        logger.warning(
-            f"{req_prefix}Validation failed reason=empty_translation source={source}"
-        )
+        logger.warning(f"{req_prefix}Validation failed reason=empty_translation source={source}")
         return False
 
     translated_stripped = translated.strip()
@@ -120,16 +118,11 @@ def is_valid_translation(source, translated, request_id=None):
 
     # Check if translated == source for Japanese
     if contains_japanese(source_stripped) and translated_stripped == source_stripped:
-        logger.warning(
-            f"{req_prefix}Validation failed reason=identical_to_source source={source}"
-        )
+        logger.warning(f"{req_prefix}Validation failed reason=identical_to_source source={source}")
         return False
 
     # Check if translated is pathologically longer than source
-    if (
-        len(source_stripped) <= 5
-        and len(translated_stripped) > len(source_stripped) * 20
-    ):
+    if len(source_stripped) <= 5 and len(translated_stripped) > len(source_stripped) * 20:
         logger.warning(
             f"{req_prefix}Validation failed reason=pathologically_long source={source} translation={translated}"
         )
@@ -214,11 +207,7 @@ def should_translate_region(region):
     cleaned_for_kana = re.sub(r"[\s！？\?!\.\,\-\_\"]", "", stripped)
     is_kana_only = False
     if cleaned_for_kana:
-        is_kana_only = bool(
-            re.match(
-                r"^[\u3040-\u309F\u30A0-\u30FF\u30FC\uFF66-\uFF9F]+$", cleaned_for_kana
-            )
-        )
+        is_kana_only = bool(re.match(r"^[\u3040-\u309F\u30A0-\u30FF\u30FC\uFF66-\uFF9F]+$", cleaned_for_kana))
 
     if is_kana_only:
         return True
@@ -258,10 +247,7 @@ def validate_translation_response(parsed_json):
         elif "items" in parsed_json:
             items = parsed_json["items"]
         else:
-            if all(
-                isinstance(k, str) and isinstance(v, str)
-                for k, v in parsed_json.items()
-            ):
+            if all(isinstance(k, str) and isinstance(v, str) for k, v in parsed_json.items()):
                 return {
                     k: {
                         "translatedText": v,
@@ -283,13 +269,7 @@ def validate_translation_response(parsed_json):
             continue
         rid = item.get("id")
         translation = item.get("translation")
-        if (
-            rid
-            and translation
-            and isinstance(rid, str)
-            and isinstance(translation, str)
-            and translation.strip()
-        ):
+        if rid and translation and isinstance(rid, str) and isinstance(translation, str) and translation.strip():
             validated[rid] = {
                 "translatedText": translation.strip(),
                 "translationNotes": item.get("translationNotes", ""),
@@ -340,9 +320,7 @@ def _inject_openrouter_routing(provider, routing_strategy, payload):
                 "order": ["StreamLake", "NovitaAI", "Baidu Qianfan", "Decart"],
             }
             payload["provider"] = provider_block
-            logger.info(
-                f"Routing: strategy=lowest-cost provider_order={provider_block['order']} allow_fallbacks=False"
-            )
+            logger.info(f"Routing: strategy=lowest-cost provider_order={provider_block['order']} allow_fallbacks=False")
         elif routing_strategy == "highest-throughput":
             payload["provider"] = {"allow_fallbacks": True, "sort": "throughput"}
             logger.info("Routing: strategy=highest-throughput allow_fallbacks=True")
@@ -354,9 +332,7 @@ def wait_for_cooldown(provider, max_wait=60):
     remaining = cooldown_until - time.time()
     if remaining > 0:
         sleep_time = min(remaining, max_wait)
-        logger.info(
-            f"Provider '{provider}' is on cooldown. Sleeping for {sleep_time:.1f} seconds to let it clear..."
-        )
+        logger.info(f"Provider '{provider}' is on cooldown. Sleeping for {sleep_time:.1f} seconds to let it clear...")
         time.sleep(sleep_time)
 
 
@@ -479,15 +455,11 @@ def try_cloud_ai(
                 PROVIDER_COOLDOWNS[provider] = time.time() + 5.0
                 if attempt < max_retries:
                     sleep_time = base_backoff * (2**attempt)
-                    logger.warning(
-                        f"{req_prefix}Provider '{provider}' returned 429. Retrying in {sleep_time:.2f}s..."
-                    )
+                    logger.warning(f"{req_prefix}Provider '{provider}' returned 429. Retrying in {sleep_time:.2f}s...")
                     time.sleep(sleep_time)
                     continue
                 else:
-                    logger.warning(
-                        f"{req_prefix}Provider '{provider}' returned 429. Initiating 60s cooldown."
-                    )
+                    logger.warning(f"{req_prefix}Provider '{provider}' returned 429. Initiating 60s cooldown.")
                     PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
                     return None
 
@@ -500,11 +472,7 @@ def try_cloud_ai(
                         f"{req_prefix}Provider '{provider}' returned 400 with json_schema format. "
                         "Degrading to json_object and retrying (consumes one retry attempt)."
                     )
-                    if (
-                        "response" in locals()
-                        and response is not None
-                        and hasattr(response, "text")
-                    ):
+                    if "response" in locals() and response is not None and hasattr(response, "text"):
                         logger.warning(f"400 response: {response.text}")
                     payload["response_format"] = {"type": "json_object"}
                     continue
@@ -513,9 +481,7 @@ def try_cloud_ai(
             data = response.json()
 
             elapsed = time.perf_counter() - start
-            logger.info(
-                f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s"
-            )
+            logger.info(f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s")
 
             if provider == "anthropic":
                 content = data.get("content", [{}])[0].get("text", "")
@@ -524,30 +490,20 @@ def try_cloud_ai(
                 completion_tokens = usage.get("output_tokens", 0)
                 total_tokens = prompt_tokens + completion_tokens
             else:
-                content = (
-                    data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                )
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 usage = data.get("usage", {})
                 prompt_tokens = usage.get("prompt_tokens", 0)
                 completion_tokens = usage.get("completion_tokens", 0)
                 total_tokens = usage.get("total_tokens", 0)
 
-            logger.info(
-                f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}"
-            )
-            cost = estimate_cost(
-                actual_model, prompt_tokens, completion_tokens, provider
-            )
+            logger.info(f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
+            cost = estimate_cost(actual_model, prompt_tokens, completion_tokens, provider)
             logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
 
             return content
 
         except requests.exceptions.RequestException as e:
-            status_code = (
-                getattr(e.response, "status_code", None)
-                if hasattr(e, "response")
-                else None
-            )
+            status_code = getattr(e.response, "status_code", None) if hasattr(e, "response") else None
             is_transient = isinstance(
                 e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
             ) or status_code in (429, 500, 502, 503, 504)
@@ -559,11 +515,7 @@ def try_cloud_ai(
                 time.sleep(sleep_time)
                 continue
             logger.error(f"{req_prefix}Cloud LLM Translation failed: {e}")
-            if (
-                "response" in locals()
-                and response is not None
-                and hasattr(response, "text")
-            ):
+            if "response" in locals() and response is not None and hasattr(response, "text"):
                 logger.error(f"Response text: {response.text}")
             return None
         except Exception as e:
@@ -673,9 +625,7 @@ def try_cloud_ai_vision(
             )
             start = time.perf_counter()
 
-            response = requests.post(
-                url, headers=headers, json=payload, timeout=(10, 45)
-            )
+            response = requests.post(url, headers=headers, json=payload, timeout=(10, 45))
 
             if response.status_code == 429:
                 # Trigger temporary 5s cooldown immediately on first 429
@@ -688,9 +638,7 @@ def try_cloud_ai_vision(
                     time.sleep(sleep_time)
                     continue
                 else:
-                    logger.warning(
-                        f"{req_prefix}Vision provider '{provider}' returned 429. Initiating 60s cooldown."
-                    )
+                    logger.warning(f"{req_prefix}Vision provider '{provider}' returned 429. Initiating 60s cooldown.")
                     PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
                     return None
 
@@ -698,9 +646,7 @@ def try_cloud_ai_vision(
             data = response.json()
 
             elapsed = time.perf_counter() - start
-            logger.info(
-                f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s"
-            )
+            logger.info(f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s")
 
             if provider == "anthropic":
                 content = data.get("content", [{}])[0].get("text", "")
@@ -709,30 +655,20 @@ def try_cloud_ai_vision(
                 completion_tokens = usage.get("output_tokens", 0)
                 total_tokens = prompt_tokens + completion_tokens
             else:
-                content = (
-                    data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                )
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 usage = data.get("usage", {})
                 prompt_tokens = usage.get("prompt_tokens", 0)
                 completion_tokens = usage.get("completion_tokens", 0)
                 total_tokens = usage.get("total_tokens", 0)
 
-            logger.info(
-                f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}"
-            )
-            cost = estimate_cost(
-                actual_model, prompt_tokens, completion_tokens, provider
-            )
+            logger.info(f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
+            cost = estimate_cost(actual_model, prompt_tokens, completion_tokens, provider)
             logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
 
             return content
 
         except requests.exceptions.RequestException as e:
-            status_code = (
-                getattr(e.response, "status_code", None)
-                if hasattr(e, "response")
-                else None
-            )
+            status_code = getattr(e.response, "status_code", None) if hasattr(e, "response") else None
             is_transient = isinstance(
                 e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
             ) or status_code in (429, 500, 502, 503, 504)
@@ -744,11 +680,7 @@ def try_cloud_ai_vision(
                 time.sleep(sleep_time)
                 continue
             logger.error(f"{req_prefix}Vision Translation failed: {e}")
-            if (
-                "response" in locals()
-                and response is not None
-                and hasattr(response, "text")
-            ):
+            if "response" in locals() and response is not None and hasattr(response, "text"):
                 logger.error(f"Response text: {response.text}")
             return None
         except Exception as e:
@@ -817,16 +749,12 @@ def try_cloud_ai_vision_batch(
         if system_prompt:
             payload["system"] = system_prompt
         elif response_schema:
-            payload["system"] = (
-                "Respond with a valid JSON object matching the requested schema."
-            )
+            payload["system"] = "Respond with a valid JSON object matching the requested schema."
     else:
         # openai, openrouter, gemini, nvidia, etc.
         user_message_content = [{"type": "text", "text": prompt}]
         for crop in crops:
-            user_message_content.append(
-                {"type": "text", "text": f"Region ID: {crop['id']}"}
-            )
+            user_message_content.append({"type": "text", "text": f"Region ID: {crop['id']}"})
             user_message_content.append(
                 {  # type: ignore
                     "type": "image_url",
@@ -869,9 +797,7 @@ def try_cloud_ai_vision_batch(
             )
             start = time.perf_counter()
 
-            response = requests.post(
-                url, headers=headers, json=payload, timeout=(10, 45)
-            )
+            response = requests.post(url, headers=headers, json=payload, timeout=(10, 45))
 
             if response.status_code == 429:
                 # Trigger temporary 5s cooldown immediately on first 429
@@ -906,9 +832,7 @@ def try_cloud_ai_vision_batch(
             data = response.json()
 
             elapsed = time.perf_counter() - start
-            logger.info(
-                f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s"
-            )
+            logger.info(f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s")
 
             if provider == "anthropic":
                 content = data.get("content", [{}])[0].get("text", "")
@@ -917,30 +841,20 @@ def try_cloud_ai_vision_batch(
                 completion_tokens = usage.get("output_tokens", 0)
                 total_tokens = prompt_tokens + completion_tokens
             else:
-                content = (
-                    data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                )
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 usage = data.get("usage", {})
                 prompt_tokens = usage.get("prompt_tokens", 0)
                 completion_tokens = usage.get("completion_tokens", 0)
                 total_tokens = usage.get("total_tokens", 0)
 
-            logger.info(
-                f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}"
-            )
-            cost = estimate_cost(
-                actual_model, prompt_tokens, completion_tokens, provider
-            )
+            logger.info(f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
+            cost = estimate_cost(actual_model, prompt_tokens, completion_tokens, provider)
             logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
 
             return content
 
         except requests.exceptions.RequestException as e:
-            status_code = (
-                getattr(e.response, "status_code", None)
-                if hasattr(e, "response")
-                else None
-            )
+            status_code = getattr(e.response, "status_code", None) if hasattr(e, "response") else None
             is_transient = isinstance(
                 e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
             ) or status_code in (429, 500, 502, 503, 504)
@@ -952,11 +866,7 @@ def try_cloud_ai_vision_batch(
                 time.sleep(sleep_time)
                 continue
             logger.error(f"{req_prefix}Vision Batch OCR failed: {e}")
-            if (
-                "response" in locals()
-                and response is not None
-                and hasattr(response, "text")
-            ):
+            if "response" in locals() and response is not None and hasattr(response, "text"):
                 logger.error(f"Response text: {response.text}")
             return None
         except Exception as e:
@@ -968,14 +878,8 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
     req_prefix = f"[{request_id}] " if request_id else ""
     enforce_rate_limit()
 
-    local_provider = (
-        os.environ.get("LOCAL_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "lmstudio"))
-        .lower()
-        .strip()
-    )
-    local_endpoint = os.environ.get(
-        "LOCAL_LLM_ENDPOINT", os.environ.get("LLM_ENDPOINT", "")
-    ).strip()
+    local_provider = os.environ.get("LOCAL_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "lmstudio")).lower().strip()
+    local_endpoint = os.environ.get("LOCAL_LLM_ENDPOINT", os.environ.get("LLM_ENDPOINT", "")).strip()
     model = os.environ.get("LOCAL_LLM_MODEL", "gemma3:4b")
 
     if not local_endpoint:
@@ -984,9 +888,7 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
         else:
             local_endpoint = "http://host.docker.internal:1234/v1/chat/completions"
     else:
-        if not local_endpoint.endswith(
-            "/v1/chat/completions"
-        ) and not local_endpoint.endswith("/api/v1/chat"):
+        if not local_endpoint.endswith("/v1/chat/completions") and not local_endpoint.endswith("/api/v1/chat"):
             if local_endpoint.endswith("/"):
                 local_endpoint += "v1/chat/completions"
             else:
@@ -994,19 +896,11 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
 
     endpoints_to_try = [local_endpoint]
     if "localhost" in local_endpoint:
-        endpoints_to_try.append(
-            local_endpoint.replace("localhost", "host.docker.internal")
-        )
+        endpoints_to_try.append(local_endpoint.replace("localhost", "host.docker.internal"))
     elif "host.docker.internal" in local_endpoint:
-        endpoints_to_try.append(
-            local_endpoint.replace("host.docker.internal", "localhost")
-        )
+        endpoints_to_try.append(local_endpoint.replace("host.docker.internal", "localhost"))
 
-    system_pr = (
-        MANGA_TRANSLATION_JSON_SYSTEM_PROMPT
-        if response_schema
-        else MANGA_TRANSLATION_SYSTEM_PROMPT
-    )
+    system_pr = MANGA_TRANSLATION_JSON_SYSTEM_PROMPT if response_schema else MANGA_TRANSLATION_SYSTEM_PROMPT
 
     payload = {
         "model": model,
@@ -1025,9 +919,7 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
     response = None
     for endpoint in endpoints_to_try:
         try:
-            logger.info(
-                f"{req_prefix}Trying Local AI endpoint '{endpoint}' using model '{model}'..."
-            )
+            logger.info(f"{req_prefix}Trying Local AI endpoint '{endpoint}' using model '{model}'...")
 
             from worker.utils.lock import acquire_lock
 
@@ -1038,19 +930,11 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
                 data = response.json()
                 elapsed = time.perf_counter() - start
 
-            logger.info(
-                f"{req_prefix}Provider={local_provider} Model={model} Time={elapsed:.2f}s"
-            )
+            logger.info(f"{req_prefix}Provider={local_provider} Model={model} Time={elapsed:.2f}s")
             return data.get("choices", [{}])[0].get("message", {}).get("content", "")
         except Exception as e:
-            logger.error(
-                f"{req_prefix}Local AI connection failed for '{endpoint}': {e}"
-            )
-            if (
-                "response" in locals()
-                and response is not None
-                and hasattr(response, "text")
-            ):
+            logger.error(f"{req_prefix}Local AI connection failed for '{endpoint}': {e}")
+            if "response" in locals() and response is not None and hasattr(response, "text"):
                 logger.error(f"Response text: {response.text}")
 
     return None
@@ -1092,9 +976,7 @@ def try_deepl(text, target_lang="en", request_id=None):
             logger.info(f"{req_prefix}DeepL Translation Success: '{translated}'")
             return translated
         else:
-            logger.error(
-                f"{req_prefix}DeepL API returned error: {res.status_code} - {res.text}"
-            )
+            logger.error(f"{req_prefix}DeepL API returned error: {res.status_code} - {res.text}")
     except Exception as e:
         logger.error(f"{req_prefix}DeepL Translation failed: {e}")
     return None
@@ -1118,9 +1000,7 @@ def try_google_translate(text, source_lang="auto", target_lang="en", request_id=
             logger.trace(f"{req_prefix}[TRACE] Google Translate Request URL: {url}")  # type: ignore
             logger.trace(f"{req_prefix}[TRACE] Google Translate Response Status: {res.status_code}")  # type: ignore
             logger.trace(f"{req_prefix}[TRACE] Google Translate Response Headers: {dict(res.headers)}")  # type: ignore
-        logger.info(
-            f"{req_prefix}Provider=google_translate Model=free_api Time={elapsed:.2f}s"
-        )
+        logger.info(f"{req_prefix}Provider=google_translate Model=free_api Time={elapsed:.2f}s")
 
         if res.status_code == 200:
             data = res.json()
@@ -1217,12 +1097,8 @@ def translate_text(
         # 1. Cloud LLM Layer
         if api_key:
             user_model = TL_CONFIG.llm_model
-            logger.info(
-                f"{req_prefix}Trying provider '{provider}' with model '{user_model}'..."
-            )
-            translated = try_cloud_ai(
-                provider, api_key, user_model, prompt, request_id=request_id
-            )
+            logger.info(f"{req_prefix}Trying provider '{provider}' with model '{user_model}'...")
+            translated = try_cloud_ai(provider, api_key, user_model, prompt, request_id=request_id)
             if translated:
                 cleaned = clean_translated_text(translated)
                 if is_valid_translation(text, cleaned, request_id=request_id):
@@ -1231,26 +1107,15 @@ def translate_text(
             # Fallback to global default model
             global_model = TL_CONFIG.llm_model
             global_provider = TL_CONFIG.provider
-            if (
-                use_fallback_models
-                and global_provider == provider
-                and global_model
-                and global_model != user_model
-            ):
-                logger.info(
-                    f"{req_prefix}Falling back to global default model '{global_model}'..."
-                )
-                translated = try_cloud_ai(
-                    provider, api_key, global_model, prompt, request_id=request_id
-                )
+            if use_fallback_models and global_provider == provider and global_model and global_model != user_model:
+                logger.info(f"{req_prefix}Falling back to global default model '{global_model}'...")
+                translated = try_cloud_ai(provider, api_key, global_model, prompt, request_id=request_id)
                 if translated:
                     cleaned = clean_translated_text(translated)
                     if is_valid_translation(text, cleaned, request_id=request_id):
                         return cleaned
                 else:
-                    logger.error(
-                        f"{req_prefix}Translation with global fallback model '{global_model}' failed."
-                    )
+                    logger.error(f"{req_prefix}Translation with global fallback model '{global_model}' failed.")
             else:
                 logger.info(
                     f"{req_prefix}No fallback applied (global provider different, model identical, or fallback disabled)."
@@ -1367,18 +1232,14 @@ Input:
     if local_only:
         logger.info(f"{req_prefix}Batch: Trying Local LLM ({provider})...")
         try:
-            res = try_local_ai(
-                prompt, bubbles_json, response_schema, request_id=request_id
-            )
+            res = try_local_ai(prompt, bubbles_json, response_schema, request_id=request_id)
             if res:
                 return res
         except Exception as e:
             logger.error(f"{req_prefix}Local LLM batch translation failed: {e}")
     else:
         if api_key:
-            logger.info(
-                f"{req_prefix}Batch: Trying provider '{provider}' with model '{user_model}'..."
-            )
+            logger.info(f"{req_prefix}Batch: Trying provider '{provider}' with model '{user_model}'...")
             res = try_cloud_ai(
                 provider,
                 api_key,
@@ -1394,15 +1255,8 @@ Input:
             # Fallback to global default model (only if use_fallback_models is True)
             global_model = TL_CONFIG.llm_model
             global_provider = TL_CONFIG.provider
-            if (
-                use_fallback_models
-                and global_provider == provider
-                and global_model
-                and global_model != user_model
-            ):
-                logger.info(
-                    f"{req_prefix}Batch: Falling back to global default model '{global_model}'..."
-                )
+            if use_fallback_models and global_provider == provider and global_model and global_model != user_model:
+                logger.info(f"{req_prefix}Batch: Falling back to global default model '{global_model}'...")
 
                 res = try_cloud_ai(
                     provider,
@@ -1416,13 +1270,9 @@ Input:
                 if res:
                     return res
                 else:
-                    logger.error(
-                        f"{req_prefix}Batch translation with global fallback model '{global_model}' failed."
-                    )
+                    logger.error(f"{req_prefix}Batch translation with global fallback model '{global_model}' failed.")
             else:
-                logger.info(
-                    f"{req_prefix}Batch: No fallback applied (global provider different or model identical)."
-                )
+                logger.info(f"{req_prefix}Batch: No fallback applied (global provider different or model identical).")
     return None
 
 
@@ -1443,9 +1293,7 @@ def try_local_vlm_vision(
         else:
             local_endpoint = "http://host.docker.internal:1234/v1/chat/completions"
 
-    if not local_endpoint.endswith(
-        "/v1/chat/completions"
-    ) and not local_endpoint.endswith("/api/v1/chat"):
+    if not local_endpoint.endswith("/v1/chat/completions") and not local_endpoint.endswith("/api/v1/chat"):
         if local_endpoint.endswith("/"):
             local_endpoint += "v1/chat/completions"
         else:
@@ -1483,9 +1331,7 @@ def try_local_vlm_vision(
 
     try:
         with acquire_lock("local-llm"):
-            logger.info(
-                f"{req_prefix}Sending local VLM request to {local_endpoint} using model {model}..."
-            )
+            logger.info(f"{req_prefix}Sending local VLM request to {local_endpoint} using model {model}...")
             start = time.perf_counter()
             response = requests.post(local_endpoint, json=payload, timeout=(10, 45))
             elapsed = time.perf_counter() - start
@@ -1496,9 +1342,7 @@ def try_local_vlm_vision(
                 choice = res_json["choices"][0]["message"]["content"]
                 return choice
             else:
-                logger.error(
-                    f"{req_prefix}Local VLM API returned status {response.status_code}: {response.text}"
-                )
+                logger.error(f"{req_prefix}Local VLM API returned status {response.status_code}: {response.text}")
     except Exception as e:
         logger.error(f"{req_prefix}Error during local VLM query: {e}")
     return None
@@ -1516,9 +1360,7 @@ def translate_batch_deepl(unmatched_regions, target_lang="en", request_id=None):
         url = "https://api.deepl.com/v2/translate"
 
     try:
-        logger.info(
-            f"{req_prefix}Sending batch request of {len(unmatched_regions)} bubbles to DeepL API..."
-        )
+        logger.info(f"{req_prefix}Sending batch request of {len(unmatched_regions)} bubbles to DeepL API...")
         headers = {
             "Authorization": f"DeepL-Auth-Key {deepl_key}",
             "Content-Type": "application/json",
@@ -1539,9 +1381,7 @@ def translate_batch_deepl(unmatched_regions, target_lang="en", request_id=None):
                 mapping[r["id"]] = translations[i]["text"]
             return mapping
         else:
-            logger.error(
-                f"{req_prefix}DeepL API returned error: {res.status_code} - {res.text}"
-            )
+            logger.error(f"{req_prefix}DeepL API returned error: {res.status_code} - {res.text}")
     except Exception as e:
         logger.error(f"{req_prefix}DeepL batch translation failed: {e}")
     return None
@@ -1561,7 +1401,9 @@ def build_context_string(image_info):
                 meta = series_meta.get("metadataJson")
                 if isinstance(meta, str):
                     meta = json.loads(meta)
-                context_str += f"Roster & Editorial Style Guidelines:\n{json.dumps(meta, ensure_ascii=False, indent=2)}\n"
+                context_str += (
+                    f"Roster & Editorial Style Guidelines:\n{json.dumps(meta, ensure_ascii=False, indent=2)}\n"
+                )
             except Exception:
                 context_str += f"Roster & Editorial Style Guidelines:\n{series_meta.get('metadataJson')}\n"
 

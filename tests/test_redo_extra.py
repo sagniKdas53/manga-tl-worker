@@ -34,9 +34,7 @@ def test_process_region_redo_ocr(mock_dl, mock_req):
         mock_ocr.return_value = ("new text", 0.99)
         with patch("worker.handlers.redo.detect_language") as mock_lang:
             mock_lang.return_value = "ja"
-            process_region_redo(
-                {"imageId": "img1", "regionId": "r1", "redoType": "ocr"}
-            )
+            process_region_redo({"imageId": "img1", "regionId": "r1", "redoType": "ocr"})
 
     mock_req.post.assert_called()
     payload = mock_req.post.call_args[1]["json"]

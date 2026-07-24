@@ -8,7 +8,7 @@ from minio import Minio
 
 # Configure structured logging
 TRACE_LEVEL_NUM = 5
-setattr(logging, "TRACE", TRACE_LEVEL_NUM)
+logging.TRACE = TRACE_LEVEL_NUM  # type: ignore
 logging.addLevelName(TRACE_LEVEL_NUM, "TRACE")
 
 
@@ -21,11 +21,7 @@ def trace(self, message, *args, **kws):
 logging.Logger.trace = trace  # type: ignore
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
-level = (
-    TRACE_LEVEL_NUM
-    if LOG_LEVEL == "TRACE"
-    else getattr(logging, LOG_LEVEL, logging.INFO)
-)
+level = TRACE_LEVEL_NUM if LOG_LEVEL == "TRACE" else getattr(logging, LOG_LEVEL, logging.INFO)
 logging.basicConfig(level=level, format="%(asctime)s [%(levelname)s] %(message)s")
 # Suppress noisy third-party loggers that flood output at DEBUG level
 for _noisy_logger in ("PIL", "PIL.PngImagePlugin"):
@@ -89,9 +85,7 @@ ENABLE_QA_AUDIT_CACHE = os.environ.get("ENABLE_QA_AUDIT_CACHE", "false").lower()
 QA_AUDIT_CACHE_DIR = os.environ.get("QA_AUDIT_CACHE_DIR", "/app/data/qa_audit")
 
 # Callback & Auth Configs
-CALLBACK_URL = os.environ.get(
-    "BACKEND_CALLBACK_URL", "http://localhost:8080/api/internal/jobs/callback"
-)
+CALLBACK_URL = os.environ.get("BACKEND_CALLBACK_URL", "http://localhost:8080/api/internal/jobs/callback")
 INTERNAL_API_TOKEN = os.environ.get("INTERNAL_API_TOKEN", "")
 BACKEND_HEADERS = {"X-Internal-Token": INTERNAL_API_TOKEN} if INTERNAL_API_TOKEN else {}
 
@@ -124,16 +118,16 @@ minio_client = Minio(
 # YOLO Speech Bubble Segmentation Configs
 YOLO_MODEL_PATH = os.environ.get("YOLO_MODEL_PATH", "")
 if not YOLO_MODEL_PATH:
-    LOCAL_PATH = "/home/sagnik/Projects/docker-composes/manga-library/data/worker/huggingface/models/yolo11n_bubble.onnx"
+    LOCAL_PATH = (
+        "/home/sagnik/Projects/docker-composes/manga-library/data/worker/huggingface/models/yolo11n_bubble.onnx"
+    )
     DOCKER_PATH = "/root/.cache/huggingface/models/yolo11n_bubble.onnx"
     YOLO_MODEL_PATH = LOCAL_PATH if os.path.exists(LOCAL_PATH) else DOCKER_PATH
 
 YOLO_CONF_THRESHOLD = float(os.environ.get("YOLO_CONF_THRESHOLD", "0.25"))
 YOLO_INPUT_SIZE = int(os.environ.get("YOLO_INPUT_SIZE", "1280"))
 YOLO_MASK_EROSION = int(os.environ.get("YOLO_MASK_EROSION", "3"))
-YOLO_PINNED_CHECKSUM = (
-    "c9208cb610aa35b8f8dc7ef0890182322992a43399a853093ad5d04a3764af4f"
-)
+YOLO_PINNED_CHECKSUM = "c9208cb610aa35b8f8dc7ef0890182322992a43399a853093ad5d04a3764af4f"
 YOLO_FALLBACK_MODE = os.environ.get("YOLO_FALLBACK_MODE", "opencv").lower()
 
 
@@ -152,18 +146,10 @@ class ModelConfig:
         self.vlm_model = os.environ.get(vlm_env, "").strip()
 
         llm_list_raw = os.environ.get(llm_list_env, "").strip() if llm_list_env else ""
-        self.llm_model_list = (
-            [x.strip() for x in llm_list_raw.split(",") if x.strip()]
-            if llm_list_raw
-            else []
-        )
+        self.llm_model_list = [x.strip() for x in llm_list_raw.split(",") if x.strip()] if llm_list_raw else []
 
         vlm_list_raw = os.environ.get(vlm_list_env, "").strip() if vlm_list_env else ""
-        self.vlm_model_list = (
-            [x.strip() for x in vlm_list_raw.split(",") if x.strip()]
-            if vlm_list_raw
-            else []
-        )
+        self.vlm_model_list = [x.strip() for x in vlm_list_raw.split(",") if x.strip()] if vlm_list_raw else []
 
     def resolve_key(self, provider: str | None = None) -> str:
         prov = (provider or self.provider or "").lower().strip()
@@ -242,11 +228,7 @@ if QA_MODE == "auto":
 RENDER_CACHE_DIR = os.environ.get("RENDER_CACHE_DIR", "/app/rendered_cache")
 
 # Validate and fetch openrouter costs on startup
-if (
-    OCR_CONFIG.provider == "openrouter"
-    or TL_CONFIG.provider == "openrouter"
-    or QA_CONFIG.provider == "openrouter"
-):
+if OCR_CONFIG.provider == "openrouter" or TL_CONFIG.provider == "openrouter" or QA_CONFIG.provider == "openrouter":
     from worker.utils.rate_limit import update_model_costs
 
     models_to_check = []

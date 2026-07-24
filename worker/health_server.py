@@ -34,13 +34,9 @@ def _parse_env_int(key: str, default_val: int) -> int:
         return default_val
 
 
-MAX_CONCURRENT_JOBS = _parse_env_int(
-    "CONCURRENT_JOBS", _parse_env_int("CONCURRENT_WORKERS", 2)
-)
+MAX_CONCURRENT_JOBS = _parse_env_int("CONCURRENT_JOBS", _parse_env_int("CONCURRENT_WORKERS", 2))
 MAX_HEAVY_SLOTS = _parse_env_int("MAX_HEAVY_SLOTS", 1)
-MAX_LIGHT_SLOTS = _parse_env_int(
-    "MAX_LIGHT_SLOTS", MAX_CONCURRENT_JOBS - MAX_HEAVY_SLOTS
-)
+MAX_LIGHT_SLOTS = _parse_env_int("MAX_LIGHT_SLOTS", MAX_CONCURRENT_JOBS - MAX_HEAVY_SLOTS)
 REUSE_IDLE_SLOTS = os.environ.get("REUSE_IDLE_SLOTS", "true").strip().lower() == "true"
 WORKER_API_SECRET = os.environ.get("WORKER_API_SECRET", "").strip()
 WORKER_API_SECRET_FILE = os.environ.get("WORKER_API_SECRET_FILE", "").strip()
@@ -209,8 +205,9 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 post_data = self.rfile.read(content_length)
                 payload = json.loads(post_data.decode("utf-8"))
 
-                from worker.schemas import JobSubmitRequest
                 from pydantic import ValidationError
+
+                from worker.schemas import JobSubmitRequest
 
                 try:
                     job_request = JobSubmitRequest.model_validate(payload)
@@ -229,9 +226,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                     if ACTIVE_JOBS >= MAX_CONCURRENT_JOBS:
                         self.send_response(429)
                         self.end_headers()
-                        self.wfile.write(
-                            b"Too Many Requests: Global concurrency limit reached"
-                        )
+                        self.wfile.write(b"Too Many Requests: Global concurrency limit reached")
                         return
 
                     # Check slot-specific limits
@@ -240,9 +235,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                         if ACTIVE_HEAVY_JOBS >= MAX_HEAVY_SLOTS:
                             self.send_response(429)
                             self.end_headers()
-                            self.wfile.write(
-                                b"Too Many Requests: Heavy job slot occupied"
-                            )
+                            self.wfile.write(b"Too Many Requests: Heavy job slot occupied")
                             return
                         ACTIVE_HEAVY_JOBS += 1
                     else:
@@ -258,9 +251,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                             else:
                                 self.send_response(429)
                                 self.end_headers()
-                                self.wfile.write(
-                                    b"Too Many Requests: Light job slot occupied"
-                                )
+                                self.wfile.write(b"Too Many Requests: Light job slot occupied")
                                 return
                         else:
                             ACTIVE_LIGHT_JOBS += 1
@@ -275,9 +266,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                     self.wfile.flush()
 
                     # Start job in background
-                    t = threading.Thread(
-                        target=_run_job_async, args=(queue_name, job_data), daemon=True
-                    )
+                    t = threading.Thread(target=_run_job_async, args=(queue_name, job_data), daemon=True)
                     t.start()
                 except Exception as start_err:
                     with ACTIVE_JOBS_LOCK:

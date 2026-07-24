@@ -1,13 +1,14 @@
-from pydantic import BaseModel, Field, HttpUrl
-from typing import List, Optional, Any, Dict
+from typing import Any
+
+from pydantic import BaseModel
 
 
 class JobCompletionRequest(BaseModel):
     pageId: str
     imageId: str
     status: str
-    message: Optional[str] = None
-    data: Optional[Dict[str, Any]] = None
+    message: str | None = None
+    data: dict[str, Any] | None = None
 
 
 class JobFailureRequest(BaseModel):
@@ -16,13 +17,13 @@ class JobFailureRequest(BaseModel):
     status: str = "FAILED"
     errorReason: str
     errorMessage: str
-    details: Optional[Dict[str, Any]] = None
+    details: dict[str, Any] | None = None
 
 
 class JobData(BaseModel):
     jobId: str
     imageId: str
-    pageId: Optional[str] = None
+    pageId: str | None = None
     attempt: int = 1
     maxAttempts: int = 3
     # Allow extra fields for specific job types

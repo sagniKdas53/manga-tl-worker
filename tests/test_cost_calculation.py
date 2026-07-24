@@ -37,9 +37,7 @@ def test_estimate_cost_basic(mock_redis):
 
     # Test fallback cost (gemini-2.5-flash on openrouter: prompt=0.30, completion=2.50 per million)
     reset_job_costs()
-    cost = estimate_cost(
-        "google/gemini-2.5-flash", 1000000, 1000000, provider="openrouter"
-    )
+    cost = estimate_cost("google/gemini-2.5-flash", 1000000, 1000000, provider="openrouter")
     assert cost == (0.30 + 2.50)
 
 
@@ -49,9 +47,7 @@ def test_estimate_cost_bypass_flag(mock_redis):
     reset_job_costs()
 
     with patch.dict(os.environ, {"DISABLE_COST_CALCULATION": "true"}):
-        cost = estimate_cost(
-            "google/gemini-2.5-flash", 1000000, 1000000, provider="gemini"
-        )
+        cost = estimate_cost("google/gemini-2.5-flash", 1000000, 1000000, provider="gemini")
         assert cost is None
         costs = get_job_costs()
         assert len(costs) == 1

@@ -13,9 +13,7 @@ try:
     os.environ.setdefault("FLAGS_use_mkldnn", "0")
     os.environ.setdefault("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", "0")
 except Exception as err_env:  # pylint: disable=broad-except
-    print(
-        f"[Unified Worker] Failed to set PaddleOCR environment: {err_env}", flush=True
-    )
+    print(f"[Unified Worker] Failed to set PaddleOCR environment: {err_env}", flush=True)
 
 
 LANG_TO_PADDLE: dict = {
@@ -59,20 +57,11 @@ class ModelManager:
         paddle_lang = LANG_TO_PADDLE.get((source_language or "ja").lower(), "japan")
 
         with self.lock:
-            if (
-                paddle_lang not in self.paddle_readers
-                or self.paddle_readers[paddle_lang] is None
-            ):
+            if paddle_lang not in self.paddle_readers or self.paddle_readers[paddle_lang] is None:
                 try:
-                    det_model = os.environ.get(
-                        "PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det"
-                    ).strip()
-                    rec_model = os.environ.get(
-                        "PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec"
-                    ).strip()
-                    ocr_device = (
-                        os.environ.get("PADDLEOCR_DEVICE", "cpu").strip().lower()
-                    )
+                    det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det").strip()
+                    rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
+                    ocr_device = os.environ.get("PADDLEOCR_DEVICE", "cpu").strip().lower()
 
                     print(
                         f"[Unified Worker] Initializing PaddleOCR "
@@ -119,17 +108,10 @@ class ModelManager:
         cache_key = f"{paddle_lang}_det"
 
         with self.lock:
-            if (
-                cache_key not in self.paddle_readers
-                or self.paddle_readers[cache_key] is None
-            ):
+            if cache_key not in self.paddle_readers or self.paddle_readers[cache_key] is None:
                 try:
-                    det_model = os.environ.get(
-                        "PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det"
-                    ).strip()
-                    ocr_device = (
-                        os.environ.get("PADDLEOCR_DEVICE", "cpu").strip().lower()
-                    )
+                    det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det").strip()
+                    ocr_device = os.environ.get("PADDLEOCR_DEVICE", "cpu").strip().lower()
 
                     print(
                         f"[Unified Worker] Initializing PaddleOCR Detector "
@@ -196,9 +178,7 @@ class ModelManager:
                 if reader is not None:
                     last_used = self.paddle_last_used.get(paddle_lang, 0.0)
                     remaining = max(0.0, ttl_seconds - (now - last_used))
-                    loaded.append(
-                        f"PaddleOCR:{paddle_lang} (unloads in {int(remaining)}s)"
-                    )
+                    loaded.append(f"PaddleOCR:{paddle_lang} (unloads in {int(remaining)}s)")
 
             return loaded
 
