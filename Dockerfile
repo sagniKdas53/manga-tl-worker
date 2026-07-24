@@ -32,7 +32,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY worker/ ./worker/
+COPY src/worker/ ./worker/
 COPY app.py .
 
 EXPOSE 8000

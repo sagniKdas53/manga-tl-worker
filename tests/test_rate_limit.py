@@ -37,22 +37,19 @@ def test_enforce_rate_limit(mock_time):
 @patch("worker.utils.rate_limit.requests")
 @patch("worker.utils.rate_limit.redis_client")
 def test_update_model_costs(mock_redis, mock_req, tmp_path):
-    cost_file = tmp_path / "costs.json"
-    with patch("worker.utils.rate_limit.COSTS_FILE", str(cost_file)):
-        mock_res = MagicMock()
-        mock_res.status_code = 200
-        mock_res.json.return_value = {
-            "data": {"endpoints": [{"pricing": {"prompt": "0.000001", "completion": "0.000002"}}]}
-        }
-        mock_req.get.return_value = mock_res
+    mock_res = MagicMock()
+    mock_res.status_code = 200
+    mock_res.json.return_value = {
+        "data": {"endpoints": [{"pricing": {"prompt": "0.000001", "completion": "0.000002"}}]}
+    }
+    mock_req.get.return_value = mock_res
 
-        update_model_costs(["meta-llama/llama-3-8b-instruct:free"])
+    update_model_costs(["meta-llama/llama-3-8b-instruct:free"])
 
-        assert not cost_file.exists()
-        mock_redis.set.assert_called_with(
-            "model_cost:meta-llama/llama-3-8b-instruct:free",
-            json.dumps({"prompt": 0.0, "completion": 0.0}),
-        )
+    mock_redis.set.assert_called_with(
+        "model_cost:meta-llama/llama-3-8b-instruct:free",
+        json.dumps({"prompt": 0.0, "completion": 0.0}),
+    )
 
         # A paid model with no available endpoint is still surfaced as an error.
         mock_res.status_code = 404

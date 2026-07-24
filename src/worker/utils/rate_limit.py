@@ -5,9 +5,7 @@ import time
 
 import requests
 
-from worker.config import RENDER_CACHE_DIR, logger, redis_client
-
-COSTS_FILE = os.environ.get("COSTS_FILE", os.path.join(RENDER_CACHE_DIR, "costs.json"))
+from worker.config import logger, redis_client
 
 RATE_LIMIT_LOCK = threading.Lock()
 LAST_REQUEST_TIME = 0.0

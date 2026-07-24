@@ -308,7 +308,7 @@ def parse_and_validate_batch(response_text, unmatched_regions):
     return None
 
 
-PROVIDER_COOLDOWNS = {}
+from worker.services.llm_client import LLMClient, PROVIDER_COOLDOWNS, wait_for_cooldown  # noqa: F401
 
 
 def _inject_openrouter_routing(provider, routing_strategy, payload):
@@ -326,48 +326,9 @@ def _inject_openrouter_routing(provider, routing_strategy, payload):
             logger.info("Routing: strategy=highest-throughput allow_fallbacks=True")
 
 
-def wait_for_cooldown(provider, max_wait=60):
-    global PROVIDER_COOLDOWNS
-    cooldown_until = PROVIDER_COOLDOWNS.get(provider, 0.0)
-    remaining = cooldown_until - time.time()
-    if remaining > 0:
-        sleep_time = min(remaining, max_wait)
-        logger.info(f"Provider '{provider}' is on cooldown. Sleeping for {sleep_time:.1f} seconds to let it clear...")
-        time.sleep(sleep_time)
-
-
 def _get_api_url_and_headers(provider, api_key, model):
-    url = ""
-    headers = {"Content-Type": "application/json"}
-    actual_model = model
-    if provider == "openrouter":
-        url = "https://openrouter.ai/api/v1/chat/completions"
-        headers["Authorization"] = f"Bearer {api_key}"
-        headers["HTTP-Referer"] = "https://manga-library"
-        if not actual_model:
-            actual_model = "meta-llama/llama-3-8b-instruct:free"
-    elif provider == "openai":
-        url = "https://api.openai.com/v1/chat/completions"
-        headers["Authorization"] = f"Bearer {api_key}"
-        if not actual_model:
-            actual_model = "gpt-4o-mini"
-    elif provider == "anthropic":
-        url = "https://api.anthropic.com/v1/messages"
-        headers["x-api-key"] = api_key
-        headers["anthropic-version"] = "2023-06-01"
-        if not actual_model:
-            actual_model = "claude-3-5-sonnet-20241022"
-    elif provider == "gemini":
-        url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-        headers["Authorization"] = f"Bearer {api_key}"
-        if not actual_model:
-            actual_model = "gemini-1.5-flash"
-    elif provider == "nvidia":
-        url = "https://integrate.api.nvidia.com/v1/chat/completions"
-        headers["Authorization"] = f"Bearer {api_key}"
-        if not actual_model:
-            actual_model = "nvidia/riva-translate-4b-instruct-v1.1"
-    return url, headers, actual_model
+    client = LLMClient(provider, api_key, model)
+    return client.url, client.headers, client.model
 
 
 def try_cloud_ai(
@@ -379,148 +340,18 @@ def try_cloud_ai(
     request_id=None,
     routing_strategy=None,
 ):
-    req_prefix = f"[{request_id}] " if request_id else ""
-    global PROVIDER_COOLDOWNS
-
-    wait_for_cooldown(provider)
-
-    cooldown_until = PROVIDER_COOLDOWNS.get(provider, 0.0)
-    if time.time() < cooldown_until:
-        logger.warning(
-            f"{req_prefix}Skipping provider '{provider}' because it is in cooldown for another {int(cooldown_until - time.time())} seconds."
-        )
-        return None
-
-    enforce_rate_limit()
-
-    url, headers, actual_model = _get_api_url_and_headers(provider, api_key, model)
-    if not url:
-        return None
-
-    payload = {}
-    if provider == "anthropic":
-        payload = {
-            "model": actual_model,
-            "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        if response_schema:
-            payload["system"] = MANGA_TRANSLATION_JSON_SYSTEM_PROMPT
-    else:
-        payload = {
-            "model": actual_model,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        if response_schema:
-            if provider == "nvidia":
-                payload["response_format"] = {"type": "json_object"}
-                payload["messages"].insert(
-                    0,
-                    {"role": "system", "content": MANGA_TRANSLATION_JSON_SYSTEM_PROMPT},
-                )
-            else:
-                payload["response_format"] = {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "manga_translation",
-                        "schema": response_schema,
-                        "strict": True,
-                    },
-                }
-
-                if provider == "openrouter":
-                    payload["plugins"] = [{"id": "response-healing"}]
-
-    _inject_openrouter_routing(provider, routing_strategy, payload)
-    max_retries = 3
-    base_backoff = 2.0
-
-    response = None
-    for attempt in range(max_retries + 1):
-        try:
-            logger.info(
-                f"{req_prefix}Sending request to '{provider}' using model '{actual_model}' (attempt {attempt + 1}/{max_retries + 1})..."
-            )
-            start = time.perf_counter()
-
-            response = requests.post(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=(10, 45),
-            )
-
-            if response.status_code == 429:
-                # Trigger temporary 5s cooldown immediately on first 429
-                PROVIDER_COOLDOWNS[provider] = time.time() + 5.0
-                if attempt < max_retries:
-                    sleep_time = base_backoff * (2**attempt)
-                    logger.warning(f"{req_prefix}Provider '{provider}' returned 429. Retrying in {sleep_time:.2f}s...")
-                    time.sleep(sleep_time)
-                    continue
-                else:
-                    logger.warning(f"{req_prefix}Provider '{provider}' returned 429. Initiating 60s cooldown.")
-                    PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
-                    return None
-
-            if response.status_code == 400 and attempt < max_retries:
-                # Some budget providers (e.g. StreamLake via OpenRouter lowest-cost) do not support
-                # json_schema response_format. Degrade to json_object and retry.
-                current_rf = payload.get("response_format", {})
-                if current_rf.get("type") == "json_schema":
-                    logger.warning(
-                        f"{req_prefix}Provider '{provider}' returned 400 with json_schema format. "
-                        "Degrading to json_object and retrying (consumes one retry attempt)."
-                    )
-                    if "response" in locals() and response is not None and hasattr(response, "text"):
-                        logger.warning(f"400 response: {response.text}")
-                    payload["response_format"] = {"type": "json_object"}
-                    continue
-
-            response.raise_for_status()
-            data = response.json()
-
-            elapsed = time.perf_counter() - start
-            logger.info(f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s")
-
-            if provider == "anthropic":
-                content = data.get("content", [{}])[0].get("text", "")
-                usage = data.get("usage", {})
-                prompt_tokens = usage.get("input_tokens", 0)
-                completion_tokens = usage.get("output_tokens", 0)
-                total_tokens = prompt_tokens + completion_tokens
-            else:
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                usage = data.get("usage", {})
-                prompt_tokens = usage.get("prompt_tokens", 0)
-                completion_tokens = usage.get("completion_tokens", 0)
-                total_tokens = usage.get("total_tokens", 0)
-
-            logger.info(f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
-            cost = estimate_cost(actual_model, prompt_tokens, completion_tokens, provider)
-            logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
-
-            return content
-
-        except requests.exceptions.RequestException as e:
-            status_code = getattr(e.response, "status_code", None) if hasattr(e, "response") else None
-            is_transient = isinstance(
-                e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
-            ) or status_code in (429, 500, 502, 503, 504)
-            if is_transient and attempt < max_retries:
-                sleep_time = base_backoff * (2**attempt)
-                logger.warning(
-                    f"{req_prefix}Provider '{provider}' transient error: {e}. Retrying in {sleep_time:.2f}s..."
-                )
-                time.sleep(sleep_time)
-                continue
-            logger.error(f"{req_prefix}Cloud LLM Translation failed: {e}")
-            if "response" in locals() and response is not None and hasattr(response, "text"):
-                logger.error(f"Response text: {response.text}")
-            return None
-        except Exception as e:
-            logger.error(f"{req_prefix}Cloud LLM Translation failed: {e}")
-            return None
+    """Cloud LLM text completion."""
+    client = LLMClient(
+        provider=provider,
+        api_key=api_key,
+        model=model,
+        request_id=request_id or "",
+        routing_strategy=routing_strategy,
+    )
+    system_prompt = MANGA_TRANSLATION_JSON_SYSTEM_PROMPT if response_schema else None
+    messages = [{"role": "user", "content": prompt}]
+    result = client.complete(messages, system_prompt=system_prompt, response_schema=response_schema)
+    return result.content if result else None
 
 
 def try_cloud_ai_vision(
@@ -534,200 +365,79 @@ def try_cloud_ai_vision(
     request_id=None,
     routing_strategy=None,
 ):
-    req_prefix = f"[{request_id}] " if request_id else ""
-    global PROVIDER_COOLDOWNS
+    """Cloud VLM single-image completion."""
+    client = LLMClient(
+        provider=provider,
+        api_key=api_key,
+        model=model,
+        request_id=request_id or "",
+        routing_strategy=routing_strategy,
+    )
 
-    wait_for_cooldown(provider)
-
-    cooldown_until = PROVIDER_COOLDOWNS.get(provider, 0.0)
-    if time.time() < cooldown_until:
-        logger.warning(
-            f"{req_prefix}Skipping vision provider '{provider}' because it is in cooldown for another {int(cooldown_until - time.time())} seconds."
-        )
-        return None
-
-    enforce_rate_limit()
-
-    url, headers, actual_model = _get_api_url_and_headers(provider, api_key, model)
-    if not url:
-        return None
-
-    if provider == "nvidia" and not model:
-        actual_model = "nvidia/nemotron-nano-12b-v2-vl"
-
-    user_message = [
-        {"type": "text", "text": prompt},
-        {
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
-        },
-    ]
-
-    payload = {}
-    if provider == "anthropic":
-        payload = {
-            "model": actual_model,
-            "max_tokens": 4096,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/jpeg",
-                                "data": base64_image,
-                            },
+    if client.is_anthropic:
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": base64_image,
                         },
-                    ],
-                }
-            ],
-        }
-        if system_prompt:
-            payload["system"] = system_prompt
-        elif response_schema:
-            payload["system"] = MANGA_TRANSLATION_JSON_SYSTEM_PROMPT
-    else:
-        payload = {
-            "model": actual_model,
-            "messages": [{"role": "user", "content": user_message}],
-        }
-        if system_prompt:
-            payload["messages"].insert(0, {"role": "system", "content": system_prompt})
-
-        if response_schema:
-            if provider == "nvidia":
-                payload["response_format"] = {"type": "json_object"}
-            else:
-                payload["response_format"] = {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "vision_schema",
-                        "schema": response_schema,
-                        "strict": True,
                     },
-                }
+                ],
+            }
+        ]
+    else:
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
+                ],
+            }
+        ]
 
-                if provider == "openrouter":
-                    payload["plugins"] = [{"id": "response-healing"}]
-
-    _inject_openrouter_routing(provider, routing_strategy, payload)
-    max_retries = 3
-    base_backoff = 2.0
-
-    response = None
-    for attempt in range(max_retries + 1):
-        try:
-            logger.info(
-                f"{req_prefix}Sending vision request to '{provider}' using model '{actual_model}' (attempt {attempt + 1}/{max_retries + 1})..."
-            )
-            start = time.perf_counter()
-
-            response = requests.post(url, headers=headers, json=payload, timeout=(10, 45))
-
-            if response.status_code == 429:
-                # Trigger temporary 5s cooldown immediately on first 429
-                PROVIDER_COOLDOWNS[provider] = time.time() + 5.0
-                if attempt < max_retries:
-                    sleep_time = base_backoff * (2**attempt)
-                    logger.warning(
-                        f"{req_prefix}Vision provider '{provider}' returned 429. Retrying in {sleep_time:.2f}s..."
-                    )
-                    time.sleep(sleep_time)
-                    continue
-                else:
-                    logger.warning(f"{req_prefix}Vision provider '{provider}' returned 429. Initiating 60s cooldown.")
-                    PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
-                    return None
-
-            response.raise_for_status()
-            data = response.json()
-
-            elapsed = time.perf_counter() - start
-            logger.info(f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s")
-
-            if provider == "anthropic":
-                content = data.get("content", [{}])[0].get("text", "")
-                usage = data.get("usage", {})
-                prompt_tokens = usage.get("input_tokens", 0)
-                completion_tokens = usage.get("output_tokens", 0)
-                total_tokens = prompt_tokens + completion_tokens
-            else:
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                usage = data.get("usage", {})
-                prompt_tokens = usage.get("prompt_tokens", 0)
-                completion_tokens = usage.get("completion_tokens", 0)
-                total_tokens = usage.get("total_tokens", 0)
-
-            logger.info(f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
-            cost = estimate_cost(actual_model, prompt_tokens, completion_tokens, provider)
-            logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
-
-            return content
-
-        except requests.exceptions.RequestException as e:
-            status_code = getattr(e.response, "status_code", None) if hasattr(e, "response") else None
-            is_transient = isinstance(
-                e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
-            ) or status_code in (429, 500, 502, 503, 504)
-            if is_transient and attempt < max_retries:
-                sleep_time = base_backoff * (2**attempt)
-                logger.warning(
-                    f"{req_prefix}Provider '{provider}' transient error: {e}. Retrying in {sleep_time:.2f}s..."
-                )
-                time.sleep(sleep_time)
-                continue
-            logger.error(f"{req_prefix}Vision Translation failed: {e}")
-            if "response" in locals() and response is not None and hasattr(response, "text"):
-                logger.error(f"Response text: {response.text}")
-            return None
-        except Exception as e:
-            logger.error(f"{req_prefix}Vision Translation failed: {e}")
-            return None
+    sys_prompt = system_prompt or (MANGA_TRANSLATION_JSON_SYSTEM_PROMPT if response_schema else None)
+    result = client.complete(messages, system_prompt=sys_prompt, response_schema=response_schema)
+    return result.content if result else None
 
 
 def try_cloud_ai_vision_batch(
     provider,
     api_key,
     model,
-    crops,  # list of dicts: [{"id": str, "base64": str}]
+    crops,
     response_schema,
     system_prompt=None,
     request_id=None,
     routing_strategy=None,
 ):
-    req_prefix = f"[{request_id}] " if request_id else ""
-    global PROVIDER_COOLDOWNS
+    """Cloud VLM multi-image batch completion."""
+    client = LLMClient(
+        provider=provider,
+        api_key=api_key,
+        model=model,
+        request_id=request_id or "",
+        routing_strategy=routing_strategy,
+    )
 
-    wait_for_cooldown(provider)
-
-    cooldown_until = PROVIDER_COOLDOWNS.get(provider, 0.0)
-    if time.time() < cooldown_until:
-        logger.warning(
-            f"{req_prefix}Skipping vision batch request for provider '{provider}' because it is in cooldown for another {int(cooldown_until - time.time())} seconds."
-        )
-        return None
-
-    enforce_rate_limit()
-
-    url, headers, actual_model = _get_api_url_and_headers(provider, api_key, model)
-    if not url:
-        return None
-
-    prompt = (
+    ocr_prompt = (
         "You are an expert manga OCR system. Perform OCR on each of the provided image crops. "
         "Each crop is labeled with a Region ID header (e.g., 'Region ID: crop_0'). "
         "Extract the text and map it back to the ID exactly as specified in the JSON schema."
     )
 
-    if provider == "anthropic":
-        content_parts = [{"type": "text", "text": prompt}]
+    if client.is_anthropic:
+        content_parts = [{"type": "text", "text": ocr_prompt}]
         for crop in crops:
             content_parts.append({"type": "text", "text": f"Region ID: {crop['id']}"})
             content_parts.append(
-                {  # type: ignore
+                {
                     "type": "image",
                     "source": {
                         "type": "base64",
@@ -736,142 +446,21 @@ def try_cloud_ai_vision_batch(
                     },
                 }
             )
-        payload = {
-            "model": actual_model,
-            "max_tokens": 4096,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": content_parts,
-                }
-            ],
-        }
-        if system_prompt:
-            payload["system"] = system_prompt
-        elif response_schema:
-            payload["system"] = "Respond with a valid JSON object matching the requested schema."
+        messages = [{"role": "user", "content": content_parts}]
     else:
-        # openai, openrouter, gemini, nvidia, etc.
-        user_message_content = [{"type": "text", "text": prompt}]
+        content_parts = [{"type": "text", "text": ocr_prompt}]
         for crop in crops:
-            user_message_content.append({"type": "text", "text": f"Region ID: {crop['id']}"})
-            user_message_content.append(
-                {  # type: ignore
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{crop['base64']}"},
-                }
+            content_parts.append({"type": "text", "text": f"Region ID: {crop['id']}"})
+            content_parts.append(
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{crop['base64']}"}}
             )
+        messages = [{"role": "user", "content": content_parts}]
 
-        payload = {
-            "model": actual_model,
-            "messages": [{"role": "user", "content": user_message_content}],
-        }
-        if system_prompt:
-            payload["messages"].insert(0, {"role": "system", "content": system_prompt})
-
-        if response_schema:
-            if provider == "nvidia":
-                payload["response_format"] = {"type": "json_object"}
-            else:
-                payload["response_format"] = {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "vision_schema",
-                        "schema": response_schema,
-                        "strict": True,
-                    },
-                }
-
-                if provider == "openrouter":
-                    payload["plugins"] = [{"id": "response-healing"}]
-
-    _inject_openrouter_routing(provider, routing_strategy, payload)
-    max_retries = 3
-    base_backoff = 2.0
-
-    response = None
-    for attempt in range(max_retries + 1):
-        try:
-            logger.info(
-                f"{req_prefix}Sending batched vision request to '{provider}' using model '{actual_model}' with {len(crops)} crops (attempt {attempt + 1}/{max_retries + 1})...."
-            )
-            start = time.perf_counter()
-
-            response = requests.post(url, headers=headers, json=payload, timeout=(10, 45))
-
-            if response.status_code == 429:
-                # Trigger temporary 5s cooldown immediately on first 429
-                PROVIDER_COOLDOWNS[provider] = time.time() + 5.0
-                if attempt < max_retries:
-                    sleep_time = base_backoff * (2**attempt)
-                    logger.warning(
-                        f"{req_prefix}Vision batch provider '{provider}' returned 429. Retrying in {sleep_time:.2f}s..."
-                    )
-                    time.sleep(sleep_time)
-                    continue
-                else:
-                    logger.warning(
-                        f"{req_prefix}Vision batch provider '{provider}' returned 429. Initiating 60s cooldown."
-                    )
-                    PROVIDER_COOLDOWNS[provider] = time.time() + 60.0
-                    return None
-
-            if response.status_code == 400 and attempt < max_retries:
-                current_rf = payload.get("response_format", {})
-                if current_rf.get("type") == "json_schema":
-                    logger.warning(
-                        f"{req_prefix}Vision batch provider '{provider}' returned 400 with json_schema format. "
-                        "Degrading to json_object and retrying (consumes one retry attempt)."
-                    )
-                    if hasattr(response, "text"):
-                        logger.warning(f"400 response: {response.text}")
-                    payload["response_format"] = {"type": "json_object"}
-                    continue
-
-            response.raise_for_status()
-            data = response.json()
-
-            elapsed = time.perf_counter() - start
-            logger.info(f"{req_prefix}Provider={provider} Model={actual_model} Time={elapsed:.2f}s")
-
-            if provider == "anthropic":
-                content = data.get("content", [{}])[0].get("text", "")
-                usage = data.get("usage", {})
-                prompt_tokens = usage.get("input_tokens", 0)
-                completion_tokens = usage.get("output_tokens", 0)
-                total_tokens = prompt_tokens + completion_tokens
-            else:
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                usage = data.get("usage", {})
-                prompt_tokens = usage.get("prompt_tokens", 0)
-                completion_tokens = usage.get("completion_tokens", 0)
-                total_tokens = usage.get("total_tokens", 0)
-
-            logger.info(f"{req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
-            cost = estimate_cost(actual_model, prompt_tokens, completion_tokens, provider)
-            logger.info(f"{req_prefix}Estimated cost: ${cost:.5f}")
-
-            return content
-
-        except requests.exceptions.RequestException as e:
-            status_code = getattr(e.response, "status_code", None) if hasattr(e, "response") else None
-            is_transient = isinstance(
-                e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
-            ) or status_code in (429, 500, 502, 503, 504)
-            if is_transient and attempt < max_retries:
-                sleep_time = base_backoff * (2**attempt)
-                logger.warning(
-                    f"{req_prefix}Provider '{provider}' transient error: {e}. Retrying in {sleep_time:.2f}s..."
-                )
-                time.sleep(sleep_time)
-                continue
-            logger.error(f"{req_prefix}Vision Batch OCR failed: {e}")
-            if "response" in locals() and response is not None and hasattr(response, "text"):
-                logger.error(f"Response text: {response.text}")
-            return None
-        except Exception as e:
-            logger.error(f"{req_prefix}Vision Batch OCR failed: {e}")
-            return None
+    sys = system_prompt or (
+        "Respond with a valid JSON object matching the requested schema." if response_schema else None
+    )
+    result = client.complete(messages, system_prompt=sys, response_schema=response_schema)
+    return result.content if result else None
 
 
 def try_local_ai(prompt, text, response_schema=None, request_id=None):

@@ -125,11 +125,10 @@ def process_job_rq(queue_name, job_data):
 
         if attempt < max_attempts:
             print(
-                f"[RQ Worker] Job {job_id} failed on attempt {attempt}/{max_attempts}. Retrying in 2 seconds...",
+                f"[RQ Worker] Job {job_id} failed on attempt {attempt}/{max_attempts}. "
+                f"Marking as PENDING for retry by backend.",
                 flush=True,
             )
-            time.sleep(2)
-            job_data["attempt"] = attempt + 1
             update_job_status(job_id, "PENDING", str(e), attempt + 1)
         else:
             print(

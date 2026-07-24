@@ -8,6 +8,10 @@ opencv-python-headless
 psutil
 onnxruntime
 rq
+fastapi
+uvicorn[standard]
+tenacity
+httpx
 pytest
 pytest-cov
 pytest-mock

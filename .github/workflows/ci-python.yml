@@ -63,5 +63,5 @@ jobs:
 
       - name: Run test suite
         env:
-          PYTHONPATH: .
+          PYTHONPATH: src
         run: pytest tests/ --cov=. --cov-report=xml

@@ -123,7 +123,6 @@ def test_process_job_rq_retry_logic(mock_sleep, mock_panel, mock_get, mock_updat
 
     # Verifications: Should retry
     mock_panel.assert_called_once()
-    mock_sleep.assert_called_once_with(2)
     mock_update.assert_any_call("job-123", "PENDING", "Simulated failure", 2)
 
 

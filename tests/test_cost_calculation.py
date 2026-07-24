@@ -92,15 +92,10 @@ def test_update_model_costs(mock_open, mock_exists, mock_get, mock_redis):
     }
     mock_get.return_value = mock_resp
 
-    with patch("worker.utils.rate_limit.COSTS_FILE", "/dummy/costs.json"):
-        # We need mock_open to mock writing
-        m_file = MagicMock()
-        mock_open.return_value.__enter__.return_value = m_file
+    update_model_costs(["google/gemini-3.1-flash-lite"])
 
-        update_model_costs(["google/gemini-3.1-flash-lite"])
-
-        # Check redis set call
-        mock_redis.set.assert_called_with(
-            "model_cost:google/gemini-3.1-flash-lite",
-            json.dumps({"prompt": 0.00000025, "completion": 0.00000150}),
-        )
+    # Check redis set call
+    mock_redis.set.assert_called_with(
+        "model_cost:google/gemini-3.1-flash-lite",
+        json.dumps({"prompt": 0.00000025, "completion": 0.00000150}),
+    )
