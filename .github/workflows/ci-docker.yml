@@ -3,11 +3,13 @@ name: CI - Docker Publish
 on:
   push:
     branches: ["main"]
+    tags:
+      - "v*"
     paths:
       - "Dockerfile"
       - "app.py"
       - "requirements.txt"
-      - "worker/**"
+      - "src/**"
       - ".github/workflows/ci-docker.yml"
 
 jobs:
@@ -17,10 +19,21 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Downcase registry owner
+        id: registry_owner
+        shell: bash
+        run: echo "owner=${OWNER,,}" >> "$GITHUB_OUTPUT"
+        env:
+          OWNER: ${{ github.repository_owner }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -32,12 +45,56 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Downcase registry owner
-        id: registry_owner
-        shell: bash
-        run: echo "owner=${OWNER,,}" >> "$GITHUB_OUTPUT"
-        env:
-          OWNER: ${{ github.repository_owner }}
+      - name: Extract metadata for GHCR
+        id: meta-ghcr
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ steps.registry_owner.outputs.owner }}/manga-tl-worker
+          flavor: |
+            latest=auto
+          tags: |
+            type=schedule,pattern={{date 'YYYYMMDD-HHmmss' tz='UTC'}}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{major}}.{{minor}}.{{patch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-
+
+      # - name: Prune Old Images from GHCR
+      #   uses: vlaurin/action-ghcr-prune@v0.6.0
+      #   with:
+      #     token: ${{ secrets.PRUNE_TOKEN }}
+      #     user: ${{ github.repository_owner }}
+      #     container: manga-tl-worker
+      #     dry-run: false
+      #     keep-younger-than: 7
+      #     keep-last: 10
+      #     prune-untagged: true
+      #     keep-tags-regexes: |
+      #       ^v[0-9]+\.[0-9]+\.[0-9]+
+      #       ^main$
+      #       ^master$
+      #       ^dev$
+      #     prune-tags-regexes: |
+      #       ^sha-
+
+      # - name: Prune Old Images from Docker Hub
+      #   uses: lostlink/docker-cleanup@v1.0.1
+      #   with:
+      #     username: ${{ secrets.DOCKERHUB_USERNAME }}
+      #     password: ${{ secrets.DOCKERHUB_TOKEN }}
+      #     organization: ${{ github.repository_owner }}
+      #     repositories: "manga-tl-worker"
+      #     sha-retention-days: 7
+      #     protected-tags: "main,master,dev,latest"
+      #     custom-patterns: |
+      #       {
+      #         "^v[0-9]+\\.[0-9]+\\.[0-9]+$": 365,
+      #         "^sha-.*": 7
+      #       }
+      #     dry-run: true
+      #     verbose: true
 
       - name: Build and push image
         uses: docker/build-push-action@v6
@@ -45,8 +102,8 @@ jobs:
           context: .
           file: Dockerfile
           push: true
-          tags: |
-            ghcr.io/${{ steps.registry_owner.outputs.owner }}/manga-tl-worker:latest
-            ghcr.io/${{ steps.registry_owner.outputs.owner }}/manga-tl-worker:${{ github.sha }}
+          tags: ${{ steps.meta-ghcr.outputs.tags }}
+          labels: ${{ steps.meta-ghcr.outputs.labels }}
           cache-from: type=gha,scope=worker
           cache-to: type=gha,mode=max,scope=worker
+
