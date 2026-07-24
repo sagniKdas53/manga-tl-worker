@@ -41,7 +41,7 @@ def test_validate_translation_response():
 def test_parse_and_validate_batch():
     text = '```json\n{"translations": [{"id": "1", "translation": "hello"}]}\n```'
     res = parse_and_validate_batch(text, [])
-    assert "1" in res
+    assert res is not None and "1" in res
     assert parse_and_validate_batch("", []) is None
     assert parse_and_validate_batch("invalid json", []) is None
 

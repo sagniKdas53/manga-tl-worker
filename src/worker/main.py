@@ -1,6 +1,7 @@
 """FastAPI application replacing the legacy BaseHTTPRequestHandler health server."""
 
 import asyncio
+import contextlib
 import threading
 from contextlib import asynccontextmanager
 
@@ -39,10 +40,8 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     maintenance_task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await maintenance_task
-    except asyncio.CancelledError:
-        pass
 
 
 async def _periodic_maintenance():
@@ -164,9 +163,10 @@ async def submit_job(req: JobSubmitRequest):
                 raise HTTPException(status_code=429, detail="Too Many Requests: Heavy job slot occupied")
             conc.ACTIVE_HEAVY_JOBS += 1
         else:
-            if conc.ACTIVE_LIGHT_JOBS >= conc.MAX_LIGHT_SLOTS:
-                if not (conc.REUSE_IDLE_SLOTS and conc.ACTIVE_JOBS < conc.MAX_CONCURRENT_JOBS):
-                    raise HTTPException(status_code=429, detail="Too Many Requests: Light job slot occupied")
+            if conc.ACTIVE_LIGHT_JOBS >= conc.MAX_LIGHT_SLOTS and not (
+                conc.REUSE_IDLE_SLOTS and conc.ACTIVE_JOBS < conc.MAX_CONCURRENT_JOBS
+            ):
+                raise HTTPException(status_code=429, detail="Too Many Requests: Light job slot occupied")
             conc.ACTIVE_LIGHT_JOBS += 1
 
         conc.ACTIVE_JOBS = conc.ACTIVE_HEAVY_JOBS + conc.ACTIVE_LIGHT_JOBS

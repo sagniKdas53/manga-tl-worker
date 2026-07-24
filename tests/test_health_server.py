@@ -1,5 +1,4 @@
-import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -78,7 +77,8 @@ def test_job_execution_wrapper(mock_process_job):
     assert conc.ACTIVE_HEAVY_JOBS == 0
 
 
-def test_heavy_light_concurrency_slots():
+@patch("worker.main.threading.Thread")
+def test_heavy_light_concurrency_slots(mock_thread):
     conc.MAX_CONCURRENT_JOBS = 2
     conc.MAX_HEAVY_SLOTS = 1
     conc.MAX_LIGHT_SLOTS = 1
@@ -123,7 +123,8 @@ def test_heavy_light_concurrency_slots():
     assert res4.status_code == 429
 
 
-def test_scenario_three_jobs_concurrency():
+@patch("worker.main.threading.Thread")
+def test_scenario_three_jobs_concurrency(mock_thread):
     conc.MAX_CONCURRENT_JOBS = 2
     conc.MAX_HEAVY_SLOTS = 1
     conc.MAX_LIGHT_SLOTS = 1
@@ -184,7 +185,8 @@ def test_scenario_three_jobs_concurrency():
     assert res5.status_code == 429
 
 
-def test_configurable_heavy_slots():
+@patch("worker.main.threading.Thread")
+def test_configurable_heavy_slots(mock_thread):
     conc.MAX_CONCURRENT_JOBS = 3
     conc.MAX_HEAVY_SLOTS = 2
     conc.MAX_LIGHT_SLOTS = 1
@@ -217,7 +219,8 @@ def test_configurable_heavy_slots():
     assert res3.status_code == 429
 
 
-def test_configurable_light_slots():
+@patch("worker.main.threading.Thread")
+def test_configurable_light_slots(mock_thread):
     conc.MAX_CONCURRENT_JOBS = 3
     conc.MAX_HEAVY_SLOTS = 1
     conc.MAX_LIGHT_SLOTS = 2
@@ -253,7 +256,8 @@ def test_region_redo_removed_from_heavy():
     assert "queue:region-redo" not in conc.LIGHT_QUEUES
 
 
-def test_light_overflow_when_heavy_idle():
+@patch("worker.main.threading.Thread")
+def test_light_overflow_when_heavy_idle(mock_thread):
     conc.MAX_CONCURRENT_JOBS = 2
     conc.MAX_HEAVY_SLOTS = 1
     conc.MAX_LIGHT_SLOTS = 1

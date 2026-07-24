@@ -8,7 +8,8 @@ import uuid
 import requests
 
 from worker.config import logger
-from worker.utils.rate_limit import enforce_rate_limit, estimate_cost
+from worker.services.llm_client import PROVIDER_COOLDOWNS, LLMClient, wait_for_cooldown  # noqa: F401
+from worker.utils.rate_limit import enforce_rate_limit, estimate_cost  # noqa: F401
 from worker.utils.text import clean_translated_text, contains_japanese
 
 LANG_MAP = {
@@ -308,8 +309,6 @@ def parse_and_validate_batch(response_text, unmatched_regions):
     return None
 
 
-from worker.services.llm_client import LLMClient, PROVIDER_COOLDOWNS, wait_for_cooldown  # noqa: F401
-
 
 def _inject_openrouter_routing(provider, routing_strategy, payload):
     if provider == "openrouter":
@@ -433,7 +432,7 @@ def try_cloud_ai_vision_batch(
     )
 
     if client.is_anthropic:
-        content_parts = [{"type": "text", "text": ocr_prompt}]
+        content_parts: list[dict] = [{"type": "text", "text": ocr_prompt}]
         for crop in crops:
             content_parts.append({"type": "text", "text": f"Region ID: {crop['id']}"})
             content_parts.append(
@@ -448,7 +447,7 @@ def try_cloud_ai_vision_batch(
             )
         messages = [{"role": "user", "content": content_parts}]
     else:
-        content_parts = [{"type": "text", "text": ocr_prompt}]
+        content_parts: list[dict] = [{"type": "text", "text": ocr_prompt}]
         for crop in crops:
             content_parts.append({"type": "text", "text": f"Region ID: {crop['id']}"})
             content_parts.append(

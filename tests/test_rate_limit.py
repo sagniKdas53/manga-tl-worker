@@ -51,10 +51,10 @@ def test_update_model_costs(mock_redis, mock_req, tmp_path):
         json.dumps({"prompt": 0.0, "completion": 0.0}),
     )
 
-        # A paid model with no available endpoint is still surfaced as an error.
-        mock_res.status_code = 404
-        with pytest.raises(ValueError):
-            update_model_costs(["unknown/model"])
+    # A paid model with no available endpoint is still surfaced as an error.
+    mock_res.status_code = 404
+    with pytest.raises(ValueError):
+        update_model_costs(["unknown/model"])
 
 
 def test_job_costs():

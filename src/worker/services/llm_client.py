@@ -8,12 +8,10 @@ import time
 from dataclasses import dataclass
 
 import requests
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
+from tenacity import retry
+from tenacity.retry import retry_if_exception_type
+from tenacity.stop import stop_after_attempt
+from tenacity.wait import wait_exponential
 
 from worker.config import logger
 from worker.utils.rate_limit import enforce_rate_limit, estimate_cost

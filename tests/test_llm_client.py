@@ -1,8 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from worker.services.llm_client import LLMClient, LLMResponse, PermanentAPIError, TransientAPIError
+from worker.services.llm_client import LLMClient, LLMResponse
 
 
 @patch("worker.services.llm_client.requests.post")
