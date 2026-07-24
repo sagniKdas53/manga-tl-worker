@@ -578,29 +578,13 @@ def fit_text_in_box_py(
 def render_image_core(image_id, page_id=None):
     try:
         render_target_id = page_id or image_id
-        if page_id:
-            backend_url = CALLBACK_URL.replace("/jobs/callback", f"/pages/{page_id}/details")
-        else:
-            backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
+        backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
-            print(f"[Render] Failed to get image/page info: {res.status_code}", flush=True)
+            print(f"[Render] Failed to get image info: {res.status_code}", flush=True)
             return False
         image_info = res.json()
         layer_elements = image_info.get("layerElements", [])
-        if not layer_elements and page_id:
-            # Fetch page layers from /pages/{page_id}/layers
-            layers_url = CALLBACK_URL.replace("/jobs/callback", f"/pages/{page_id}/layers")
-            l_res = requests.get(layers_url, headers=BACKEND_HEADERS)
-            if l_res.status_code == 200:
-                layer_data_list = l_res.json()
-                layer_elements = []
-                for l_entry in layer_data_list:
-                    layer_obj = l_entry.get("layer", {})
-                    for el in l_entry.get("elements", []):
-                        el["layerVisible"] = layer_obj.get("visible", True)
-                        el["layerType"] = layer_obj.get("type", "translation")
-                        layer_elements.append(el)
     except Exception as e:
         print(f"[Render] Error fetching image details: {e}", flush=True)
         raise e
@@ -641,8 +625,8 @@ def render_image_core(image_id, page_id=None):
             ):
                 text = text.upper()
 
-            ex = float(el.get("x", 0.0))
-            ey = float(el.get("y", 0.0))
+            ex = float(el.get("x") or 0.0)
+            ey = float(el.get("y") or 0.0)
             ew = int(el.get("maxWidth") or 100)
             eh = int(el.get("maxHeight") or 50)
 

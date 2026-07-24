@@ -42,7 +42,7 @@ def test_job_submission_success(mock_thread, mock_request_handler):
     mock_request_handler.command = "POST"
     mock_request_handler.path = "/api/v1/jobs/submit"
 
-    body = json.dumps({"queue_name": "queue:ocr", "job_data": {"id": "123"}})
+    body = json.dumps({"queue_name": "queue:ocr", "job_data": {"jobId": "test_job_id", "imageId": "123"}})
     mock_request_handler.rfile = MagicMock()
     mock_request_handler.rfile.read.return_value = body.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body))
@@ -61,7 +61,7 @@ def test_job_submission_rate_limit(mock_request_handler):
     mock_request_handler.command = "POST"
     mock_request_handler.path = "/api/v1/jobs/submit"
 
-    body = json.dumps({"queue_name": "queue:ocr", "job_data": {"id": "123"}})
+    body = json.dumps({"queue_name": "queue:ocr", "job_data": {"jobId": "test_job_id", "imageId": "123"}})
     mock_request_handler.rfile = MagicMock()
     mock_request_handler.rfile.read.return_value = body.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body))
@@ -100,7 +100,7 @@ def test_heavy_light_concurrency_slots(mock_thread, mock_request_handler):
     hs.ACTIVE_LIGHT_JOBS = 0
 
     # Step 1: Submit Heavy Job (should succeed)
-    body_heavy_1 = json.dumps({"queue_name": "queue:ocr", "job_data": {"id": "1"}})
+    body_heavy_1 = json.dumps({"queue_name": "queue:ocr", "job_data": {"jobId": "test_job_id", "imageId": "1"}})
     mock_request_handler.rfile = MagicMock()
     mock_request_handler.rfile.read.return_value = body_heavy_1.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body_heavy_1))
@@ -114,7 +114,7 @@ def test_heavy_light_concurrency_slots(mock_thread, mock_request_handler):
     mock_request_handler.send_response.reset_mock()
 
     # Step 2: Submit another Heavy Job (should fail with 429)
-    body_heavy_2 = json.dumps({"queue_name": "queue:ocr", "job_data": {"id": "2"}})
+    body_heavy_2 = json.dumps({"queue_name": "queue:ocr", "job_data": {"jobId": "test_job_id", "imageId": "2"}})
     mock_request_handler.rfile.read.return_value = body_heavy_2.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body_heavy_2))
 
@@ -128,7 +128,7 @@ def test_heavy_light_concurrency_slots(mock_thread, mock_request_handler):
     mock_request_handler.send_response.reset_mock()
 
     # Step 3: Submit Light Job (should succeed in parallel)
-    body_light_1 = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "3"}})
+    body_light_1 = json.dumps({"queue_name": "queue:translation", "job_data": {"jobId": "test_job_id", "imageId": "3"}})
     mock_request_handler.rfile.read.return_value = body_light_1.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body_light_1))
 
@@ -141,7 +141,7 @@ def test_heavy_light_concurrency_slots(mock_thread, mock_request_handler):
     mock_request_handler.send_response.reset_mock()
 
     # Step 4: Submit another Light Job (should fail with 429)
-    body_light_2 = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "4"}})
+    body_light_2 = json.dumps({"queue_name": "queue:translation", "job_data": {"jobId": "test_job_id", "imageId": "4"}})
     mock_request_handler.rfile.read.return_value = body_light_2.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body_light_2))
 
@@ -171,7 +171,7 @@ def test_scenario_three_jobs_concurrency(mock_thread, mock_request_handler):
 
     # 1. Job 1 submitted for OCR (heavy slot).
     # Since heavy slot is empty, it must succeed.
-    body_job1_ocr = json.dumps({"queue_name": "queue:ocr", "job_data": {"id": "job1"}})
+    body_job1_ocr = json.dumps({"queue_name": "queue:ocr", "job_data": {"jobId": "test_job_id", "imageId": "job1"}})
     mock_request_handler.rfile = MagicMock()
     mock_request_handler.rfile.read.return_value = body_job1_ocr.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body_job1_ocr))
@@ -186,7 +186,7 @@ def test_scenario_three_jobs_concurrency(mock_thread, mock_request_handler):
 
     # 2. Job 2 submitted for OCR (heavy slot).
     # Since active heavy jobs is already 1, it must be rejected with 429.
-    body_job2_ocr = json.dumps({"queue_name": "queue:ocr", "job_data": {"id": "job2"}})
+    body_job2_ocr = json.dumps({"queue_name": "queue:ocr", "job_data": {"jobId": "test_job_id", "imageId": "job2"}})
     mock_request_handler.rfile.read.return_value = body_job2_ocr.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body_job2_ocr))
 
@@ -203,7 +203,7 @@ def test_scenario_three_jobs_concurrency(mock_thread, mock_request_handler):
 
     # 4. Job 1 is now submitted for Translation (light slot).
     # Since light slot is empty, it must succeed.
-    body_job1_tl = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "job1"}})
+    body_job1_tl = json.dumps({"queue_name": "queue:translation", "job_data": {"jobId": "test_job_id", "imageId": "job1"}})
     mock_request_handler.rfile.read.return_value = body_job1_tl.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body_job1_tl))
 
@@ -235,7 +235,7 @@ def test_scenario_three_jobs_concurrency(mock_thread, mock_request_handler):
     # 7. Job 2 is submitted for Translation (light slot).
     # But Job 1 is still running Translation (active light jobs = 1).
     # Since active light jobs is already 1, this must be rejected with 429.
-    body_job2_tl = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "job2"}})
+    body_job2_tl = json.dumps({"queue_name": "queue:translation", "job_data": {"jobId": "test_job_id", "imageId": "job2"}})
     mock_request_handler.rfile.read.return_value = body_job2_tl.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body_job2_tl))
 
@@ -264,7 +264,7 @@ def test_configurable_heavy_slots(mock_thread, mock_request_handler):
     hs.ACTIVE_LIGHT_JOBS = 0
 
     # Heavy job 1 — accepted
-    body = json.dumps({"queue_name": "queue:ocr", "job_data": {"id": "h1"}})
+    body = json.dumps({"queue_name": "queue:ocr", "job_data": {"jobId": "test_job_id", "imageId": "h1"}})
     mock_request_handler.rfile = MagicMock()
     mock_request_handler.rfile.read.return_value = body.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body))
@@ -276,7 +276,7 @@ def test_configurable_heavy_slots(mock_thread, mock_request_handler):
     mock_request_handler.send_response.reset_mock()
 
     # Heavy job 2 — accepted (second heavy slot)
-    body = json.dumps({"queue_name": "queue:panel-detection", "job_data": {"id": "h2"}})
+    body = json.dumps({"queue_name": "queue:panel-detection", "job_data": {"jobId": "test_job_id", "imageId": "h2"}})
     mock_request_handler.rfile.read.return_value = body.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body))
 
@@ -287,7 +287,7 @@ def test_configurable_heavy_slots(mock_thread, mock_request_handler):
     mock_request_handler.send_response.reset_mock()
 
     # Heavy job 3 — rejected (both heavy slots occupied)
-    body = json.dumps({"queue_name": "queue:ocr", "job_data": {"id": "h3"}})
+    body = json.dumps({"queue_name": "queue:ocr", "job_data": {"jobId": "test_job_id", "imageId": "h3"}})
     mock_request_handler.rfile.read.return_value = body.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body))
 
@@ -316,7 +316,7 @@ def test_configurable_light_slots(mock_thread, mock_request_handler):
     hs.ACTIVE_LIGHT_JOBS = 0
 
     # Light job 1 — accepted
-    body = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "l1"}})
+    body = json.dumps({"queue_name": "queue:translation", "job_data": {"jobId": "test_job_id", "imageId": "l1"}})
     mock_request_handler.rfile = MagicMock()
     mock_request_handler.rfile.read.return_value = body.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body))
@@ -328,7 +328,7 @@ def test_configurable_light_slots(mock_thread, mock_request_handler):
     mock_request_handler.send_response.reset_mock()
 
     # Light job 2 — accepted (second light slot)
-    body = json.dumps({"queue_name": "queue:layout", "job_data": {"id": "l2"}})
+    body = json.dumps({"queue_name": "queue:layout", "job_data": {"jobId": "test_job_id", "imageId": "l2"}})
     mock_request_handler.rfile.read.return_value = body.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body))
 
@@ -339,7 +339,7 @@ def test_configurable_light_slots(mock_thread, mock_request_handler):
     mock_request_handler.send_response.reset_mock()
 
     # Light job 3 — rejected (both light slots occupied)
-    body = json.dumps({"queue_name": "queue:render", "job_data": {"id": "l3"}})
+    body = json.dumps({"queue_name": "queue:render", "job_data": {"jobId": "test_job_id", "imageId": "l3"}})
     mock_request_handler.rfile.read.return_value = body.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body))
 
@@ -367,7 +367,7 @@ def test_default_slot_allocation_concurrent_3(mock_thread, mock_request_handler)
     hs.ACTIVE_LIGHT_JOBS = 0
 
     # Heavy job — accepted
-    body = json.dumps({"queue_name": "queue:ocr", "job_data": {"id": "h1"}})
+    body = json.dumps({"queue_name": "queue:ocr", "job_data": {"jobId": "test_job_id", "imageId": "h1"}})
     mock_request_handler.rfile = MagicMock()
     mock_request_handler.rfile.read.return_value = body.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body))
@@ -380,7 +380,7 @@ def test_default_slot_allocation_concurrent_3(mock_thread, mock_request_handler)
     mock_request_handler.send_response.reset_mock()
 
     # Light job 1 — accepted
-    body = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "l1"}})
+    body = json.dumps({"queue_name": "queue:translation", "job_data": {"jobId": "test_job_id", "imageId": "l1"}})
     mock_request_handler.rfile.read.return_value = body.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body))
 
@@ -391,7 +391,7 @@ def test_default_slot_allocation_concurrent_3(mock_thread, mock_request_handler)
     mock_request_handler.send_response.reset_mock()
 
     # Light job 2 — accepted (second light slot)
-    body = json.dumps({"queue_name": "queue:layout", "job_data": {"id": "l2"}})
+    body = json.dumps({"queue_name": "queue:layout", "job_data": {"jobId": "test_job_id", "imageId": "l2"}})
     mock_request_handler.rfile.read.return_value = body.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body))
 
@@ -403,7 +403,7 @@ def test_default_slot_allocation_concurrent_3(mock_thread, mock_request_handler)
     mock_request_handler.send_response.reset_mock()
 
     # Light job 3 — rejected (all 3 concurrent slots filled)
-    body = json.dumps({"queue_name": "queue:render", "job_data": {"id": "l3"}})
+    body = json.dumps({"queue_name": "queue:render", "job_data": {"jobId": "test_job_id", "imageId": "l3"}})
     mock_request_handler.rfile.read.return_value = body.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body))
 
@@ -434,7 +434,7 @@ def test_light_overflow_when_heavy_idle(mock_thread, mock_request_handler):
     hs.ACTIVE_HEAVY_JOBS = 0
     hs.ACTIVE_LIGHT_JOBS = 1
 
-    body = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "light2"}})
+    body = json.dumps({"queue_name": "queue:translation", "job_data": {"jobId": "test_job_id", "imageId": "light2"}})
     mock_request_handler.rfile = MagicMock()
     mock_request_handler.rfile.read.return_value = body.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body))
@@ -459,7 +459,7 @@ def test_light_overflow_blocked_at_global_limit(mock_request_handler):
     hs.ACTIVE_HEAVY_JOBS = 1
     hs.ACTIVE_LIGHT_JOBS = 1
 
-    body = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "light3"}})
+    body = json.dumps({"queue_name": "queue:translation", "job_data": {"jobId": "test_job_id", "imageId": "light3"}})
     mock_request_handler.rfile = MagicMock()
     mock_request_handler.rfile.read.return_value = body.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body))
@@ -482,7 +482,7 @@ def test_light_overflow_disabled(mock_request_handler):
     hs.ACTIVE_HEAVY_JOBS = 0
     hs.ACTIVE_LIGHT_JOBS = 1
 
-    body = json.dumps({"queue_name": "queue:translation", "job_data": {"id": "light2"}})
+    body = json.dumps({"queue_name": "queue:translation", "job_data": {"jobId": "test_job_id", "imageId": "light2"}})
     mock_request_handler.rfile = MagicMock()
     mock_request_handler.rfile.read.return_value = body.encode("utf-8")
     mock_request_handler.headers["Content-Length"] = str(len(body))

@@ -124,10 +124,7 @@ def _process_qa_hybrid(job_data):
     print(f"[QA] Processing Hybrid QA check for page: {page_id or image_id}", flush=True)
 
     try:
-        if page_id:
-            backend_url = CALLBACK_URL.replace("/jobs/callback", f"/pages/{page_id}/details")
-        else:
-            backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
+        backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
             print(f"[QA] Failed to get page/image info: {res.status_code}", flush=True)
