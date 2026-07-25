@@ -117,7 +117,13 @@ def process_region_redo(job_data):
         try:
             text = region["text"]
             lang = region["detectedLanguage"]
-            translated = translate_text(text, source_lang=lang, request_id=request_id)
+            translated = translate_text(
+                text,
+                source_lang=lang,
+                request_id=request_id,
+                provider=job_data.get("tlProvider"),
+                model=job_data.get("tlModel"),
+            )
             callback_payload["translatedText"] = translated
             callback_payload["translationFailed"] = translated is None
             logger.info(f"{req_prefix}Redo Translation result: '{translated}' (failed={translated is None})")

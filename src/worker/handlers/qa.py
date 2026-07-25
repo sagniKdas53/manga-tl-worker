@@ -193,6 +193,8 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     def attempt_llm(prov, model_override=None):
         user_model = model_override or job_data.get("qaLlmModel") or QA_CONFIG.llm_model
+        cache_key = f"qa:{prov}:{user_model}:{image_id}"
+        logger.info(f"Cache key: {cache_key} (hit=False)")
         if prov == "openrouter" and api_key:
             llm_model = user_model if user_model else "meta-llama/llama-3-8b-instruct:free"
             try:
@@ -419,6 +421,8 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     def attempt_vlm(prov, model_override=None):
         user_model = model_override or job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
+        cache_key = f"qa-vlm:{prov}:{user_model}:{image_id}"
+        logger.info(f"Cache key: {cache_key} (hit=False)")
         if prov == "openrouter" and vlm_api_key:
             vlm_model = user_model if user_model else "google/gemini-1.5-pro"
             try:

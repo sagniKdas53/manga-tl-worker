@@ -577,7 +577,7 @@ def fit_text_in_box_py(
 
 def render_image_core(image_id, page_id=None):
     try:
-        render_target_id = page_id or image_id
+        render_target_id = image_id
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:

@@ -258,6 +258,9 @@ def process_translation(job_data):
                         target_lang=target_lang,
                         request_id=request_id,
                         use_fallback_models=use_fallback_models,
+                        provider=job_data.get("tlProvider"),
+                        model=job_data.get("tlModel"),
+                        context_str=context_str,
                     )
                     if translated and is_valid_translation(text, translated, request_id=request_id):
                         resolved_translations[rid] = {

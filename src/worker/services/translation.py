@@ -605,6 +605,9 @@ def translate_text(
     target_lang="en",
     request_id=None,
     use_fallback_models=True,
+    provider=None,
+    model=None,
+    context_str=None,
 ):
     if not request_id:
         request_id = str(uuid.uuid4())[:8]
@@ -612,8 +615,9 @@ def translate_text(
 
     from worker.config import TL_CONFIG
 
-    provider = TL_CONFIG.provider
-    api_key = TL_CONFIG.resolve_key()
+    provider = provider or TL_CONFIG.provider
+    api_key = TL_CONFIG.resolve_key(provider)
+    user_model = model or TL_CONFIG.llm_model
 
     # LOCAL_ONLY mode: when provider is a local runtime, skip all cloud tiers
     local_only = provider in ("ollama", "lmstudio")
@@ -622,7 +626,8 @@ def translate_text(
 
     LANG_MAP.get(source_lang.lower(), source_lang)
     tgt_name = LANG_MAP.get(target_lang.lower(), target_lang)
-    prompt = f"Translate the following text to natural {tgt_name}, maintaining its tone and context. Respond ONLY with the translated text. Do not include any tags, notes, or explanations. NEVER include romanized text, pinyin, romaji, or pronunciation guides. (e.g. BAD: 'ERUFU (ELF!)', GOOD: 'ELF!').\n\nText: {text}"
+    ctx_prefix = f"Context: {context_str}\n\n" if context_str else ""
+    prompt = f"Translate the following text to natural {tgt_name}, maintaining its tone and context. Respond ONLY with the translated text. Do not include any tags, notes, or explanations. NEVER include romanized text, pinyin, romaji, or pronunciation guides. (e.g. BAD: 'ERUFU (ELF!)', GOOD: 'ELF!').\n\n{ctx_prefix}Text: {text}"
 
     # Log Strategy
     logger.info(f"{req_prefix}Translation Strategy:")
@@ -683,7 +688,8 @@ def translate_text(
     else:
         # 1. Cloud LLM Layer
         if api_key:
-            user_model = TL_CONFIG.llm_model
+            cache_key = f"tl:{provider}:{user_model}:{hash(text)}"
+            logger.info(f"{req_prefix}Cache key: {cache_key} (hit=False)")
             logger.info(f"{req_prefix}Trying provider '{provider}' with model '{user_model}'...")
             translated = try_cloud_ai(provider, api_key, user_model, prompt, request_id=request_id)
             if translated:
