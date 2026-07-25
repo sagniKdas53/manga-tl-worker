@@ -155,12 +155,19 @@ class ModelConfig:
         prov = (provider or self.provider or "").lower().strip()
         if not prov:
             return ""
+        from worker.provider_config import get_config_loader
+
+        loader = get_config_loader()
+        if prov in loader.providers and loader.providers[prov].api_key:
+            return loader.providers[prov].api_key
+
         env_var_map = {
             "openrouter": ["OPENROUTER_API_KEY", "API_KEY"],
             "gemini": ["GEMINI_API_KEY", "API_KEY"],
             "nvidia": ["NVIDIA_API_KEY", "API_KEY"],
             "anthropic": ["ANTHROPIC_API_KEY", "API_KEY"],
             "openai": ["OPENAI_API_KEY", "API_KEY"],
+            "neurometric": ["NEUROMETRIC_API_KEY", "API_KEY"],
         }
         candidates = env_var_map.get(prov, ["API_KEY"])
         for var in candidates:
@@ -224,8 +231,13 @@ if QA_MODE == "auto":
     else:
         QA_MODE = "none"
 
-# Render cache
-RENDER_CACHE_DIR = os.environ.get("RENDER_CACHE_DIR", "/app/rendered_cache")
+# Publish provider config map to Redis on startup
+try:
+    from worker.provider_config import get_config_loader
+    get_config_loader().publish_config_to_redis(redis_client)
+except Exception as _e:
+    logger.warning(f"Could not publish provider config to Redis at startup: {_e}")
+
 
 # Validate and fetch openrouter costs on startup
 if OCR_CONFIG.provider == "openrouter" or TL_CONFIG.provider == "openrouter" or QA_CONFIG.provider == "openrouter":
@@ -249,3 +261,4 @@ if OCR_CONFIG.provider == "openrouter" or TL_CONFIG.provider == "openrouter" or 
             import sys
 
             sys.exit(1)
+

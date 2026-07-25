@@ -59,43 +59,25 @@ def wait_for_cooldown(provider: str, max_wait: float = 60.0):
         time.sleep(sleep_time)
 
 
+from worker.provider_config import get_provider_registry
+
 # Provider endpoint registry
-PROVIDER_REGISTRY: dict[str, dict] = {
-    "openrouter": {
-        "url": "https://openrouter.ai/api/v1/chat/completions",
-        "auth_header": "Authorization",
-        "auth_prefix": "Bearer ",
-        "extra_headers": {"HTTP-Referer": "https://manga-library"},
-        "default_model": "meta-llama/llama-3-8b-instruct:free",
-    },
-    "openai": {
-        "url": "https://api.openai.com/v1/chat/completions",
-        "auth_header": "Authorization",
-        "auth_prefix": "Bearer ",
-        "default_model": "gpt-4o-mini",
-    },
-    "anthropic": {
-        "url": "https://api.anthropic.com/v1/messages",
-        "auth_header": "x-api-key",
-        "auth_prefix": "",
-        "extra_headers": {"anthropic-version": "2023-06-01"},
-        "default_model": "claude-3-5-sonnet-20241022",
-        "is_anthropic": True,
-    },
-    "gemini": {
-        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        "auth_header": "Authorization",
-        "auth_prefix": "Bearer ",
-        "default_model": "gemini-1.5-flash",
-    },
-    "nvidia": {
-        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
-        "auth_header": "Authorization",
-        "auth_prefix": "Bearer ",
-        "default_model": "nvidia/riva-translate-4b-instruct-v1.1",
-        "default_vision_model": "nvidia/nemotron-nano-12b-v2-vl",
-    },
-}
+PROVIDER_REGISTRY: dict[str, dict] = get_provider_registry()
+
+
+def normalize_model_name(provider: str, model: str) -> str:
+    """Normalize model name for specific direct provider endpoints."""
+    prov = provider.lower().strip()
+    norm = model.strip()
+    if prov == "gemini":
+        norm = norm.removeprefix("google/").removeprefix("models/").removesuffix(":free")
+    elif prov == "nvidia":
+        norm = norm.removesuffix(":free")
+    elif prov == "neurometric":
+        norm = norm.removeprefix("neurometric/")
+    elif prov in ("openai", "anthropic"):
+        norm = norm.removesuffix(":free")
+    return norm
 
 
 class LLMClient:
@@ -120,7 +102,8 @@ class LLMClient:
         provider_info = PROVIDER_REGISTRY.get(provider, {})
         self.url = provider_info.get("url", "")
         self.is_anthropic = provider_info.get("is_anthropic", False)
-        self.model = model or provider_info.get("default_model", "")
+        raw_model = model or provider_info.get("default_model", "")
+        self.model = normalize_model_name(provider, raw_model)
 
         self.headers = {"Content-Type": "application/json"}
         auth_header = provider_info.get("auth_header", "Authorization")
