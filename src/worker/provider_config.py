@@ -4,7 +4,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from worker.config import logger
@@ -48,6 +48,19 @@ def interpolate_env_vars(raw_str: str) -> str:
 
     pattern = r"\$\{([A-Za-z0-9_]+)(:-([^}]+))?\}"
     return re.sub(pattern, replace_match, raw_str)
+
+
+def normalize_model_name(provider: str, model_name: str) -> str:
+    """Normalize model identifier for provider payload sending."""
+    if not model_name:
+        return ""
+    name = model_name.removesuffix(":free")
+    p = (provider or "").lower()
+    if p == "gemini" and name.startswith("google/"):
+        name = name[len("google/") :]
+    elif p == "neurometric" and name.startswith("neurometric/"):
+        name = name[len("neurometric/") :]
+    return name
 
 
 def find_providers_json_path() -> str:
@@ -197,7 +210,7 @@ class ProviderConfigLoader:
             config_map = {
                 "version": self.version,
                 "defaults": self.defaults,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "providers": {},
             }
 
