@@ -139,4 +139,3 @@ def test_llm_client_null_token_details(mock_post):
     assert res.completion_tokens == 310
     assert res.total_tokens == 1718
     assert res.cached_tokens == 0
-
