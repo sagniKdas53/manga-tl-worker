@@ -315,21 +315,6 @@ def parse_and_validate_batch(response_text, unmatched_regions):
     return None
 
 
-def _inject_openrouter_routing(provider, routing_strategy, payload):
-    if provider == "openrouter":
-        if routing_strategy == "lowest-cost":
-            provider_block = {
-                "allow_fallbacks": False,
-                "sort": "price",
-                "order": ["StreamLake", "NovitaAI", "Baidu Qianfan", "Decart"],
-            }
-            payload["provider"] = provider_block
-            logger.info(f"Routing: strategy=lowest-cost provider_order={provider_block['order']} allow_fallbacks=False")
-        elif routing_strategy == "highest-throughput":
-            payload["provider"] = {"allow_fallbacks": True, "sort": "throughput"}
-            logger.info("Routing: strategy=highest-throughput allow_fallbacks=True")
-
-
 def _get_api_url_and_headers(provider, api_key, model):
     client = LLMClient(provider, api_key, model)
     return client.url, client.headers, client.model
