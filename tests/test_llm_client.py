@@ -112,4 +112,3 @@ def test_llm_client_cloudflare_schema_and_session(mock_post):
     # Check x-session-affinity header
     headers = mock_post.call_args.kwargs["headers"]
     assert headers.get("x-session-affinity") == "cf-session-123"
-

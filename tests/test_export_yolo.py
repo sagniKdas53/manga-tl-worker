@@ -23,6 +23,6 @@ def test_main(tmp_path):
         patch("worker.utils.export_yolo.shutil.move") as mock_move,
         patch("worker.utils.export_yolo.get_sha256", return_value="dummy_sha"),
     ):
-        main()
+        main(dest_dir=str(tmp_path / "models"), cache_dir=str(tmp_path))
         mock_model.export.assert_called_once_with(format="onnx", imgsz=1280, simplify=True)
         mock_move.assert_called_once()

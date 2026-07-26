@@ -14,15 +14,24 @@ def get_sha256(file_path):
     return h.hexdigest()
 
 
-def main():
-    dest_dir = "/home/sagnik/Projects/docker-composes/manga-library/data/worker/huggingface/models"
+def main(dest_dir: str | None = None, cache_dir: str | None = None):
+    if not dest_dir:
+        dest_dir = os.environ.get(
+            "YOLO_EXPORT_DIR",
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../data/worker/huggingface/models")),
+        )
+    if not cache_dir:
+        cache_dir = os.environ.get(
+            "HF_CACHE_DIR",
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../data/worker/huggingface")),
+        )
     os.makedirs(dest_dir, exist_ok=True)
 
     print("Downloading best.pt from Hugging Face...")
     pt_path = hf_hub_download(
         repo_id="juithealien/manga109-segmentation-bubble",
         filename="best.pt",
-        cache_dir="/home/sagnik/Projects/docker-composes/manga-library/data/worker/huggingface",
+        cache_dir=cache_dir,
     )
     print(f"Downloaded model checkpoint to {pt_path}")
 

@@ -72,6 +72,7 @@ def find_providers_json_path() -> str:
     candidates = [
         "/app/config/providers.json",
         os.path.join(os.path.dirname(__file__), "../../../config/providers.json"),
+        os.path.join(os.path.dirname(__file__), "../../config/providers.json"),
         os.path.join(os.getcwd(), "config/providers.json"),
         os.path.join(os.getcwd(), "../config/providers.json"),
     ]
