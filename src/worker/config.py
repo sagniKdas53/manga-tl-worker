@@ -35,6 +35,15 @@ def _is_sensitive(path: str) -> bool:
 
 
 def _load_docker_secrets():
+    """Load secrets into os.environ.
+
+    PRECEDENCE & RESOLUTION ORDER:
+    1. Initial container environment variables (populated from .env via docker-compose).
+    2. DOCKER_SECRETS_JSON (secrets/api_keys.json): Overwrites matching keys in os.environ.
+       If a key is present in secrets/api_keys.json, its value takes precedence over .env.
+       If a key is omitted or empty in secrets/api_keys.json, the value from .env is preserved.
+    3. Individual *_FILE secrets: Overwrite keys only if they were not already loaded from JSON.
+    """
     import json
 
     loaded_from_json = set()
@@ -46,6 +55,7 @@ def _load_docker_secrets():
                 with open(resolved_json_path) as f:
                     secrets = json.load(f)
                     for k, v in secrets.items():
+                        # Override container environment variables with values from secrets/api_keys.json
                         os.environ[k] = str(v)
                         loaded_from_json.add(k)
             except Exception as e:
@@ -168,6 +178,7 @@ class ModelConfig:
             "anthropic": ["ANTHROPIC_API_KEY", "API_KEY"],
             "openai": ["OPENAI_API_KEY", "API_KEY"],
             "neurometric": ["NEUROMETRIC_API_KEY", "API_KEY"],
+            "cloudflare": ["CLOUDFLARE_API_TOKEN", "API_KEY"],
         }
         candidates = env_var_map.get(prov, ["API_KEY"])
         for var in candidates:

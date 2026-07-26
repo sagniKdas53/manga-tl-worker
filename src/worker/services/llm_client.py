@@ -181,6 +181,11 @@ class LLMClient:
             if response_schema and not self._degraded_format:
                 if self.provider == "nvidia":
                     payload["response_format"] = {"type": "json_object"}
+                elif self.provider == "cloudflare":
+                    payload["response_format"] = {
+                        "type": "json_schema",
+                        "json_schema": response_schema,
+                    }
                 else:
                     payload["response_format"] = {
                         "type": "json_schema",
@@ -197,6 +202,11 @@ class LLMClient:
 
     def _inject_routing_and_caching(self, payload: dict):
         """Inject routing parameters, OpenRouter prompt caching, and session tracking."""
+        if self.provider == "cloudflare":
+            if self.session_id:
+                self.headers["x-session-affinity"] = self.session_id
+            return
+
         if self.provider != "openrouter":
             return
 

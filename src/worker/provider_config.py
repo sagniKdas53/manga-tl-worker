@@ -120,6 +120,9 @@ class ProviderConfigLoader:
                 if not api_key:
                     api_key = os.environ.get("API_KEY", "").strip()
                 active = bool(api_key)
+                if name == "cloudflare":
+                    account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+                    active = bool(api_key and account_id)
             else:
                 # Local or keyless provider
                 active = True
@@ -272,7 +275,14 @@ def get_provider_registry() -> dict[str, dict]:
                 "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
                 "auth_header": "Authorization",
                 "auth_prefix": "Bearer ",
-                "default_model": "gemini-2.5-flash",
+                "default_model": "gemini-3.5-flash",
+            },
+            "cloudflare": {
+                "url": "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions",
+                "auth_header": "Authorization",
+                "auth_prefix": "Bearer ",
+                "default_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                "default_vision_model": "@cf/meta/llama-3.2-11b-vision-instruct",
             },
             "nvidia": {
                 "url": "https://integrate.api.nvidia.com/v1/chat/completions",
