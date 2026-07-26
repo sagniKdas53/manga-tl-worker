@@ -109,6 +109,8 @@ def test_process_region_redo_translation(mock_post, mock_get, mock_translate, mo
         "こんにちは",
         source_lang="ja",
         request_id=mock_translate.call_args[1]["request_id"],
+        provider=None,
+        model=None,
     )
 
     mock_post.assert_called_once()

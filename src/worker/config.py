@@ -234,6 +234,7 @@ if QA_MODE == "auto":
 # Publish provider config map to Redis on startup
 try:
     from worker.provider_config import get_config_loader
+
     get_config_loader().publish_config_to_redis(redis_client)
 except Exception as _e:
     logger.warning(f"Could not publish provider config to Redis at startup: {_e}")
@@ -261,4 +262,3 @@ if OCR_CONFIG.provider == "openrouter" or TL_CONFIG.provider == "openrouter" or 
             import sys
 
             sys.exit(1)
-

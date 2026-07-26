@@ -1,11 +1,14 @@
 from unittest.mock import MagicMock
+
 from worker.provider_config import ProviderConfigLoader, normalize_model_name
-from worker.services.llm_client import LLMClient
 
 
 def test_normalize_model_name():
     assert normalize_model_name("gemini", "google/gemini-2.5-flash:free") == "gemini-2.5-flash"
-    assert normalize_model_name("nvidia", "nvidia/riva-translate-4b-instruct-v1.1:free") == "nvidia/riva-translate-4b-instruct-v1.1"
+    assert (
+        normalize_model_name("nvidia", "nvidia/riva-translate-4b-instruct-v1.1:free")
+        == "nvidia/riva-translate-4b-instruct-v1.1"
+    )
     assert normalize_model_name("neurometric", "neurometric/clawpack") == "clawpack"
     assert normalize_model_name("openai", "gpt-4o-mini:free") == "gpt-4o-mini"
     assert normalize_model_name("anthropic", "claude-3-5-sonnet-20241022:free") == "claude-3-5-sonnet-20241022"
@@ -20,6 +23,8 @@ def test_provider_config_loader():
 
     registry = loader.get_provider_registry()
     assert "openrouter" in registry
+    assert "openai" in registry
+    assert "anthropic" in registry
     assert "url" in registry["openrouter"]
 
 

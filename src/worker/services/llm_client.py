@@ -14,6 +14,7 @@ from tenacity.stop import stop_after_attempt
 from tenacity.wait import wait_exponential
 
 from worker.config import logger
+from worker.provider_config import get_provider_registry
 from worker.utils.rate_limit import enforce_rate_limit, estimate_cost
 
 
@@ -58,8 +59,6 @@ def wait_for_cooldown(provider: str, max_wait: float = 60.0):
         logger.info(f"Provider '{provider}' is on cooldown. Sleeping for {sleep_time:.1f}s...")
         time.sleep(sleep_time)
 
-
-from worker.provider_config import get_provider_registry
 
 # Provider endpoint registry
 PROVIDER_REGISTRY: dict[str, dict] = get_provider_registry()

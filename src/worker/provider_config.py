@@ -3,7 +3,7 @@
 import json
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -100,7 +100,7 @@ class ProviderConfigLoader:
             return
 
         try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
+            with open(self.config_path, encoding="utf-8") as f:
                 self.raw_data = json.load(f)
         except Exception as e:
             logger.error(f"Failed to parse providers.json at '{self.config_path}': {e}")
@@ -149,8 +149,9 @@ class ProviderConfigLoader:
 
             # Validate defaults exist in model list if specified
             for task, default_model in defaults_dict.items():
-                if default_model and models_dict.get(task):
-                    model_ids = [m.id for m in models_dict[task]]
+                task_models = models_dict.get(task)
+                if default_model and task_models is not None:
+                    model_ids = [m.id for m in task_models]
                     if default_model not in model_ids:
                         logger.warning(
                             f"Provider '{name}' default model '{default_model}' for task '{task}' not in models list"
@@ -187,8 +188,6 @@ class ProviderConfigLoader:
         """Convert loaded ProviderConfigs into format expected by LLMClient / PROVIDER_REGISTRY."""
         registry = {}
         for name, pconfig in self.providers.items():
-            if not pconfig.active:
-                continue
             registry[name] = {
                 "url": pconfig.base_url,
                 "auth_header": pconfig.auth_header or "Authorization",
@@ -210,7 +209,7 @@ class ProviderConfigLoader:
             config_map = {
                 "version": self.version,
                 "defaults": self.defaults,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),  # noqa: UP017
                 "providers": {},
             }
 
@@ -220,9 +219,7 @@ class ProviderConfigLoader:
                 for task, model_list in prov.models.items():
                     if model_list is not None:
                         capabilities.append(task)
-                        models_export[task] = [
-                            {"id": m.id, "name": m.name, "free": m.free} for m in model_list
-                        ]
+                        models_export[task] = [{"id": m.id, "name": m.name, "free": m.free} for m in model_list]
 
                 config_map["providers"][name] = {
                     "displayName": prov.display_name,
