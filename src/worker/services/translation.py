@@ -286,6 +286,12 @@ def parse_and_validate_batch(response_text, unmatched_regions):
     if not response_text:
         return None
 
+    if isinstance(response_text, dict):
+        validated = validate_translation_response(response_text)
+        if validated:
+            return validated
+        return None
+
     cleaned_text = response_text.strip()
     if cleaned_text.startswith("```"):
         lines = cleaned_text.splitlines()

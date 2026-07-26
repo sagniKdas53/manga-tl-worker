@@ -112,3 +112,31 @@ def test_llm_client_cloudflare_schema_and_session(mock_post):
     # Check x-session-affinity header
     headers = mock_post.call_args.kwargs["headers"]
     assert headers.get("x-session-affinity") == "cf-session-123"
+
+
+@patch("worker.services.llm_client.requests.post")
+def test_llm_client_null_token_details(mock_post):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"translatedText": "Success"}'}}],
+        "usage": {
+            "prompt_tokens": 1408,
+            "completion_tokens": 310,
+            "total_tokens": 1718,
+            "prompt_tokens_details": {"cached_tokens": None, "audio_tokens": None},
+            "completion_tokens_details": {"reasoning_tokens": None},
+        },
+    }
+    mock_post.return_value = mock_resp
+
+    client = LLMClient(provider="neurometric", api_key="test_key", model="clawpack")
+    res = client.complete(messages=[{"role": "user", "content": "Hi"}])
+
+    assert isinstance(res, LLMResponse)
+    assert res.content == '{"translatedText": "Success"}'
+    assert res.prompt_tokens == 1408
+    assert res.completion_tokens == 310
+    assert res.total_tokens == 1718
+    assert res.cached_tokens == 0
+

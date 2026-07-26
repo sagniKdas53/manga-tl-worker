@@ -212,9 +212,8 @@ class LLMClient:
 
         if self.routing_strategy == "lowest-cost":
             payload["provider"] = {
-                "allow_fallbacks": False,
+                "allow_fallbacks": True,
                 "sort": "price",
-                "order": ["StreamLake", "NovitaAI", "Baidu Qianfan", "Decart"],
             }
         elif self.routing_strategy == "highest-throughput":
             payload["provider"] = {"allow_fallbacks": True, "sort": "throughput"}
@@ -285,12 +284,12 @@ class LLMClient:
         else:
             choices = data.get("choices", [])
             content = choices[0].get("message", {}).get("content", "") if choices else ""
-            usage = data.get("usage", {})
-            prompt_tokens = usage.get("prompt_tokens", 0)
-            completion_tokens = usage.get("completion_tokens", 0)
-            total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
+            usage = data.get("usage") or {}
+            prompt_tokens = usage.get("prompt_tokens") or 0
+            completion_tokens = usage.get("completion_tokens") or 0
+            total_tokens = usage.get("total_tokens") or (prompt_tokens + completion_tokens)
             details = usage.get("prompt_tokens_details") or {}
-            cached_tokens = details.get("cached_tokens", 0)
+            cached_tokens = details.get("cached_tokens") or 0
 
         logger.info(f"{self.req_prefix}Provider={self.provider} Model={self.model} Time={elapsed:.2f}s")
         logger.info(f"{self.req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
