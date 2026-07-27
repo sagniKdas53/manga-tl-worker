@@ -21,15 +21,18 @@ def test_enforce_rate_limit(mock_time):
 
     import worker.utils.rate_limit as rlimit
 
-    rlimit.LAST_REQUEST_TIME = 99.5
+    # lock_key = "global" (provider=None)
+    rlimit.PROVIDER_LAST_REQUEST_TIME = {"global": 99.5}
 
     # 60/min = 1/s. Min delay = 1. Elapsed = 0.5. Should sleep for 0.5.
     enforce_rate_limit()
     mock_time.sleep.assert_called_with(0.5)
 
-    # Test error fallback
-    rlimit.LAST_REQUEST_TIME = "invalid"
-    enforce_rate_limit()  # should not crash
+    # Test no-delay path (elapsed >= delay)
+    rlimit.PROVIDER_LAST_REQUEST_TIME = {"default:60/min": 98.0}
+    mock_time.sleep.reset_mock()
+    enforce_rate_limit()
+    mock_time.sleep.assert_not_called()
 
     del os.environ["RATE_LIMIT"]
 
@@ -93,7 +96,8 @@ def test_concurrent_rate_limiting(mock_time):
 
     import worker.utils.rate_limit as rlimit
 
-    rlimit.LAST_REQUEST_TIME = 99.5
+    # lock_key = "global" (provider=None)
+    rlimit.PROVIDER_LAST_REQUEST_TIME = {"global": 99.5}
 
     current_time = 100.0
 

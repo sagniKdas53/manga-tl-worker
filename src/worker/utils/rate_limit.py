@@ -11,7 +11,7 @@ RATE_LIMIT_LOCK = threading.Lock()
 PROVIDER_LAST_REQUEST_TIME = {}
 
 
-def enforce_rate_limit(provider: str = None, provider_rpm: float = None):
+def enforce_rate_limit(provider: str | None = None, provider_rpm: float | None = None):
     global PROVIDER_LAST_REQUEST_TIME
     rpm = None
 
