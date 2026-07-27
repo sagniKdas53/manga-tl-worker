@@ -8,47 +8,50 @@ import requests
 from worker.config import logger, redis_client
 
 RATE_LIMIT_LOCK = threading.Lock()
-LAST_REQUEST_TIME = 0.0
+PROVIDER_LAST_REQUEST_TIME = {}
 
 
-def enforce_rate_limit():
-    global LAST_REQUEST_TIME
-    rate_limit_env = os.environ.get("RATE_LIMIT", "").strip()
-    if not rate_limit_env:
-        return
-    try:
-        # Parse formats like "60", "60/m", "60/min", "5/s", "5/sec"
-        rpm = None
-        if "/" in rate_limit_env:
-            parts = rate_limit_env.split("/")
-            val = float(parts[0])
-            unit = parts[1].lower().strip()
-            rpm = val * 60.0 if unit in ("s", "sec", "second", "seconds") else val
-        else:
-            rpm = float(rate_limit_env)
+def enforce_rate_limit(provider: str = None, provider_rpm: float = None):
+    global PROVIDER_LAST_REQUEST_TIME
+    rpm = None
 
-        if rpm > 0:
-            min_delay = 60.0 / rpm
-            sleep_time = 0.0
-
-            with RATE_LIMIT_LOCK:
-                now = time.time()
-                elapsed = now - LAST_REQUEST_TIME
-                if elapsed < min_delay:
-                    sleep_time = min_delay - elapsed
-                    LAST_REQUEST_TIME = now + sleep_time
+    if provider and provider_rpm and provider_rpm > 0:
+        rpm = float(provider_rpm)
+    else:
+        rate_limit_env = os.environ.get("RATE_LIMIT", "").strip()
+        if rate_limit_env:
+            try:
+                if "/" in rate_limit_env:
+                    parts = rate_limit_env.split("/")
+                    val = float(parts[0])
+                    unit = parts[1].lower().strip()
+                    rpm = val * 60.0 if unit in ("s", "sec", "second", "seconds") else val
                 else:
-                    LAST_REQUEST_TIME = now
+                    rpm = float(rate_limit_env)
+            except Exception as e:
+                print(f"[Translation] Error parsing RATE_LIMIT env: {e}", flush=True)
 
-            if sleep_time > 0:
-                print(
-                    f"[Translation] Rate limit: Sleeping for {sleep_time:.2f} seconds to respect {rate_limit_env} rate limit...",
-                    flush=True,
-                )
-                time.sleep(sleep_time)
+    if rpm and rpm > 0:
+        min_delay = 60.0 / rpm
+        sleep_time = 0.0
+        lock_key = provider if provider else "global"
 
-    except Exception as e:
-        print(f"[Translation] Error enforcing rate limit: {e}", flush=True)
+        with RATE_LIMIT_LOCK:
+            now = time.time()
+            last_time = PROVIDER_LAST_REQUEST_TIME.get(lock_key, 0.0)
+            elapsed = now - last_time
+            if elapsed < min_delay:
+                sleep_time = min_delay - elapsed
+                PROVIDER_LAST_REQUEST_TIME[lock_key] = now + sleep_time
+            else:
+                PROVIDER_LAST_REQUEST_TIME[lock_key] = now
+
+        if sleep_time > 0:
+            print(
+                f"[Translation] Rate limit: Sleeping for {sleep_time:.2f} seconds to respect {rpm} RPM limit for {lock_key}...",
+                flush=True,
+            )
+            time.sleep(sleep_time)
 
 
 COSTS_LOCK = threading.Lock()

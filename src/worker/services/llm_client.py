@@ -101,6 +101,7 @@ class LLMClient:
         provider_info = PROVIDER_REGISTRY.get(provider, {})
         self.url = provider_info.get("url", "")
         self.is_anthropic = provider_info.get("is_anthropic", False)
+        self.rate_limits = provider_info.get("rate_limits")
         raw_model = model or provider_info.get("default_model", "")
         self.model = normalize_model_name(provider, raw_model)
 
@@ -131,7 +132,7 @@ class LLMClient:
             logger.warning(f"{self.req_prefix}Skipping provider '{self.provider}' — still in cooldown")
             return None
 
-        enforce_rate_limit()
+        enforce_rate_limit(self.provider, self.rate_limits)
 
         payload = self._build_payload(messages, system_prompt, response_schema)
         self._inject_routing_and_caching(payload)
@@ -237,7 +238,7 @@ class LLMClient:
             payload.setdefault("extra_body", {})["session_id"] = self.session_id
 
     @retry(
-        stop=stop_after_attempt(4),
+        stop=stop_after_attempt(6),
         wait=wait_exponential(multiplier=2, min=2, max=30),
         retry=retry_if_exception_type(TransientAPIError),
         reraise=True,
@@ -253,8 +254,12 @@ class LLMClient:
             raise TransientAPIError(f"Connection error: {e}") from e
 
         if response.status_code == 429:
-            PROVIDER_COOLDOWNS[self.provider] = time.time() + 5.0
-            raise TransientAPIError("Rate limited (429)", status_code=429)
+            retry_after = response.headers.get("Retry-After")
+            cooldown_time = 5.0
+            if retry_after and retry_after.isdigit():
+                cooldown_time = float(retry_after)
+            PROVIDER_COOLDOWNS[self.provider] = time.time() + cooldown_time
+            raise TransientAPIError(f"Rate limited (429), Retry-After: {cooldown_time}s", status_code=429)
 
         if response.status_code == 400 and not self._degraded_format:
             current_rf = payload.get("response_format", {})

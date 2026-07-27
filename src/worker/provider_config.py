@@ -197,6 +197,7 @@ class ProviderConfigLoader:
                 "auth_header": pconfig.auth_header or "Authorization",
                 "auth_prefix": pconfig.auth_prefix if pconfig.auth_prefix is not None else "Bearer ",
                 "extra_headers": pconfig.extra_headers,
+                "rate_limits": pconfig.rate_limits,
                 "default_model": pconfig.defaults.get("tl") or "",
                 "default_vision_model": pconfig.defaults.get("ocr") or pconfig.defaults.get("qaVLM") or "",
                 "is_anthropic": pconfig.type == "anthropic",
