@@ -48,6 +48,10 @@ class LLMResponse:
 
 # Provider cooldown registry
 PROVIDER_COOLDOWNS: dict[str, float] = {}
+PROVIDER_CONSECUTIVE_429S: dict[str, int] = {}
+
+COOLDOWN_BASE_SECONDS = 10.0
+COOLDOWN_MAX_SECONDS = 120.0
 
 
 def wait_for_cooldown(provider: str, max_wait: float = 60.0):
@@ -238,7 +242,7 @@ class LLMClient:
             payload.setdefault("extra_body", {})["session_id"] = self.session_id
 
     @retry(
-        stop=stop_after_attempt(6),
+        stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=2, max=30),
         retry=retry_if_exception_type(TransientAPIError),
         reraise=True,
@@ -255,11 +259,15 @@ class LLMClient:
 
         if response.status_code == 429:
             retry_after = response.headers.get("Retry-After")
-            cooldown_time = 5.0
+            cooldown_time = 10.0
             if retry_after and retry_after.isdigit():
                 cooldown_time = float(retry_after)
+            consecutive = PROVIDER_CONSECUTIVE_429S.get(self.provider, 0) + 1
+            PROVIDER_CONSECUTIVE_429S[self.provider] = consecutive
+            multiplier = min(2 ** (consecutive - 1), COOLDOWN_MAX_SECONDS / COOLDOWN_BASE_SECONDS)
+            cooldown_time = max(cooldown_time, COOLDOWN_BASE_SECONDS * multiplier)
             PROVIDER_COOLDOWNS[self.provider] = time.time() + cooldown_time
-            raise TransientAPIError(f"Rate limited (429), Retry-After: {cooldown_time}s", status_code=429)
+            raise TransientAPIError(f"Rate limited (429), cooldown: {cooldown_time}s", status_code=429)
 
         if response.status_code == 400 and not self._degraded_format:
             current_rf = payload.get("response_format", {})
@@ -278,6 +286,7 @@ class LLMClient:
 
     def _parse_response(self, data: dict, elapsed: float) -> LLMResponse:
         """Normalize response JSON from Anthropic or OpenAI format."""
+        PROVIDER_CONSECUTIVE_429S.pop(self.provider, None)
         if self.is_anthropic:
             content_list = data.get("content", [])
             content = content_list[0].get("text", "") if content_list else ""

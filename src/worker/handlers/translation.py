@@ -362,3 +362,6 @@ def process_translation(job_data):
         logger.info(f"{req_prefix}Callback status code: {res.status_code}")
     except Exception as e:
         logger.error(f"{req_prefix}Failed to post callback to backend: {e}")
+
+    if all_failed:
+        raise RuntimeError(f"All {failed_count} translation(s) failed — no regions translated successfully")
