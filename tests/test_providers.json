@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "defaults": {
+    "provider": "openrouter"
+  },
+  "providers": {
+    "openrouter": {
+      "displayName": "OpenRouter",
+      "type": "openai-compatible",
+      "baseUrl": "https://openrouter.ai/api/v1/chat/completions",
+      "authHeader": "Authorization"
+    },
+    "openai": {
+      "displayName": "OpenAI",
+      "type": "openai-compatible",
+      "baseUrl": "https://api.openai.com/v1/chat/completions",
+      "authHeader": "Authorization"
+    },
+    "anthropic": {
+      "displayName": "Anthropic",
+      "type": "anthropic",
+      "baseUrl": "https://api.anthropic.com/v1/messages",
+      "authHeader": "x-api-key"
+    },
+    "gemini": {
+      "displayName": "Google Gemini",
+      "type": "openai-compatible",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "authHeader": "Authorization"
+    },
+    "nvidia": {
+      "displayName": "NVIDIA",
+      "type": "openai-compatible",
+      "baseUrl": "https://integrate.api.nvidia.com/v1/chat/completions",
+      "authHeader": "Authorization"
+    },
+    "cloudflare": {
+      "displayName": "Cloudflare",
+      "type": "openai-compatible",
+      "baseUrl": "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions",
+      "authHeader": "Authorization"
+    },
+    "neurometric": {
+      "displayName": "Neurometric",
+      "type": "openai-compatible",
+      "baseUrl": "https://api.neurometric.ai/v1/chat/completions",
+      "authHeader": "Authorization"
+    }
+  }
+}
