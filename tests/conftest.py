@@ -15,4 +15,5 @@ if "cv2" in sys.modules:
         pass
 
 import os
+
 os.environ["PROVIDERS_CONFIG"] = os.path.join(os.path.dirname(__file__), "test_providers.json")
