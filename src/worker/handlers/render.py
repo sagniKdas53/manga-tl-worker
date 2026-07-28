@@ -766,11 +766,11 @@ def process_render(job_data):
     qa_mode_resolved = job_data.get("qaMode") or QA_MODE
 
     if qa_mode_resolved == "auto":
-        from worker.config import QA_CONFIG
+        from worker.config import QA_CONFIG, is_usable_model
 
         provider = job_data.get("qaProvider") or getattr(QA_CONFIG, "provider", None)
-        has_vlm = job_data.get("qaVlmModel") or getattr(QA_CONFIG, "vlm_model", None)
-        has_llm = job_data.get("qaLlmModel") or getattr(QA_CONFIG, "llm_model", None)
+        has_vlm = is_usable_model(job_data.get("qaVlmModel")) or is_usable_model(getattr(QA_CONFIG, "vlm_model", None))
+        has_llm = is_usable_model(job_data.get("qaLlmModel")) or is_usable_model(getattr(QA_CONFIG, "llm_model", None))
         if has_vlm and provider:
             qa_mode_resolved = "vlm"
         elif has_llm and provider:

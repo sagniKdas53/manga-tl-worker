@@ -12,6 +12,7 @@ from worker.config import (
     CALLBACK_URL,
     QA_CONFIG,
     QA_MODE,
+    is_usable_model,
     logger,
     minio_client,
     redis_client,
@@ -86,14 +87,19 @@ def process_qa(job_data):
 
     if qa_mode_resolved == "auto":
         provider = job_data.get("qaProvider") or getattr(QA_CONFIG, "provider", None)
-        has_vlm = job_data.get("qaVlmModel") or getattr(QA_CONFIG, "vlm_model", None)
-        has_llm = job_data.get("qaLlmModel") or getattr(QA_CONFIG, "llm_model", None)
+        has_vlm = is_usable_model(job_data.get("qaVlmModel")) or is_usable_model(getattr(QA_CONFIG, "vlm_model", None))
+        has_llm = is_usable_model(job_data.get("qaLlmModel")) or is_usable_model(getattr(QA_CONFIG, "llm_model", None))
         if has_vlm and provider:
             qa_mode_resolved = "vlm"
         elif has_llm and provider:
             qa_mode_resolved = "llm"
         else:
             qa_mode_resolved = "none"
+        print(
+            f"[QA] AUTO mode resolved to '{qa_mode_resolved}' (provider={provider}, "
+            f"vlm={'yes' if has_vlm else 'no'}, llm={'yes' if has_llm else 'no'})",
+            flush=True,
+        )
 
     print(
         f"[QA] Processing image: {image_id}{progress_str} (mode={qa_mode_resolved})",

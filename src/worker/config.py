@@ -141,6 +141,16 @@ YOLO_PINNED_CHECKSUM = "c9208cb610aa35b8f8dc7ef0890182322992a43399a853093ad5d04a
 YOLO_FALLBACK_MODE = os.environ.get("YOLO_FALLBACK_MODE", "opencv").lower()
 
 
+def is_usable_model(model):
+    """A model id counts as usable only if it is a real, non-sentinel value."""
+    if not model or not isinstance(model, str):
+        return False
+    m = model.strip()
+    if not m:
+        return False
+    return m.lower() != "n/a" and m not in ("default", "inherit") and "[ORPHANED]" not in m
+
+
 # Model Configuration
 class ModelConfig:
     def __init__(
@@ -231,13 +241,19 @@ if QA_MODE == "auto":
     effective_local_vlm = "" if disable_local else LOCAL_VLM_MODEL
     effective_local_llm = "" if disable_local else LOCAL_LLM_MODEL
 
-    # Detect VLM capability (Cloud VLM or effective local VLM)
-    has_vlm = bool(QA_CONFIG.vlm_model or OCR_CONFIG.vlm_model or effective_local_vlm)
+    # Detect VLM capability (usable Cloud VLM or effective local VLM)
+    has_vlm = (
+        is_usable_model(QA_CONFIG.vlm_model)
+        or is_usable_model(OCR_CONFIG.vlm_model)
+        or is_usable_model(effective_local_vlm)
+    )
 
-    # Detect LLM capability (Cloud provider or effective local LLM)
+    # Detect LLM capability (usable Cloud LLM with provider or effective local LLM)
+    has_llm = is_usable_model(QA_CONFIG.llm_model) or is_usable_model(effective_local_llm)
+
     if has_vlm:
         QA_MODE = "vlm"
-    elif QA_CONFIG.provider or effective_local_llm:
+    elif (QA_CONFIG.provider and has_llm) or is_usable_model(effective_local_llm):
         QA_MODE = "llm"
     else:
         QA_MODE = "none"
