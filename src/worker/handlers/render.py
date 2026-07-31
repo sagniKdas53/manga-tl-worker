@@ -575,12 +575,10 @@ def fit_text_in_box_py(
     }
 
 
-def render_image_core(image_id, page_id=None):
+def render_image_core(image_id, page_id=None, chapter_id=None):
     try:
         render_target_id = image_id
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
-        chapter_id = job_data.get("chapterId")
-        page_id = job_data.get("pageId")
         if page_id:
             backend_url += f"?pageId={page_id}"
             if chapter_id:
@@ -786,7 +784,7 @@ def process_render(job_data):
         else:
             qa_mode_resolved = "none"
 
-    if not render_image_core(image_id, page_id=page_id):
+    if not render_image_core(image_id, page_id=page_id, chapter_id=job_data.get("chapterId")):
         raise Exception("Render failed")
 
     # Trigger callback
