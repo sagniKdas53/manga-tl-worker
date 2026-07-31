@@ -579,6 +579,14 @@ def render_image_core(image_id, page_id=None):
     try:
         render_target_id = image_id
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
+        chapter_id = job_data.get("chapterId")
+        page_id = job_data.get("pageId")
+        if page_id:
+            backend_url += f"?pageId={page_id}"
+            if chapter_id:
+                backend_url += f"&chapterId={chapter_id}"
+        elif chapter_id:
+            backend_url += f"?chapterId={chapter_id}"
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
             print(f"[Render] Failed to get image info: {res.status_code}", flush=True)

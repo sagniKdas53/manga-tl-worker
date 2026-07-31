@@ -134,6 +134,14 @@ def _process_qa_hybrid(job_data):
 
     try:
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
+        chapter_id = job_data.get("chapterId")
+        page_id = job_data.get("pageId")
+        if page_id:
+            backend_url += f"?pageId={page_id}"
+            if chapter_id:
+                backend_url += f"&chapterId={chapter_id}"
+        elif chapter_id:
+            backend_url += f"?chapterId={chapter_id}"
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
             print(f"[QA] Failed to get page/image info: {res.status_code}", flush=True)
@@ -582,6 +590,14 @@ def _auto_pass_all(job_data):
 
     try:
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
+        chapter_id = job_data.get("chapterId")
+        page_id = job_data.get("pageId")
+        if page_id:
+            backend_url += f"?pageId={page_id}"
+            if chapter_id:
+                backend_url += f"&chapterId={chapter_id}"
+        elif chapter_id:
+            backend_url += f"?chapterId={chapter_id}"
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
             print(f"[QA] Failed to get image info: {res.status_code}", flush=True)
@@ -643,6 +659,14 @@ def _process_qa_llm(job_data):
 
     try:
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
+        chapter_id = job_data.get("chapterId")
+        page_id = job_data.get("pageId")
+        if page_id:
+            backend_url += f"?pageId={page_id}"
+            if chapter_id:
+                backend_url += f"&chapterId={chapter_id}"
+        elif chapter_id:
+            backend_url += f"?chapterId={chapter_id}"
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
             print(f"[QA] Failed to get image info: {res.status_code}", flush=True)
@@ -851,6 +875,14 @@ def _process_qa_vlm(job_data):
 
     try:
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
+        chapter_id = job_data.get("chapterId")
+        page_id = job_data.get("pageId")
+        if page_id:
+            backend_url += f"?pageId={page_id}"
+            if chapter_id:
+                backend_url += f"&chapterId={chapter_id}"
+        elif chapter_id:
+            backend_url += f"?chapterId={chapter_id}"
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
             print(f"[QA] Failed to get image info: {res.status_code}", flush=True)

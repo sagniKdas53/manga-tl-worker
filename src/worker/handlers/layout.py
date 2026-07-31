@@ -25,6 +25,14 @@ def process_layout(job_data):
     # 1. Fetch OCR regions + panels from backend
     try:
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
+        chapter_id = job_data.get("chapterId")
+        page_id = job_data.get("pageId")
+        if page_id:
+            backend_url += f"?pageId={page_id}"
+            if chapter_id:
+                backend_url += f"&chapterId={chapter_id}"
+        elif chapter_id:
+            backend_url += f"?chapterId={chapter_id}"
         res = requests.get(backend_url, headers=BACKEND_HEADERS)
         if res.status_code != 200:
             print(f"[Layout] Failed to get page/image info: {res.status_code}", flush=True)
@@ -50,7 +58,7 @@ def process_layout(job_data):
             print(f"[Layout] Callback status code: {res.status_code}", flush=True)
         except Exception as e:
             print(f"[Layout] Failed to post callback: {e}", flush=True)
-        raise
+        return
 
     # Get image dimensions from the first panel or estimate from regions
     image_width = max(
