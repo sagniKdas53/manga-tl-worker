@@ -304,7 +304,11 @@ You MUST return a JSON object containing a "results" key with an array of object
     # Call backend prepare endpoint to apply fixes and set visibility
     prepare_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}/qa-hybrid-prepare")
     try:
-        prep_res = requests.post(prepare_url, json={"qaResults": results}, headers=BACKEND_HEADERS)
+        prep_res = requests.post(
+            prepare_url,
+            json={"pageId": job_data.get("pageId"), "qaResults": results},
+            headers=BACKEND_HEADERS,
+        )
         print(
             f"[QA] Hybrid QA preparation status code: {prep_res.status_code}",
             flush=True,
@@ -551,7 +555,11 @@ You MUST return a JSON object containing a "results" key with an array of object
             )
 
     # Call backend
-    callback_payload = {"imageId": image_id, "qaResults": results_vlm}
+    callback_payload = {
+        "imageId": image_id,
+        "pageId": job_data.get("pageId"),
+        "qaResults": results_vlm,
+    }
     from worker.utils.rate_limit import format_cost, get_job_costs
 
     costs = get_job_costs()
@@ -620,7 +628,11 @@ def _auto_pass_all(job_data):
         )
 
     # Call backend
-    callback_payload = {"imageId": image_id, "qaResults": results}
+    callback_payload = {
+        "imageId": image_id,
+        "pageId": job_data.get("pageId"),
+        "qaResults": results,
+    }
     from worker.utils.rate_limit import format_cost, get_job_costs
 
     costs = get_job_costs()
@@ -836,7 +848,11 @@ You MUST return a JSON object containing a "results" key with an array of object
     logger.debug(f"[QA] LLM QA results output:\n{json.dumps(results, ensure_ascii=False, indent=2)}")
 
     # Call backend
-    callback_payload = {"imageId": image_id, "qaResults": results}
+    callback_payload = {
+        "imageId": image_id,
+        "pageId": job_data.get("pageId"),
+        "qaResults": results,
+    }
     from worker.utils.rate_limit import format_cost, get_job_costs
 
     costs = get_job_costs()
@@ -1128,7 +1144,11 @@ You MUST return a JSON object containing a "results" key with an array of object
     logger.debug(f"[QA] VLM QA results output:\n{json.dumps(results, ensure_ascii=False, indent=2)}")
 
     # Call backend
-    callback_payload = {"imageId": image_id, "qaResults": results}
+    callback_payload = {
+        "imageId": image_id,
+        "pageId": job_data.get("pageId"),
+        "qaResults": results,
+    }
     from worker.utils.rate_limit import format_cost, get_job_costs
 
     costs = get_job_costs()
