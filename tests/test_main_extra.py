@@ -1,9 +1,21 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 import worker.concurrency as conc
 from worker.main import app
+
+AUTH_HEADERS = {"WORKER_API_SECRET": "test_secret"}
+
+
+@pytest.fixture(autouse=True)
+def configure_api_secret():
+    """Authenticated endpoints fail closed now (AUDIT-S3), so the secret has to be configured."""
+    previous = conc.WORKER_API_SECRET
+    conc.WORKER_API_SECRET = "test_secret"
+    yield
+    conc.WORKER_API_SECRET = previous
 
 
 def test_main_health_seeding():
@@ -38,17 +50,15 @@ def test_main_health_disconnected():
 
 def test_main_capabilities():
     client = TestClient(app)
-    headers = {"WORKER_API_SECRET": conc.WORKER_API_SECRET} if conc.WORKER_API_SECRET else {}
-    res = client.get("/capabilities", headers=headers)
+    res = client.get("/capabilities", headers=AUTH_HEADERS)
     assert res.status_code == 200
     assert "supported_tasks" in res.json()
 
 
 def test_submit_job_success():
     client = TestClient(app)
-    headers = {"WORKER_API_SECRET": conc.WORKER_API_SECRET} if conc.WORKER_API_SECRET else {}
     payload = {"queue_name": "queue:translation", "job_data": {"jobId": "j1", "imageId": "i1"}}
     with patch("threading.Thread"):
-        res = client.post("/api/v1/jobs/submit", json=payload, headers=headers)
+        res = client.post("/api/v1/jobs/submit", json=payload, headers=AUTH_HEADERS)
         assert res.status_code == 202
         assert res.json()["status"] == "accepted"

@@ -1,5 +1,8 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from worker.handlers import qa
 from worker.handlers.qa import (
     process_qa,
 )
@@ -181,3 +184,50 @@ def test_process_qa_reject_sfx(mock_cloud, mock_redis, mock_requests):
 
     mock_requests.post.assert_called()
     assert mock_requests.post.call_args[1]["json"]["qaResults"][0]["qaStatus"] == "reject_sfx"
+
+
+class TestQaProviderDispatch:
+    """AUDIT-W1: QA dispatched on a hardcoded openrouter/gemini/nvidia if/elif in four places.
+
+    cloudflare and neurometric are selectable in the UI and present in config/providers.json, but
+    fell off the end of every chain and returned None — which then fell through to the broken local
+    fallback and completed QA with zero findings and no error.
+    """
+
+    @pytest.mark.parametrize("provider", ["cloudflare", "neurometric", "openrouter", "nvidia"])
+    def test_llm_reaches_every_configured_provider(self, provider):
+        with patch("worker.handlers.qa.try_cloud_ai", return_value='{"results": []}') as mock_call:
+            result = qa._qa_cloud_llm(provider, "key", "some/model", "prompt", "lowest-cost")
+
+        assert result == '{"results": []}'
+        assert mock_call.call_args.args[0] == provider
+        assert mock_call.call_args.args[2] == "some/model"
+
+    @pytest.mark.parametrize("provider", ["cloudflare", "neurometric", "openrouter", "nvidia"])
+    def test_vlm_reaches_every_configured_provider(self, provider):
+        with patch("worker.handlers.qa.try_cloud_ai_vision", return_value='{"results": []}') as mock_call:
+            result = qa._qa_cloud_vlm(provider, "key", "some/model", "prompt", "b64", "lowest-cost")
+
+        assert result == '{"results": []}'
+        assert mock_call.call_args.args[0] == provider
+
+    def test_falls_back_to_the_builtin_default_model(self):
+        with patch("worker.handlers.qa.try_cloud_ai", return_value="{}") as mock_call:
+            qa._qa_cloud_llm("openrouter", "key", None, "prompt", None)
+        assert mock_call.call_args.args[2] == qa.QA_DEFAULT_LLM_MODELS["openrouter"]
+
+    def test_returns_none_without_an_api_key(self):
+        with patch("worker.handlers.qa.try_cloud_ai") as mock_call:
+            assert qa._qa_cloud_llm("cloudflare", "", "m", "prompt", None) is None
+        mock_call.assert_not_called()
+
+    def test_returns_none_when_no_model_can_be_resolved(self):
+        # A provider outside the default table must be given an explicit model rather than
+        # silently doing nothing.
+        with patch("worker.handlers.qa.try_cloud_ai") as mock_call:
+            assert qa._qa_cloud_llm("neurometric", "key", None, "prompt", None) is None
+        mock_call.assert_not_called()
+
+    def test_provider_exception_is_swallowed_into_none(self):
+        with patch("worker.handlers.qa.try_cloud_ai", side_effect=RuntimeError("boom")):
+            assert qa._qa_cloud_llm("openrouter", "key", "m", "prompt", None) is None

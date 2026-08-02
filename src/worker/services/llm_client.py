@@ -50,8 +50,16 @@ class LLMResponse:
 PROVIDER_COOLDOWNS: dict[str, float] = {}
 PROVIDER_CONSECUTIVE_429S: dict[str, int] = {}
 
+# Providers that answered 401/403, and until when to stop asking. Deliberately separate from
+# PROVIDER_COOLDOWNS: a rate-limit cooldown is worth waiting out, a bad credential is not, so this
+# one short-circuits without sleeping.
+PROVIDER_AUTH_FAILURES: dict[str, float] = {}
+
 COOLDOWN_BASE_SECONDS = 10.0
 COOLDOWN_MAX_SECONDS = 120.0
+# Long enough to cover the whole retry ladder above a single job, short enough that fixing the key
+# recovers without a worker restart.
+AUTH_FAILURE_COOLDOWN_SECONDS = 300.0
 
 
 def wait_for_cooldown(provider: str, max_wait: float = 60.0):
@@ -128,6 +136,14 @@ class LLMClient:
         """Send a completion request with retries."""
         if not self.url or not self.api_key:
             logger.warning(f"{self.req_prefix}Missing URL or API key for provider '{self.provider}'")
+            return None
+
+        auth_failed_until = PROVIDER_AUTH_FAILURES.get(self.provider, 0.0)
+        if time.time() < auth_failed_until:
+            logger.warning(
+                f"{self.req_prefix}Skipping provider '{self.provider}' — its API key was rejected; "
+                f"not retrying for another {auth_failed_until - time.time():.0f}s."
+            )
             return None
 
         wait_for_cooldown(self.provider)
@@ -279,6 +295,19 @@ class LLMClient:
 
         if response.status_code >= 500:
             raise TransientAPIError(f"Server error: {response.status_code}", status_code=response.status_code)
+
+        if response.status_code in (401, 403):
+            # A bad credential does not heal inside a job, but every layer above this one retries:
+            # batch, then a retry pass, then per-region individual fallback, then the RQ job itself
+            # up to 3 times. On the 2026-08-02 drained run one invalid neurometric key produced 323
+            # identical 401s and failed 11 of 50 translation jobs. Parking the provider on cooldown
+            # makes call() short-circuit the rest of those attempts and says why, once, loudly.
+            PROVIDER_AUTH_FAILURES[self.provider] = time.time() + AUTH_FAILURE_COOLDOWN_SECONDS
+            raise PermanentAPIError(
+                f"Authentication failed for provider '{self.provider}' ({response.status_code}) — check its API "
+                f"key. Skipping this provider for {AUTH_FAILURE_COOLDOWN_SECONDS:.0f}s. {response.text}"
+            )
+
         if response.status_code >= 400:
             raise PermanentAPIError(f"Client error: {response.status_code} — {response.text}")
 
@@ -287,6 +316,7 @@ class LLMClient:
     def _parse_response(self, data: dict, elapsed: float) -> LLMResponse:
         """Normalize response JSON from Anthropic or OpenAI format."""
         PROVIDER_CONSECUTIVE_429S.pop(self.provider, None)
+        PROVIDER_AUTH_FAILURES.pop(self.provider, None)
         if self.is_anthropic:
             content_list = data.get("content", [])
             content = content_list[0].get("text", "") if content_list else ""

@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import worker.concurrency as conc
-from worker.main import app
+from worker.main import _require_api_secret, app
 
 client = TestClient(app)
 
@@ -16,6 +16,7 @@ def reset_concurrency_state():
     conc.ACTIVE_LIGHT_JOBS = 0
     conc.SEEDING_COMPLETE = True
     conc.WORKER_API_SECRET = "test_secret"
+    conc.ALLOW_UNAUTHENTICATED_API = False
 
 
 def test_check_auth_failure():
@@ -24,6 +25,44 @@ def test_check_auth_failure():
 
     response_no_header = client.get("/capabilities")
     assert response_no_header.status_code == 401
+
+
+def test_unconfigured_secret_denies_rather_than_opening_the_worker():
+    """AUDIT-S3: an empty secret used to skip the comparison and make every endpoint public.
+
+    That is the state an absent or unreadable secret file produces, so the failure mode of a bad
+    mount was an open /api/v1/jobs/submit.
+    """
+    conc.WORKER_API_SECRET = ""
+
+    assert client.get("/capabilities").status_code == 401
+    assert client.get("/capabilities", headers={"WORKER_API_SECRET": "anything"}).status_code == 401
+    submit = client.post(
+        "/api/v1/jobs/submit",
+        json={"queue_name": "queue:translation", "job_data": {"jobId": "j1", "imageId": "i1"}},
+    )
+    assert submit.status_code == 401
+
+
+def test_explicit_opt_out_allows_an_open_worker():
+    conc.WORKER_API_SECRET = ""
+    conc.ALLOW_UNAUTHENTICATED_API = True
+    assert client.get("/capabilities").status_code == 200
+
+
+def test_require_api_secret_exits_without_a_secret():
+    conc.WORKER_API_SECRET = ""
+    with pytest.raises(SystemExit) as exc:
+        _require_api_secret()
+    assert exc.value.code == 1
+
+
+def test_require_api_secret_passes_when_configured_or_opted_out():
+    _require_api_secret()
+
+    conc.WORKER_API_SECRET = ""
+    conc.ALLOW_UNAUTHENTICATED_API = True
+    _require_api_secret()
 
 
 def test_check_auth_success():

@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 
+from worker.services import llm_client
 from worker.services.llm_client import LLMClient, LLMResponse
 
 
@@ -139,3 +140,60 @@ def test_llm_client_null_token_details(mock_post):
     assert res.completion_tokens == 310
     assert res.total_tokens == 1718
     assert res.cached_tokens == 0
+
+
+@patch("worker.services.llm_client.requests.post")
+def test_auth_failure_parks_the_provider_instead_of_retrying_it(mock_post):
+    """AUDIT triage 2026-08-02: an invalid neurometric key produced 323 identical 401s.
+
+    A bad credential does not heal inside a job, but every layer above the client retries — batch,
+    retry pass, per-region fallback, then the RQ job three times. The first 401 must therefore stop
+    the provider being asked again rather than being re-attempted at each level.
+    """
+    llm_client.PROVIDER_AUTH_FAILURES.clear()
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 401
+    mock_resp.text = '{"error":{"message":"Invalid API key provided."}}'
+    mock_post.return_value = mock_resp
+
+    client = LLMClient(provider="neurometric", api_key="bad_key", model="neurometric/clawpack")
+    assert client.complete(messages=[{"role": "user", "content": "Hi"}]) is None
+    assert mock_post.call_count == 1
+    assert "neurometric" in llm_client.PROVIDER_AUTH_FAILURES
+
+    # A second attempt short-circuits without touching the network — and without sleeping, which
+    # is why this uses its own registry rather than the 429 cooldown.
+    assert client.complete(messages=[{"role": "user", "content": "Hi"}]) is None
+    assert mock_post.call_count == 1
+
+    llm_client.PROVIDER_AUTH_FAILURES.clear()
+
+
+@patch("worker.services.llm_client.requests.post")
+def test_auth_failure_is_cleared_by_a_later_success(mock_post):
+    llm_client.PROVIDER_AUTH_FAILURES.clear()
+    llm_client.PROVIDER_AUTH_FAILURES["openrouter"] = 0.0  # already expired
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+    mock_post.return_value = mock_resp
+
+    client = LLMClient(provider="openrouter", api_key="good_key", model="m")
+    assert client.complete(messages=[{"role": "user", "content": "Hi"}]) is not None
+    assert "openrouter" not in llm_client.PROVIDER_AUTH_FAILURES
+
+
+@patch("worker.services.llm_client.requests.post")
+def test_other_4xx_errors_do_not_park_the_provider(mock_post):
+    llm_client.PROVIDER_AUTH_FAILURES.clear()
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 404
+    mock_resp.text = "no such model"
+    mock_post.return_value = mock_resp
+
+    client = LLMClient(provider="openrouter", api_key="k", model="missing-model")
+    assert client.complete(messages=[{"role": "user", "content": "Hi"}]) is None
+    assert "openrouter" not in llm_client.PROVIDER_AUTH_FAILURES

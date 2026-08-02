@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import secrets
 import threading
 from contextlib import asynccontextmanager
 
@@ -14,9 +15,37 @@ from worker.model_manager import model_manager
 from worker.schemas import JobSubmitRequest
 
 
+def _require_api_secret():
+    """Refuse to start unauthenticated (AUDIT-S3).
+
+    ``/api/v1/jobs/submit`` mutates the pipeline, so a worker with no configured secret is a
+    remote job-submission endpoint open to anything that can reach it. Exiting here — rather than
+    serving traffic and hoping the per-request check catches it — makes a broken secret mount an
+    obvious crash-loop instead of a silent hole.
+    """
+    import sys
+
+    if conc.ALLOW_UNAUTHENTICATED_API:
+        print(
+            "[Worker] ALLOW_UNAUTHENTICATED_WORKER_API=true — every endpoint, including "
+            "/api/v1/jobs/submit, is public. Development only.",
+            flush=True,
+        )
+        return
+    if not conc.WORKER_API_SECRET:
+        print(
+            "[Worker] FATAL: WORKER_API_SECRET is not set. Mount the secret (WORKER_API_SECRET_FILE) "
+            "or set ALLOW_UNAUTHENTICATED_WORKER_API=true if you really want an open worker.",
+            flush=True,
+        )
+        sys.exit(1)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Replaces app.py's manual while-True loop."""
+    _require_api_secret()
+
     # Cleanup old audit cache
     from app import cleanup_audit_cache, seed_models
 
@@ -79,8 +108,16 @@ app = FastAPI(lifespan=lifespan)
 
 
 def verify_auth(worker_api_secret: str | None = Header(None, alias="WORKER_API_SECRET")):
-    """Dependency for endpoints requiring auth."""
-    if conc.WORKER_API_SECRET and worker_api_secret != conc.WORKER_API_SECRET:
+    """Dependency for endpoints requiring auth.
+
+    Fails closed (AUDIT-S3). The previous form was ``if conc.WORKER_API_SECRET and ...``, so an
+    empty secret — which is exactly what an absent or unreadable secret file produces — skipped the
+    comparison and opened every endpoint, ``/api/v1/jobs/submit`` included. Absence of a credential
+    now denies unless ``ALLOW_UNAUTHENTICATED_WORKER_API=true`` says so deliberately.
+    """
+    if conc.ALLOW_UNAUTHENTICATED_API:
+        return
+    if not conc.WORKER_API_SECRET or not secrets.compare_digest(worker_api_secret or "", conc.WORKER_API_SECRET):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
