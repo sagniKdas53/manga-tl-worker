@@ -8,7 +8,12 @@ import uuid
 import requests
 
 from worker.config import logger
-from worker.services.llm_client import PROVIDER_COOLDOWNS, LLMClient, wait_for_cooldown  # noqa: F401
+from worker.services.llm_client import (  # noqa: F401
+    PROVIDER_COOLDOWNS,
+    LLMClient,
+    is_provider_auth_parked,
+    wait_for_cooldown,
+)
 from worker.utils.rate_limit import enforce_rate_limit, estimate_cost  # noqa: F401
 from worker.utils.text import clean_translated_text, contains_japanese
 
@@ -318,6 +323,59 @@ def parse_and_validate_batch(response_text, unmatched_regions):
 def _get_api_url_and_headers(provider, api_key, model):
     client = LLMClient(provider, api_key, model)
     return client.url, client.headers, client.model
+
+
+def resolve_fallback_target(provider, user_model, api_key, use_fallback_models, req_prefix=""):
+    """Pick the (provider, key, model) to retry with after the pinned one failed, or None.
+
+    Normally the fallback stays on the pinned provider and only swaps the model: a chapter
+    pinned to a provider presumably wants that provider, so crossing the boundary would
+    quietly ignore the pin.
+
+    The exception is AUDIT-W11. When the pinned provider's key has been rejected it is parked
+    in PROVIDER_AUTH_FAILURES and short-circuits every subsequent call, so refusing to cross
+    means the chapter fails 100% of its translations rather than degrading to a provider that
+    works. On the 2026-08-02 run one invalid `neurometric` key did exactly that: 401 x 323, and
+    every traceback carried "No fallback applied (global provider different or model identical)".
+    A parked provider is not a preference worth honouring, so crossing is allowed then.
+    """
+    from worker.config import TL_CONFIG
+
+    if not use_fallback_models:
+        return None
+
+    global_model = TL_CONFIG.llm_model
+    global_provider = TL_CONFIG.provider
+    if not global_model or not global_provider:
+        return None
+
+    if global_provider == provider:
+        # Same provider: only a different model is worth retrying.
+        if global_model == user_model:
+            return None
+        return provider, api_key, global_model
+
+    if not is_provider_auth_parked(provider):
+        logger.info(
+            f"{req_prefix}No cross-provider fallback: '{provider}' is pinned and still answering; "
+            f"not substituting global default '{global_provider}'."
+        )
+        return None
+
+    global_key = TL_CONFIG.resolve_key(global_provider)
+    if not global_key:
+        logger.error(
+            f"{req_prefix}Provider '{provider}' is parked on an auth failure and the global "
+            f"default '{global_provider}' has no usable key — no fallback available."
+        )
+        return None
+
+    logger.warning(
+        f"{req_prefix}Provider '{provider}' is parked on an auth failure (rejected key). "
+        f"Crossing to global default '{global_provider}' with model '{global_model}' so the "
+        f"chapter does not fail entirely — fix the '{provider}' key to restore the pin."
+    )
+    return global_provider, global_key, global_model
 
 
 def try_cloud_ai(
@@ -688,22 +746,20 @@ def translate_text(
                 if is_valid_translation(text, cleaned, request_id=request_id):
                     return cleaned
 
-            # Fallback to global default model
-            global_model = TL_CONFIG.llm_model
-            global_provider = TL_CONFIG.provider
-            if use_fallback_models and global_provider == provider and global_model and global_model != user_model:
-                logger.info(f"{req_prefix}Falling back to global default model '{global_model}'...")
-                translated = try_cloud_ai(provider, api_key, global_model, prompt, request_id=request_id)
+            # Fallback to the global default, crossing providers only if the pinned one is parked.
+            fallback = resolve_fallback_target(provider, user_model, api_key, use_fallback_models, req_prefix)
+            if fallback:
+                fb_provider, fb_key, fb_model = fallback
+                logger.info(f"{req_prefix}Falling back to '{fb_provider}' with model '{fb_model}'...")
+                translated = try_cloud_ai(fb_provider, fb_key, fb_model, prompt, request_id=request_id)
                 if translated:
                     cleaned = clean_translated_text(translated)
                     if is_valid_translation(text, cleaned, request_id=request_id):
                         return cleaned
                 else:
-                    logger.error(f"{req_prefix}Translation with global fallback model '{global_model}' failed.")
+                    logger.error(f"{req_prefix}Translation with fallback '{fb_provider}'/'{fb_model}' failed.")
             else:
-                logger.info(
-                    f"{req_prefix}No fallback applied (global provider different, model identical, or fallback disabled)."
-                )
+                logger.info(f"{req_prefix}No fallback applied (model identical, or fallback disabled).")
 
     logger.error(f"{req_prefix}All translation tiers failed for text: '{text}'")
     return None
@@ -836,16 +892,18 @@ Input:
             if res:
                 return res
 
-            # Fallback to global default model (only if use_fallback_models is True)
-            global_model = TL_CONFIG.llm_model
-            global_provider = TL_CONFIG.provider
-            if use_fallback_models and global_provider == provider and global_model and global_model != user_model:
-                logger.info(f"{req_prefix}Batch: Falling back to global default model '{global_model}'...")
+            # Fallback to the global default, crossing providers only if the pinned one is parked.
+            fallback = resolve_fallback_target(
+                provider, user_model, api_key, use_fallback_models, f"{req_prefix}Batch: "
+            )
+            if fallback:
+                fb_provider, fb_key, fb_model = fallback
+                logger.info(f"{req_prefix}Batch: Falling back to '{fb_provider}' with model '{fb_model}'...")
 
                 res = try_cloud_ai(
-                    provider,
-                    api_key,
-                    global_model,
+                    fb_provider,
+                    fb_key,
+                    fb_model,
                     prompt,
                     response_schema,
                     request_id=request_id,
@@ -854,9 +912,9 @@ Input:
                 if res:
                     return res
                 else:
-                    logger.error(f"{req_prefix}Batch translation with global fallback model '{global_model}' failed.")
+                    logger.error(f"{req_prefix}Batch translation with fallback '{fb_provider}'/'{fb_model}' failed.")
             else:
-                logger.info(f"{req_prefix}Batch: No fallback applied (global provider different or model identical).")
+                logger.info(f"{req_prefix}Batch: No fallback applied (model identical or fallback disabled).")
     return None
 
 

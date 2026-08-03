@@ -77,6 +77,19 @@ COOLDOWN_MAX_SECONDS = 120.0
 AUTH_FAILURE_COOLDOWN_SECONDS = 300.0
 
 
+def is_provider_auth_parked(provider: str | None) -> bool:
+    """True while a provider's key is known-rejected and calls to it short-circuit.
+
+    Callers use this to decide whether falling back across a provider boundary is warranted.
+    Normally it is not — a chapter pinned to a provider presumably wants that provider — but a
+    pinned provider parked here will refuse every request until the cooldown lapses, so staying
+    on it means failing the whole chapter rather than degrading to a working one.
+    """
+    if not provider:
+        return False
+    return time.time() < PROVIDER_AUTH_FAILURES.get(provider.lower().strip(), 0.0)
+
+
 def wait_for_cooldown(provider: str, max_wait: float = 60.0):
     """Block if provider is in cooldown."""
     cooldown_until = PROVIDER_COOLDOWNS.get(provider, 0.0)
