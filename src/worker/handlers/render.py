@@ -605,14 +605,30 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         draw = ImageDraw.Draw(img)
 
-        # Render only visible elements from visible translation/sfx layers
+        # Render only visible elements from visible translation/sfx layers.
+        #
+        # This used to also accept `layerType is None`, which was meant as a backwards-compatible
+        # fallback but behaved as "render anything unlabelled". The backend never sent layerType at
+        # all -- `Layer` is @JsonIgnore'd on LayerElement -- so *every* element matched, and each
+        # rendered page had its Japanese OCR text drawn underneath the translated bubbles, where it
+        # overflowed. Layer visibility set in the reader was ignored for the same reason.
+        #
+        # Now fails closed: an element whose layer type is unknown is not drawn. Rendering nothing
+        # extra is always recoverable; baking source text into an export is not.
         translation_elements = [
             el
             for el in layer_elements
             if el.get("visible", True)
             and el.get("layerVisible", True)
-            and (el.get("layerType") in ("translation", "sfx") or el.get("layerType") is None)
+            and el.get("layerType") in ("translation", "sfx")
         ]
+        skipped = len(layer_elements) - len(translation_elements)
+        if skipped:
+            print(
+                f"[Render] {len(translation_elements)} element(s) to draw, {skipped} skipped "
+                f"(not a visible translation/sfx layer)",
+                flush=True,
+            )
 
         for el in translation_elements:
             text = el.get("text", "")

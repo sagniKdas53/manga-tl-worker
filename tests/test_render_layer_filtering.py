@@ -94,10 +94,14 @@ def test_render_filters_correctly(mock_post, mock_get, mock_minio, mock_download
                 "layerVisible": True,
                 "font": "Comic Neue",
             },
-            # 6. Legacy element with no layer details (default translation / visible) -> SHOULD RENDER
+            # 6. Element with no layer details -> MUST NOT RENDER.
+            #    This previously asserted the opposite. The backend never sent layerType at all
+            #    (Layer is @JsonIgnore'd on LayerElement), so "unlabelled means translation" made
+            #    every element render, and OCR source text was drawn under the translated bubbles.
+            #    Unknown layer type now fails closed.
             {
                 "id": "el-6",
-                "text": "RENDER_LEGACY",
+                "text": "SKIP_UNLABELLED",
                 "x": 10.0,
                 "y": 20.0,
                 "maxWidth": 100,
@@ -141,8 +145,8 @@ def test_render_filters_correctly(mock_post, mock_get, mock_minio, mock_download
 
         assert "RENDER_ME" in called_texts
         assert "RENDER_SFX" in called_texts
-        assert "RENDER_LEGACY" in called_texts
 
         assert "SKIP_HIDDEN_LAYER" not in called_texts
         assert "SKIP_OCR_LAYER" not in called_texts
         assert "SKIP_HIDDEN_ELEMENT" not in called_texts
+        assert "SKIP_UNLABELLED" not in called_texts
