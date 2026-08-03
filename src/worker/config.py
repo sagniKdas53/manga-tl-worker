@@ -140,6 +140,22 @@ YOLO_MASK_EROSION = int(os.environ.get("YOLO_MASK_EROSION", "3"))
 YOLO_PINNED_CHECKSUM = "c9208cb610aa35b8f8dc7ef0890182322992a43399a853093ad5d04a3764af4f"
 YOLO_FALLBACK_MODE = os.environ.get("YOLO_FALLBACK_MODE", "opencv").lower()
 
+# When YOLO is active but matched no bubble to a text fragment, try the OpenCV contour search on
+# that fragment before giving up and using the raw text bbox as the "bubble".
+#
+# The detector is single-class ("balloon") and only recognizes canonical enclosed balloons. On
+# irregular thought clouds it scores 0.04-0.21 against 0.92 for a normal bubble, so they fall below
+# threshold and their text gets typeset into the tight vertical Japanese column. Measured over 180
+# such regions, the contour search recovers a usable containing shape for ~48% of them, median 2.6x
+# wider. See BUBBLE_CONTOUR_* below for the guards and TODO.md for the removal checkpoint.
+BUBBLE_CONTOUR_FALLBACK = os.environ.get("BUBBLE_CONTOUR_FALLBACK", "true").lower() in ("1", "true", "yes", "on")
+
+# Guards on an accepted contour. Chosen from the measured distribution over those 180 regions:
+# growth maxed at 4.1x wide / 3.6x tall, and a page-area cap of 0.35 keeps 87 of 89 containing
+# contours while rejecting the two that swallowed most of the page.
+BUBBLE_CONTOUR_MAX_GROWTH = float(os.environ.get("BUBBLE_CONTOUR_MAX_GROWTH", "5.0"))
+BUBBLE_CONTOUR_MAX_PAGE_FRACTION = float(os.environ.get("BUBBLE_CONTOUR_MAX_PAGE_FRACTION", "0.35"))
+
 
 def is_usable_model(model):
     """A model id counts as usable only if it is a real, non-sentinel value."""

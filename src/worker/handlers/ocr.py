@@ -12,6 +12,9 @@ import requests
 
 from worker.config import (
     BACKEND_HEADERS,
+    BUBBLE_CONTOUR_FALLBACK,
+    BUBBLE_CONTOUR_MAX_GROWTH,
+    BUBBLE_CONTOUR_MAX_PAGE_FRACTION,
     CALLBACK_URL,
     OCR_CONFIG,
     YOLO_MASK_EROSION,
@@ -253,6 +256,46 @@ def detect_bubble_contour(img, ocr_x, ocr_y, ocr_w, ocr_h):
         }
 
     return None
+
+
+def contour_bubble_for_unmatched(img, rx, ry, rw, rh, img_w, img_h):
+    """Last-chance bubble geometry for a text fragment YOLO matched to no bubble.
+
+    YOLO is single-class and only confident on canonical enclosed balloons; irregular thought clouds
+    score far below threshold, so their text ends up with the raw OCR bbox standing in for a bubble —
+    the tight vertical Japanese column, which typesets English one word per line. The OpenCV contour
+    search finds a containing shape for roughly half of these.
+
+    Returns the contour dict from :func:`detect_bubble_contour`, or ``None`` when the flag is off,
+    nothing was found, or the result fails a guard. Guards, in order: it must fully contain the text
+    (a contour that merely overlaps is tracing something else), it must not balloon past
+    ``BUBBLE_CONTOUR_MAX_GROWTH`` per axis, and it must not cover more than
+    ``BUBBLE_CONTOUR_MAX_PAGE_FRACTION`` of the page — that last one is what rejects a contour that
+    has escaped into the panel border or the artwork.
+    """
+    if not BUBBLE_CONTOUR_FALLBACK:
+        return None
+
+    found = detect_bubble_contour(img, rx, ry, rw, rh)
+    if not found:
+        return None
+
+    fx, fy, fw, fh = found["x"], found["y"], found["width"], found["height"]
+
+    # Contains the text on every edge (2px of slack for contour simplification).
+    if fx > rx + 2 or fy > ry + 2 or fx + fw < rx + rw - 2 or fy + fh < ry + rh - 2:
+        return None
+
+    if rw > 0 and fw > rw * BUBBLE_CONTOUR_MAX_GROWTH:
+        return None
+    if rh > 0 and fh > rh * BUBBLE_CONTOUR_MAX_GROWTH:
+        return None
+
+    page_area = float(img_w * img_h)
+    if page_area > 0 and (fw * fh) / page_area > BUBBLE_CONTOUR_MAX_PAGE_FRACTION:
+        return None
+
+    return found
 
 
 def process_ocr(job_data):
@@ -594,24 +637,42 @@ def process_ocr(job_data):
                         r_sub["height"],
                     )
 
-                    # Generate tight padded "virtual bubble" mask to allow typesetter inpainting / background cleaning
-                    pad = 0
-                    px1 = max(0, rx - pad)
-                    py1 = max(0, ry - pad)
-                    px2 = min(img_w, rx + rw + pad)
-                    py2 = min(img_h, ry + rh + pad)
-                    mask_polygon = [[px1, py1], [px2, py1], [px2, py2], [px1, py2]]
+                    # YOLO matched this fragment to no bubble. Before accepting the text bbox as the
+                    # bubble — which typesets English into the vertical Japanese column — try the
+                    # contour search; on irregular clouds it usually finds the shape YOLO missed.
+                    contour = contour_bubble_for_unmatched(img, rx, ry, rw, rh, img_w, img_h)
+
+                    if contour:
+                        px1 = max(0, contour["x"])
+                        py1 = max(0, contour["y"])
+                        px2 = min(img_w, contour["x"] + contour["width"])
+                        py2 = min(img_h, contour["y"] + contour["height"])
+                        mask_polygon = contour["maskPolygon"]
+                    else:
+                        # Generate tight padded "virtual bubble" mask to allow typesetter inpainting / background cleaning
+                        pad = 0
+                        px1 = max(0, rx - pad)
+                        py1 = max(0, ry - pad)
+                        px2 = min(img_w, rx + rw + pad)
+                        py2 = min(img_h, ry + rh + pad)
+                        mask_polygon = [[px1, py1], [px2, py1], [px2, py2], [px1, py2]]
 
                     candidate_regions.append(
                         {
                             "type": "direct_text",
                             "direct_idx": idx,
+                            # x/y/w/h stay the OCR text extent — that is what gets cropped and sent
+                            # to the recognizer. Only the bubble geometry below comes from the contour.
                             "x": rx,
                             "y": ry,
                             "width": rw,
                             "height": rh,
                             "poly_pts": mask_polygon,
                             "safe_rect": [px1, py1, px2 - px1, py2 - py1],
+                            "bubbleX": px1,
+                            "bubbleY": py1,
+                            "bubbleWidth": px2 - px1,
+                            "bubbleHeight": py2 - py1,
                             "text": r_sub["text"],
                             "confidence": r_sub["confidence"],
                             "detectedLanguage": r_sub["detectedLanguage"],
@@ -915,10 +976,13 @@ def process_ocr(job_data):
                                         "panelId": None,
                                         "bubbleReadingOrder": 0,
                                         "backgroundColor": bg_color,
-                                        "bubbleX": r["x"],
-                                        "bubbleY": r["y"],
-                                        "bubbleWidth": r["width"],
-                                        "bubbleHeight": r["height"],
+                                        # Contour geometry when the fallback found a shape, else the
+                                        # text bbox — which the backend detects and grows rather
+                                        # than insets, since it is not a container.
+                                        "bubbleX": r.get("bubbleX", r["x"]),
+                                        "bubbleY": r.get("bubbleY", r["y"]),
+                                        "bubbleWidth": r.get("bubbleWidth", r["width"]),
+                                        "bubbleHeight": r.get("bubbleHeight", r["height"]),
                                         "bubbleId": f"direct_text_{r['direct_idx']}",
                                         "detectionConfidence": 0.0,
                                         "maskPolygon": json.dumps(r["poly_pts"]),
@@ -978,10 +1042,12 @@ def process_ocr(job_data):
                                     "panelId": None,
                                     "bubbleReadingOrder": 0,
                                     "backgroundColor": bg_color,
-                                    "bubbleX": r["x"],
-                                    "bubbleY": r["y"],
-                                    "bubbleWidth": r["width"],
-                                    "bubbleHeight": r["height"],
+                                    # Contour geometry when the fallback found a shape, else the text
+                                    # bbox — see the cloud-mode branch above.
+                                    "bubbleX": r.get("bubbleX", r["x"]),
+                                    "bubbleY": r.get("bubbleY", r["y"]),
+                                    "bubbleWidth": r.get("bubbleWidth", r["width"]),
+                                    "bubbleHeight": r.get("bubbleHeight", r["height"]),
                                     "bubbleId": f"direct_text_{r['direct_idx']}",
                                     "detectionConfidence": 0.0,
                                     "maskPolygon": json.dumps(r["poly_pts"]),
