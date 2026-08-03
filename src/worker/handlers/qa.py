@@ -47,6 +47,15 @@ QA_DEFAULT_VLM_MODELS = {
 }
 
 
+# `directFix` and `escalation` used to be optional, and the model simply never emitted them: the
+# 20260803-084755 run produced qaStatus "direct_fix" 10 times with zero directFix payloads and
+# "failed" 10 times with zero escalation blocks. Both consuming branches in JobCoordinatorService
+# are keyed on the object being present, so direct fixes were never applied and needsReOcr never
+# routed — every failure fell through to a blind re-translation of the same bad OCR.
+#
+# Everything is required now, which is also what OpenAI-style `strict` structured output demands.
+# "Not applicable" is expressed as false / "" / 0 rather than by omitting the key. If a provider
+# rejects the schema, LLMClient degrades to plain json_object and retries.
 QA_JSON_SCHEMA = {
     "type": "object",
     "properties": {
@@ -68,6 +77,8 @@ QA_JSON_SCHEMA = {
                             "correctedText": {"type": "string"},
                             "suggestedFontSize": {"type": "number"},
                         },
+                        "required": ["correctedText", "suggestedFontSize"],
+                        "additionalProperties": False,
                     },
                     "escalation": {
                         "type": "object",
@@ -79,14 +90,94 @@ QA_JSON_SCHEMA = {
                             "orderBad": {"type": "boolean"},
                             "suggestedReadingOrderIndex": {"type": "number"},
                         },
+                        "required": [
+                            "ocrBad",
+                            "correctedSourceText",
+                            "needsReOcr",
+                            "needsManualIntervention",
+                            "orderBad",
+                            "suggestedReadingOrderIndex",
+                        ],
+                        "additionalProperties": False,
                     },
                 },
-                "required": ["regionId", "qaStatus", "qaScore", "qaFeedback"],
+                "required": [
+                    "regionId",
+                    "qaStatus",
+                    "qaScore",
+                    "qaFeedback",
+                    "directFix",
+                    "escalation",
+                ],
+                "additionalProperties": False,
             },
         }
     },
     "required": ["results"],
+    "additionalProperties": False,
 }
+
+
+VALID_QA_STATUSES = {"passed", "failed", "direct_fix", "reject_sfx"}
+
+
+def _sanitize_qa_results(results, ocr_regions, label="LLM"):
+    """
+    Keep only results that actually identify a region we asked about.
+
+    A response truncated at the output token limit still parses: OpenRouter's response-healing
+    plugin closes the JSON, so `json.loads` succeeds and hands back an object that has lost its
+    trailing fields. In the 20260803-084755 run that produced a single `{"qaFeedback": "..."}`
+    entry with no regionId, which the backend then failed to apply — and, because nothing was
+    scored, recorded as a clean QA pass.
+
+    Anything unusable is dropped here rather than forwarded. Returning fewer results than regions
+    is fine; the backend treats an empty verdict as "QA did not run" instead of as a pass.
+    """
+    known_ids = {str(r.get("id")) for r in ocr_regions if r.get("id")}
+    kept, discarded = [], []
+
+    for r in results or []:
+        if not isinstance(r, dict):
+            discarded.append("not-an-object")
+            continue
+        region_id = r.get("regionId")
+        if not isinstance(region_id, str) or not region_id.strip():
+            discarded.append("missing regionId")
+            continue
+        if known_ids and region_id not in known_ids:
+            discarded.append(f"unknown regionId {region_id}")
+            continue
+        if r.get("qaStatus") not in VALID_QA_STATUSES:
+            discarded.append(f"bad qaStatus {r.get('qaStatus')!r} for {region_id}")
+            continue
+        kept.append(r)
+
+    if discarded:
+        print(
+            f"[QA] Discarded {len(discarded)} unusable {label} result(s): {'; '.join(discarded[:5])}"
+            f"{' ...' if len(discarded) > 5 else ''}",
+            flush=True,
+        )
+
+    missing = len(known_ids) - len(kept) if known_ids else 0
+    if kept and missing > 0:
+        print(
+            f"[QA] {label} returned a verdict for {len(kept)}/{len(known_ids)} regions — "
+            "the response was probably truncated.",
+            flush=True,
+        )
+
+    # A `failed` verdict with no escalation gives the backend nothing to act on, so it falls back
+    # to re-translating the same source text. Surface it; the schema now requires the object.
+    unactionable = [r["regionId"] for r in kept if r.get("qaStatus") == "failed" and not r.get("escalation")]
+    if unactionable:
+        print(
+            f"[QA] {len(unactionable)} failed region(s) carry no escalation block; re-OCR cannot be routed for them.",
+            flush=True,
+        )
+
+    return kept
 
 
 def _resolve_qa_model(prov: str, api_key: str | None, user_model: str | None, defaults: dict) -> str | None:
@@ -271,6 +362,17 @@ Status categories:
 - "failed": Translation error requiring a translation re-run. Specify "qaFeedback" with detailed correction notes/feedback to guide the re-translation. Your output must be strictly better. Do not send back the exact same text if flagging an error.
 
 IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
+
+IMPORTANT: Every result MUST include both a "directFix" object and an "escalation" object. They are
+never omitted. When a field does not apply, send its empty value rather than leaving it out —
+empty string for text fields, false for flags, 0 for numbers.
+  - "directFix" always carries: correctedText, suggestedFontSize
+  - "escalation" always carries: ocrBad, correctedSourceText, needsReOcr, needsManualIntervention,
+    orderBad, suggestedReadingOrderIndex
+The ocrBad / needsReOcr / needsManualIntervention / orderBad flags described above live inside
+"escalation". Describing a problem only in "qaFeedback" prose has no effect — the flags are what
+route the fix. In particular, if the OCR text is unreadable, set escalation.needsReOcr to true;
+asking for a re-OCR in prose alone will instead re-run the translation over the same bad text.
 
 Region Metadata:
 {json.dumps(regions_metadata, ensure_ascii=False, indent=2)}
@@ -472,6 +574,17 @@ Status categories:
 
 IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
 
+IMPORTANT: Every result MUST include both a "directFix" object and an "escalation" object. They are
+never omitted. When a field does not apply, send its empty value rather than leaving it out —
+empty string for text fields, false for flags, 0 for numbers.
+  - "directFix" always carries: correctedText, suggestedFontSize
+  - "escalation" always carries: ocrBad, correctedSourceText, needsReOcr, needsManualIntervention,
+    orderBad, suggestedReadingOrderIndex
+The ocrBad / needsReOcr / needsManualIntervention / orderBad flags described above live inside
+"escalation". Describing a problem only in "qaFeedback" prose has no effect — the flags are what
+route the fix. In particular, if the OCR text is unreadable, set escalation.needsReOcr to true;
+asking for a re-OCR in prose alone will instead re-run the translation over the same bad text.
+
 Region Metadata:
 {json.dumps(regions_metadata_vlm, ensure_ascii=False, indent=2)}
 
@@ -535,17 +648,13 @@ You MUST return a JSON object containing a "results" key with an array of object
                 flush=True,
             )
 
+    results_vlm = _sanitize_qa_results(results_vlm, ocr_regions, label="VLM")
+
     if not results_vlm:
-        print("[QA] Falling back to default PASS for all regions.", flush=True)
-        for r in ocr_regions:
-            results_vlm.append(
-                {
-                    "regionId": r["id"],
-                    "qaStatus": "passed",
-                    "qaScore": 1.0,
-                    "qaFeedback": "Auto-passed fallback",
-                }
-            )
+        # Deliberately not auto-passing. Fabricating a pass for every region is what made a failed
+        # QA call indistinguishable from a clean page; an empty list tells the backend QA did not
+        # run, and it records that instead of a verdict.
+        print("[QA] No usable VLM results — reporting no verdict rather than auto-passing.", flush=True)
 
     # Call backend
     callback_payload = {
@@ -724,6 +833,17 @@ Status categories:
 
 IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
 
+IMPORTANT: Every result MUST include both a "directFix" object and an "escalation" object. They are
+never omitted. When a field does not apply, send its empty value rather than leaving it out —
+empty string for text fields, false for flags, 0 for numbers.
+  - "directFix" always carries: correctedText, suggestedFontSize
+  - "escalation" always carries: ocrBad, correctedSourceText, needsReOcr, needsManualIntervention,
+    orderBad, suggestedReadingOrderIndex
+The ocrBad / needsReOcr / needsManualIntervention / orderBad flags described above live inside
+"escalation". Describing a problem only in "qaFeedback" prose has no effect — the flags are what
+route the fix. In particular, if the OCR text is unreadable, set escalation.needsReOcr to true;
+asking for a re-OCR in prose alone will instead re-run the translation over the same bad text.
+
 Region Metadata:
 {json.dumps(regions_metadata, ensure_ascii=False, indent=2)}
 
@@ -792,17 +912,13 @@ You MUST return a JSON object containing a "results" key with an array of object
                 flush=True,
             )
 
+    results = _sanitize_qa_results(results, ocr_regions, label="LLM")
+
     if not results:
-        print("[QA] Falling back to default PASS for all regions.", flush=True)
-        for r in ocr_regions:
-            results.append(
-                {
-                    "regionId": r["id"],
-                    "qaStatus": "passed",
-                    "qaScore": 1.0,
-                    "qaFeedback": "Auto-passed fallback",
-                }
-            )
+        # Deliberately not auto-passing. Fabricating a pass for every region is what made a failed
+        # QA call indistinguishable from a clean page; an empty list tells the backend QA did not
+        # run, and it records that instead of a verdict.
+        print("[QA] No usable LLM results — reporting no verdict rather than auto-passing.", flush=True)
 
     logger.debug(f"[QA] LLM QA results output:\n{json.dumps(results, ensure_ascii=False, indent=2)}")
 
@@ -965,6 +1081,17 @@ Status categories:
 
 IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
 
+IMPORTANT: Every result MUST include both a "directFix" object and an "escalation" object. They are
+never omitted. When a field does not apply, send its empty value rather than leaving it out —
+empty string for text fields, false for flags, 0 for numbers.
+  - "directFix" always carries: correctedText, suggestedFontSize
+  - "escalation" always carries: ocrBad, correctedSourceText, needsReOcr, needsManualIntervention,
+    orderBad, suggestedReadingOrderIndex
+The ocrBad / needsReOcr / needsManualIntervention / orderBad flags described above live inside
+"escalation". Describing a problem only in "qaFeedback" prose has no effect — the flags are what
+route the fix. In particular, if the OCR text is unreadable, set escalation.needsReOcr to true;
+asking for a re-OCR in prose alone will instead re-run the translation over the same bad text.
+
 Region Metadata:
 {json.dumps(regions_metadata, ensure_ascii=False, indent=2)}
 
@@ -1037,17 +1164,13 @@ You MUST return a JSON object containing a "results" key with an array of object
                 flush=True,
             )
 
+    results = _sanitize_qa_results(results, ocr_regions, label="VLM")
+
     if not results:
-        print("[QA] Falling back to default PASS for all regions.", flush=True)
-        for r in ocr_regions:
-            results.append(
-                {
-                    "regionId": r["id"],
-                    "qaStatus": "passed",
-                    "qaScore": 1.0,
-                    "qaFeedback": "Auto-passed fallback",
-                }
-            )
+        # Deliberately not auto-passing. Fabricating a pass for every region is what made a failed
+        # QA call indistinguishable from a clean page; an empty list tells the backend QA did not
+        # run, and it records that instead of a verdict.
+        print("[QA] No usable VLM results — reporting no verdict rather than auto-passing.", flush=True)
 
     logger.debug(f"[QA] VLM QA results output:\n{json.dumps(results, ensure_ascii=False, indent=2)}")
 

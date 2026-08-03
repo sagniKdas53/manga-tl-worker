@@ -303,9 +303,11 @@ def test_process_qa_vlm_local_fallback(
     mock_post.assert_called_once()
     _post_args, post_kwargs = mock_post.call_args
     qa_results = post_kwargs["json"]["qaResults"]
-    assert len(qa_results) == 1
-    assert qa_results[0]["regionId"] == "region-uuid-1"
-    assert qa_results[0]["qaStatus"] == "passed"
+    # This used to assert the region came back "passed": with the cloud call raising and no local
+    # fallback, QA produced nothing and the handler fabricated a pass for every region. That made a
+    # dead QA provider indistinguishable from a clean page. An empty verdict now tells the backend
+    # QA did not run, and it records that rather than a pass.
+    assert qa_results == []
 
 
 @patch("worker.handlers.qa.try_cloud_ai_vision")

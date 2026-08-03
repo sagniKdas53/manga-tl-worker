@@ -17,6 +17,12 @@ from worker.config import logger
 from worker.provider_config import get_provider_registry
 from worker.utils.rate_limit import enforce_rate_limit, estimate_cost
 
+# Anthropic already sent max_tokens; everyone else was sending none at all, so the ceiling was
+# whatever the routed model happened to default to. A QA pass over a dense page blew through it and
+# came back truncated (out=3408) with no way for the caller to tell. Explicit and generous: a full
+# QA verdict for ~16 regions runs well under this.
+DEFAULT_MAX_OUTPUT_TOKENS = 8192
+
 
 class TransientAPIError(Exception):
     """Raised on retryable HTTP errors (429, 5xx, timeouts)."""
@@ -44,6 +50,15 @@ class LLMResponse:
     model: str = ""
     provider: str = ""
     cost: float | None = None
+    # "stop" on a complete answer, "length" when the model ran out of output budget. Callers that
+    # parse structured JSON must check this: OpenRouter's response-healing plugin closes a truncated
+    # object so json.loads() still succeeds, and the result looks valid while having silently lost
+    # its trailing fields.
+    finish_reason: str = ""
+
+    @property
+    def truncated(self) -> bool:
+        return self.finish_reason == "length"
 
 
 # Provider cooldown registry
@@ -174,7 +189,7 @@ class LLMClient:
         if self.is_anthropic:
             payload = {
                 "model": self.model,
-                "max_tokens": 4096,
+                "max_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
                 "messages": messages,
             }
             if system_prompt:
@@ -189,6 +204,7 @@ class LLMClient:
             payload = {
                 "model": self.model,
                 "messages": list(messages),
+                "max_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
             }
             if system_prompt:
                 payload["messages"].insert(
@@ -325,9 +341,12 @@ class LLMClient:
             completion_tokens = usage.get("output_tokens", 0)
             total_tokens = prompt_tokens + completion_tokens
             cached_tokens = usage.get("cache_read_input_tokens", 0)
+            # Anthropic spells it "max_tokens"; normalize onto the OpenAI vocabulary.
+            finish_reason = "length" if data.get("stop_reason") == "max_tokens" else "stop"
         else:
             choices = data.get("choices", [])
             content = choices[0].get("message", {}).get("content", "") if choices else ""
+            finish_reason = choices[0].get("finish_reason") or "" if choices else ""
             usage = data.get("usage") or {}
             prompt_tokens = usage.get("prompt_tokens") or 0
             completion_tokens = usage.get("completion_tokens") or 0
@@ -337,6 +356,12 @@ class LLMClient:
 
         logger.info(f"{self.req_prefix}Provider={self.provider} Model={self.model} Time={elapsed:.2f}s")
         logger.info(f"{self.req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
+
+        if finish_reason == "length":
+            logger.warning(
+                f"{self.req_prefix}Response truncated at the output token limit "
+                f"(out={completion_tokens}). Structured output past this point is lost."
+            )
 
         if cached_tokens > 0:
             cache_ratio = cached_tokens / max(prompt_tokens, 1)
@@ -357,4 +382,5 @@ class LLMClient:
             model=self.model,
             provider=self.provider,
             cost=cost,
+            finish_reason=finish_reason,
         )
