@@ -253,6 +253,10 @@ def detect_bubble_contour(img, ocr_x, ocr_y, ocr_w, ocr_h):
             "width": bw,
             "height": bh,
             "maskPolygon": polygon,
+            # The window the search ran in. A caller cannot tell an enclosed shape from the page
+            # background without it: a blob that runs off the edge of the crop was clipped by the
+            # crop, so its bounding box describes the window, not anything in the artwork.
+            "searchWindow": (x1, y1, x2, y2),
         }
 
     return None
@@ -267,8 +271,9 @@ def contour_bubble_for_unmatched(img, rx, ry, rw, rh, img_w, img_h):
     search finds a containing shape for roughly half of these.
 
     Returns the contour dict from :func:`detect_bubble_contour`, or ``None`` when the flag is off,
-    nothing was found, or the result fails a guard. Guards, in order: it must fully contain the text
-    (a contour that merely overlaps is tracing something else), it must not balloon past
+    nothing was found, or the result fails a guard. Guards, in order: the blob must be enclosed
+    inside the search window rather than clipped by it, it must fully contain the text (a contour
+    that merely overlaps is tracing something else), it must not balloon past
     ``BUBBLE_CONTOUR_MAX_GROWTH`` per axis, and it must not cover more than
     ``BUBBLE_CONTOUR_MAX_PAGE_FRACTION`` of the page — that last one is what rejects a contour that
     has escaped into the panel border or the artwork.
@@ -281,6 +286,28 @@ def contour_bubble_for_unmatched(img, rx, ry, rw, rh, img_w, img_h):
         return None
 
     fx, fy, fw, fh = found["x"], found["y"], found["width"], found["height"]
+
+    # Enclosed by the window, not clipped by it.
+    #
+    # The threshold that finds a balloon interior also finds the page background, and free-floating
+    # text usually sits on it. That blob has no boundary inside the crop, so `boundingRect` returns
+    # the crop, and every other guard here passes by construction: a search window contains the text
+    # it was built around, sits within `2 * pad` of its size, and is a small part of the page. On
+    # Openrouter ch. 11 p22 all three unmatched fragments came back as their own search window --
+    # 129x1271 for a 49x489 caption -- which then reads downstream as a bubble a thought cloud's
+    # worth of text can be laid into.
+    #
+    # A shape that is actually enclosed leaves a margin on every side. Edges where the window was
+    # clamped by the page are exempt: there the crop boundary is the paper, and a balloon that runs
+    # to the edge of the page is a real balloon.
+    wx1, wy1, wx2, wy2 = found.get("searchWindow", (fx, fy, fx + fw, fy + fh))
+    if (
+        (fx <= wx1 and wx1 > 0)
+        or (fy <= wy1 and wy1 > 0)
+        or (fx + fw >= wx2 and wx2 < img_w)
+        or (fy + fh >= wy2 and wy2 < img_h)
+    ):
+        return None
 
     # Contains the text on every edge (2px of slack for contour simplification).
     if fx > rx + 2 or fy > ry + 2 or fx + fw < rx + rw - 2 or fy + fh < ry + rh - 2:

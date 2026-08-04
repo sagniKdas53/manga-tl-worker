@@ -66,3 +66,29 @@ def test_returns_none_when_nothing_is_found(flag_on):
     # Uniform image: no contour to find.
     flat = np.full((200, 200, 3), 128, dtype=np.uint8)
     assert contour_bubble_for_unmatched(flat, 90, 90, 20, 10, 200, 200) is None
+
+
+def test_rejects_the_search_window_itself(flag_on):
+    """Free-floating text sits on the page background, and the background is what the threshold
+    finds. That blob has no boundary inside the crop, so its bounding box comes back as the crop --
+    which passes every other guard by construction: a search window contains the text it was built
+    around, is within 2 * pad of its size, and is a small part of the page. Measured over 300
+    unmatched fragments, 171 of the 172 results accepted before this guard were their own window.
+    """
+    paper = np.full((400, 400, 3), 255, dtype=np.uint8)  # no balloon anywhere on it
+    cv2.putText(paper, "TXT", (180, 208), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+
+    assert contour_bubble_for_unmatched(paper, 180, 192, 40, 20, 400, 400) is None
+
+
+def test_accepts_a_balloon_that_runs_off_the_edge_of_the_page(flag_on):
+    """The window is clamped by the paper there, so the blob touching its edge says nothing about
+    whether the shape is enclosed -- a balloon drawn to the edge of the page is a real balloon."""
+    img = np.full((400, 400, 3), 128, dtype=np.uint8)
+    cv2.circle(img, (0, 200), 45, (255, 255, 255), -1)
+    cv2.putText(img, "TX", (5, 208), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1)
+
+    found = contour_bubble_for_unmatched(img, 5, 192, 35, 20, 400, 400)
+
+    assert found is not None
+    assert found["x"] == 0, "clipped by the paper, not by the search window"

@@ -143,16 +143,20 @@ YOLO_FALLBACK_MODE = os.environ.get("YOLO_FALLBACK_MODE", "opencv").lower()
 # When YOLO is active but matched no bubble to a text fragment, try the OpenCV contour search on
 # that fragment before giving up and using the raw text bbox as the "bubble".
 #
-# The detector is single-class ("balloon") and only recognizes canonical enclosed balloons. On
-# irregular thought clouds it scores 0.04-0.21 against 0.92 for a normal bubble, so they fall below
-# threshold and their text gets typeset into the tight vertical Japanese column. Measured over 180
-# such regions, the contour search recovers a usable containing shape for ~48% of them, median 2.6x
-# wider. See BUBBLE_CONTOUR_* below for the guards and TODO.md for the removal checkpoint.
-BUBBLE_CONTOUR_FALLBACK = os.environ.get("BUBBLE_CONTOUR_FALLBACK", "true").lower() in ("1", "true", "yes", "on")
+# Off by default, because measurement says it recovers almost nothing. The original number behind
+# this flag -- "a usable containing shape for ~48% of unmatched fragments, median 2.6x wider" --
+# counted results that were the contour search's own crop window. Free-floating text sits on the
+# page background, the background is what the threshold finds, and that blob has no boundary inside
+# the crop, so its bounding box comes back as the crop: text bbox + 2 * pad, which is where a
+# "median 2.6x wider" for a 40px pad on a ~50px-wide column comes from. Re-measured over 300 such
+# regions with that case excluded, acceptance is 1 in 300 (0.3%), not 48%.
+#
+# The guard now lives in contour_bubble_for_unmatched, so turning this back on cannot reintroduce
+# window geometry -- but a 0.3% hit rate does not pay for a contour search per unmatched fragment.
+BUBBLE_CONTOUR_FALLBACK = os.environ.get("BUBBLE_CONTOUR_FALLBACK", "false").lower() in ("1", "true", "yes", "on")
 
-# Guards on an accepted contour. Chosen from the measured distribution over those 180 regions:
-# growth maxed at 4.1x wide / 3.6x tall, and a page-area cap of 0.35 keeps 87 of 89 containing
-# contours while rejecting the two that swallowed most of the page.
+# Guards on an accepted contour. Growth and page-fraction caps come from the original sweep; both
+# were near-inert on their own, since a crop window passes them by construction.
 BUBBLE_CONTOUR_MAX_GROWTH = float(os.environ.get("BUBBLE_CONTOUR_MAX_GROWTH", "5.0"))
 BUBBLE_CONTOUR_MAX_PAGE_FRACTION = float(os.environ.get("BUBBLE_CONTOUR_MAX_PAGE_FRACTION", "0.35"))
 
