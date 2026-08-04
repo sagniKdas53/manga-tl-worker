@@ -247,6 +247,20 @@ def fit_text_in_box_py(
         except Exception:
             pass
 
+    # The mask is a flow constraint only when it is wider than the box it is being flowed into.
+    #
+    # It serves two purposes at once: it is the shape painted over the source text, and -- below --
+    # the shape the lines are wrapped to. Those agree for a balloon, where the mask is the outline
+    # and the box is an inset of it. They disagree for free-floating text, where the mask is the
+    # tight rectangle round the vertical Japanese column: wrapping to it would set English back down
+    # that column and undo the box the caller asked for. When the mask does not span the box, the box
+    # is the deliberate one of the two, so the mask keeps its erasing job and loses its typesetting
+    # one.
+    if polygon_points:
+        xs = [p[0] for p in polygon_points]
+        if min(xs) > box_x + 2 or max(xs) < box_x + max_width - 2:
+            polygon_points = None
+
     def wrap_text_py(txt, f_size):
         font = load_font(f_size, font_name=font_name, bold=bold, italic=italic)
         if not font:
@@ -545,26 +559,84 @@ def fit_text_in_box_py(
     max_start_size = min(max_height // 2, max_width // 3, 72)
     start_size = max(max_start_size, default_font_size)
 
-    low = 6
-    high = start_size
-    best_fs = 6
-    best_res = None
+    min_font_size = 6
     line_height_multiplier = 1.2
 
-    while low <= high:
-        mid = (low + high) // 2
-        res = wrap_text_py(clean_text, mid)
-        total_height = len(res["lines"]) * mid * line_height_multiplier
-        if total_height <= max_height:
-            best_fs = mid
-            best_res = res
-            low = mid + 1
-        else:
-            high = mid - 1
+    def broke_a_word(res):
+        """True when the wrap cut a word apart to make it fit.
 
-    if best_res is None:
-        best_res = wrap_text_py(clean_text, 6)
-        best_fs = 6
+        Every wrapping path above falls through to splitting a word per character once the
+        word is wider than the line it has to go on, which is how "collection" comes out as
+        "collect" / "ion". Comparing the words that came out against the words that went in
+        detects that regardless of which path produced it.
+        """
+        return " ".join(res["lines"]).split() != clean_text.split()
+
+    def widest_line(res, f_size):
+        font = load_font(f_size, font_name=font_name, bold=bold, italic=italic)
+        if not font:
+            return 0.0
+        widest = 0.0
+        for line in res["lines"]:
+            try:
+                w = font.getlength(line)
+            except Exception:
+                try:
+                    bbox = font.getbbox(line)
+                    w = bbox[2] - bbox[0]
+                except Exception:
+                    w = len(line) * (f_size * 0.5)
+            widest = max(widest, w)
+        return widest
+
+    evaluated = {}
+
+    def evaluate(f_size):
+        """(wrap, fits height, fits cleanly) at this size."""
+        if f_size in evaluated:
+            return evaluated[f_size]
+        res = wrap_text_py(clean_text, f_size)
+        total = len(res["lines"]) * f_size * line_height_multiplier
+        fits_height = total <= max_height
+        fits_clean = fits_height and not broke_a_word(res) and widest_line(res, f_size) <= max_width
+        evaluated[f_size] = (res, fits_height, fits_clean)
+        return evaluated[f_size]
+
+    def largest_size_where(accept):
+        low = min_font_size
+        high = start_size
+        best = None
+        while low <= high:
+            mid = (low + high) // 2
+            res, fits_height, fits_clean = evaluate(mid)
+            if accept(fits_height, fits_clean):
+                best = (mid, res)
+                low = mid + 1
+            else:
+                high = mid - 1
+        return best
+
+    # Largest size that lays the text out whole: every word intact and every line inside the box.
+    #
+    # Height used to be the only test, which made both of the ways text can fail horizontally
+    # invisible to the search. A word wider than the line gets split per character, and the
+    # polygon/ellipse fallback wraps to the box width without splitting anything, so a size that
+    # spills sideways out of the bubble still reported the same "fits" as one that does not. The
+    # search then kept growing the font until the *height* ran out and returned the largest size
+    # that mangles the text rather than the largest size that sets it.
+    best = largest_size_where(lambda fits_height, fits_clean: fits_clean)
+
+    # Nothing sets cleanly -- a single word longer than the box is wide even at 6px, say. Fall back
+    # to the old height-only rule so such a region still gets the largest legible size we can give
+    # it, rather than collapsing to the minimum.
+    if best is None:
+        best = largest_size_where(lambda fits_height, fits_clean: fits_height)
+
+    if best is None:
+        best_fs = min_font_size
+        best_res = wrap_text_py(clean_text, min_font_size)
+    else:
+        best_fs, best_res = best
 
     total_height = len(best_res["lines"]) * best_fs * line_height_multiplier
     return {
@@ -724,6 +796,12 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
                                 line_width = len(line) * (f_size * 0.5)
 
                     line_x = line_center_x - line_width / 2
+                    # A line centred on the shape it was wrapped to can still start left of the box
+                    # or end right of it -- the centre comes from the mask span, the width from the
+                    # glyphs. Keep whatever fits inside the box inside it, so an off-centre line
+                    # cannot walk into the next panel or off the page.
+                    if line_width <= ew:
+                        line_x = min(max(line_x, ex), ex + ew - line_width)
                     line_y = start_y + i * line_height
                     draw.text((line_x, line_y), line, fill=text_color_hex, font=font)
 
