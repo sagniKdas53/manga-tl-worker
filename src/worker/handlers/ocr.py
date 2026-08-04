@@ -300,14 +300,16 @@ def contour_bubble_for_unmatched(img, rx, ry, rw, rh, img_w, img_h):
     # A shape that is actually enclosed leaves a margin on every side. Edges where the window was
     # clamped by the page are exempt: there the crop boundary is the paper, and a balloon that runs
     # to the edge of the page is a real balloon.
-    wx1, wy1, wx2, wy2 = found.get("searchWindow", (fx, fy, fx + fw, fy + fh))
-    if (
-        (fx <= wx1 and wx1 > 0)
-        or (fy <= wy1 and wy1 > 0)
-        or (fx + fw >= wx2 and wx2 < img_w)
-        or (fy + fh >= wy2 and wy2 < img_h)
-    ):
-        return None
+    window = found.get("searchWindow")
+    if window:
+        wx1, wy1, wx2, wy2 = window
+        if (
+            (fx <= wx1 and wx1 > 0)
+            or (fy <= wy1 and wy1 > 0)
+            or (fx + fw >= wx2 and wx2 < img_w)
+            or (fy + fh >= wy2 and wy2 < img_h)
+        ):
+            return None
 
     # Contains the text on every edge (2px of slack for contour simplification).
     if fx > rx + 2 or fy > ry + 2 or fx + fw < rx + rw - 2 or fy + fh < ry + rh - 2:

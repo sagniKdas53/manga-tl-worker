@@ -261,8 +261,18 @@ def fit_text_in_box_py(
         if min(xs) > box_x + 2 or max(xs) < box_x + max_width - 2:
             polygon_points = None
 
+    # One font instance per size for this box. The size search wraps and then measures at each
+    # candidate size, and every load_font miss is a font file read; there are a dozen or so
+    # candidates per box. Scoped to this call so it stays a pure function of its arguments.
+    fonts = {}
+
+    def font_at(f_size):
+        if f_size not in fonts:
+            fonts[f_size] = load_font(f_size, font_name=font_name, bold=bold, italic=italic)
+        return fonts[f_size]
+
     def wrap_text_py(txt, f_size):
-        font = load_font(f_size, font_name=font_name, bold=bold, italic=italic)
+        font = font_at(f_size)
         if not font:
             return {"lines": [txt], "line_centers": [box_x + max_width / 2]}
 
@@ -573,7 +583,7 @@ def fit_text_in_box_py(
         return " ".join(res["lines"]).split() != clean_text.split()
 
     def widest_line(res, f_size):
-        font = load_font(f_size, font_name=font_name, bold=bold, italic=italic)
+        font = font_at(f_size)
         if not font:
             return 0.0
         widest = 0.0
@@ -602,14 +612,14 @@ def fit_text_in_box_py(
         evaluated[f_size] = (res, fits_height, fits_clean)
         return evaluated[f_size]
 
-    def largest_size_where(accept):
+    def largest_size_where(clean):
         low = min_font_size
         high = start_size
         best = None
         while low <= high:
             mid = (low + high) // 2
             res, fits_height, fits_clean = evaluate(mid)
-            if accept(fits_height, fits_clean):
+            if fits_clean if clean else fits_height:
                 best = (mid, res)
                 low = mid + 1
             else:
@@ -624,13 +634,13 @@ def fit_text_in_box_py(
     # spills sideways out of the bubble still reported the same "fits" as one that does not. The
     # search then kept growing the font until the *height* ran out and returned the largest size
     # that mangles the text rather than the largest size that sets it.
-    best = largest_size_where(lambda fits_height, fits_clean: fits_clean)
+    best = largest_size_where(clean=True)
 
     # Nothing sets cleanly -- a single word longer than the box is wide even at 6px, say. Fall back
     # to the old height-only rule so such a region still gets the largest legible size we can give
     # it, rather than collapsing to the minimum.
     if best is None:
-        best = largest_size_where(lambda fits_height, fits_clean: fits_height)
+        best = largest_size_where(clean=False)
 
     if best is None:
         best_fs = min_font_size
