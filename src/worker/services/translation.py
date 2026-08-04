@@ -511,6 +511,17 @@ def try_cloud_ai_vision_batch(
 
 
 def try_local_ai(prompt, text, response_schema=None, request_id=None):
+    """Run `text` through the local LLM tier.
+
+    `prompt` is the caller's own instruction block and becomes the system message. It used to be
+    accepted and silently dropped in favour of the hardcoded translation prompts below, which was
+    invisible for translation callers -- they pass a translation prompt anyway -- but broke QA
+    outright: `handlers/qa.py` asks for a `{"results": [...]}` object, the model was instead told to
+    translate and answered `{"translations": [...]}`, and `parsed.get("results")` yielded `[]`. QA
+    then reported success having produced nothing, with no error and no log line.
+
+    The hardcoded prompts remain the default for any caller that passes nothing.
+    """
     req_prefix = f"[{request_id}] " if request_id else ""
     enforce_rate_limit()
 
@@ -536,7 +547,10 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
     elif "host.docker.internal" in local_endpoint:
         endpoints_to_try.append(local_endpoint.replace("host.docker.internal", "localhost"))
 
-    system_pr = MANGA_TRANSLATION_JSON_SYSTEM_PROMPT if response_schema else MANGA_TRANSLATION_SYSTEM_PROMPT
+    default_system_pr = (
+        MANGA_TRANSLATION_JSON_SYSTEM_PROMPT if response_schema else MANGA_TRANSLATION_SYSTEM_PROMPT
+    )
+    system_pr = prompt or default_system_pr
 
     payload = {
         "model": model,

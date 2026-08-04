@@ -1,6 +1,8 @@
 from unittest.mock import MagicMock, patch
 
 from worker.services.translation import (
+    MANGA_TRANSLATION_JSON_SYSTEM_PROMPT,
+    MANGA_TRANSLATION_SYSTEM_PROMPT,
     _get_api_url_and_headers,
     build_context_string,
     parse_and_validate_batch,
@@ -128,6 +130,67 @@ def test_try_local_ai(mock_lock, mock_env, mock_post):
 
     res = try_local_ai("prompt", "text", response_schema={})
     assert res == "hello local"
+
+
+def _local_ai_payload(mock_post):
+    """The JSON body try_local_ai actually sent."""
+    assert mock_post.call_count >= 1
+    return mock_post.call_args.kwargs["json"]
+
+
+def _system_message(payload):
+    systems = [m["content"] for m in payload["messages"] if m["role"] == "system"]
+    assert len(systems) == 1, f"expected exactly one system message, got {systems}"
+    return systems[0]
+
+
+@patch("worker.services.translation.requests.post")
+@patch("worker.services.translation.os.environ.get")
+@patch("worker.utils.lock.acquire_lock")
+def test_try_local_ai_sends_the_callers_prompt(mock_lock, mock_env, mock_post):
+    """The caller's prompt must reach the payload.
+
+    try_local_ai accepted `prompt` and dropped it, hardcoding a manga *translation* system prompt
+    instead. QA passes a prompt asking for `{"results": [...]}`; the model was told to translate and
+    answered `{"translations": [...]}`, so `parsed.get("results")` gave `[]` and QA finished having
+    changed nothing -- no exception, no log line. Only asserting on the outgoing payload catches
+    this, because the failure mode is silence.
+    """
+    mock_env.side_effect = lambda k, default="": (
+        "ollama" if k == "LOCAL_LLM_PROVIDER" else "http://test:11434" if k == "LOCAL_LLM_ENDPOINT" else default
+    )
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"choices": [{"message": {"content": '{"results": []}'}}]}
+    mock_post.return_value = mock_resp
+
+    qa_prompt = 'You are a QA reviewer. Return a JSON object with a "results" key.'
+    try_local_ai(qa_prompt, '[{"id": "r1"}]', response_schema={"type": "object"})
+
+    payload = _local_ai_payload(mock_post)
+    assert _system_message(payload) == qa_prompt
+    assert "expert manga translator" not in _system_message(payload)
+
+
+@patch("worker.services.translation.requests.post")
+@patch("worker.services.translation.os.environ.get")
+@patch("worker.utils.lock.acquire_lock")
+def test_try_local_ai_falls_back_to_the_builtin_prompt(mock_lock, mock_env, mock_post):
+    """A caller that supplies no prompt still gets the hardcoded translation prompts."""
+    mock_env.side_effect = lambda k, default="": (
+        "ollama" if k == "LOCAL_LLM_PROVIDER" else "http://test:11434" if k == "LOCAL_LLM_ENDPOINT" else default
+    )
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"choices": [{"message": {"content": "hello local"}}]}
+    mock_post.return_value = mock_resp
+
+    try_local_ai(None, "text")
+    assert _system_message(_local_ai_payload(mock_post)) == MANGA_TRANSLATION_SYSTEM_PROMPT
+
+    mock_post.reset_mock()
+    try_local_ai("", "text", response_schema={"type": "object"})
+    assert _system_message(_local_ai_payload(mock_post)) == MANGA_TRANSLATION_JSON_SYSTEM_PROMPT
 
 
 @patch("worker.services.translation.requests.get")
