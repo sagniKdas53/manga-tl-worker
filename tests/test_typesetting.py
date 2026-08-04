@@ -5,6 +5,9 @@ from worker.handlers.render import fit_text_in_box_py, load_font
 
 def widest_line(res, font_name="Comic Neue", bold=False):
     font = load_font(res["fontSize"], font_name=font_name, bold=bold)
+    # load_font falls back all the way to ImageFont.load_default(), so None means the environment
+    # has no usable font at all -- worth failing on loudly rather than measuring against nothing.
+    assert font is not None
     return max(font.getlength(line) for line in res["lines"])
 
 

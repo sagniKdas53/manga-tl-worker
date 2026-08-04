@@ -547,9 +547,7 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
     elif "host.docker.internal" in local_endpoint:
         endpoints_to_try.append(local_endpoint.replace("host.docker.internal", "localhost"))
 
-    default_system_pr = (
-        MANGA_TRANSLATION_JSON_SYSTEM_PROMPT if response_schema else MANGA_TRANSLATION_SYSTEM_PROMPT
-    )
+    default_system_pr = MANGA_TRANSLATION_JSON_SYSTEM_PROMPT if response_schema else MANGA_TRANSLATION_SYSTEM_PROMPT
     system_pr = prompt or default_system_pr
 
     payload = {
