@@ -33,17 +33,24 @@ FONT_REGISTRY = {
         "italic": "/usr/share/fonts/truetype/google/LuckiestGuy-Regular.ttf",
         "bolditalic": "/usr/share/fonts/truetype/google/LuckiestGuy-Regular.ttf",
     },
+    # AUDIT-D2: the display names stay "Arial" and "Courier New" because they are persisted
+    # on existing layers — renaming the keys would strand every chapter already using them.
+    # The files behind them are now Liberation Sans and Liberation Mono, metric-compatible
+    # substitutes with the same advance widths, so fitting and line breaking are unchanged.
+    # The originals were Monotype fonts scraped from third-party repos that had no right to
+    # redistribute them. Unlike those single files, Liberation has genuine bold and italic
+    # faces, so the four style keys below now resolve to four different fonts.
     "Arial": {
-        "normal": "/usr/share/fonts/truetype/google/Arial.ttf",
-        "bold": "/usr/share/fonts/truetype/google/Arial.ttf",
-        "italic": "/usr/share/fonts/truetype/google/Arial.ttf",
-        "bolditalic": "/usr/share/fonts/truetype/google/Arial.ttf",
+        "normal": "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "bold": "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "italic": "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
+        "bolditalic": "/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf",
     },
     "Courier New": {
-        "normal": "/usr/share/fonts/truetype/google/CourierNew.ttf",
-        "bold": "/usr/share/fonts/truetype/google/CourierNew.ttf",
-        "italic": "/usr/share/fonts/truetype/google/CourierNew.ttf",
-        "bolditalic": "/usr/share/fonts/truetype/google/CourierNew.ttf",
+        "normal": "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+        "bold": "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf",
+        "italic": "/usr/share/fonts/truetype/liberation/LiberationMono-Italic.ttf",
+        "bolditalic": "/usr/share/fonts/truetype/liberation/LiberationMono-BoldItalic.ttf",
     },
     "WenQuanYi Micro Hei": {
         "normal": "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
