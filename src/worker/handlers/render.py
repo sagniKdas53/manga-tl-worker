@@ -899,7 +899,11 @@ def process_render(job_data):
         raise Exception("Render failed")
 
     # Trigger callback
-    callback_payload = {"imageId": image_id, "pageId": page_id}
+    callback_payload = {
+        "jobId": job_data.get("jobId"),
+        "imageId": image_id,
+        "pageId": page_id,
+    }
     try:
         res = requests.post(f"{CALLBACK_URL}/render", json=callback_payload, headers=BACKEND_HEADERS)
         print(f"[Render] Callback status code: {res.status_code}", flush=True)

@@ -658,6 +658,7 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     # Call backend
     callback_payload = {
+        "jobId": job_data.get("jobId"),
         "imageId": image_id,
         "pageId": job_data.get("pageId"),
         "qaResults": results_vlm,
@@ -731,6 +732,7 @@ def _auto_pass_all(job_data):
 
     # Call backend
     callback_payload = {
+        "jobId": job_data.get("jobId"),
         "imageId": image_id,
         "pageId": job_data.get("pageId"),
         "qaResults": results,
@@ -924,6 +926,7 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     # Call backend
     callback_payload = {
+        "jobId": job_data.get("jobId"),
         "imageId": image_id,
         "pageId": job_data.get("pageId"),
         "qaResults": results,
@@ -1176,6 +1179,7 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     # Call backend
     callback_payload = {
+        "jobId": job_data.get("jobId"),
         "imageId": image_id,
         "pageId": job_data.get("pageId"),
         "qaResults": results,

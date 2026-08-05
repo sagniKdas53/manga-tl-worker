@@ -55,7 +55,12 @@ def process_panel_detection(job_data):
         flush=True,
     )
 
-    callback_payload = {"imageId": image_id, "pageId": page_id, "panels": panels}
+    callback_payload = {
+        "jobId": job_data.get("jobId"),
+        "imageId": image_id,
+        "pageId": page_id,
+        "panels": panels,
+    }
     try:
         res = requests.post(f"{CALLBACK_URL}/panel", json=callback_payload, headers=BACKEND_HEADERS)
         print(f"[Panel Detection] Callback status code: {res.status_code}", flush=True)

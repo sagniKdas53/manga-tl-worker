@@ -1200,6 +1200,7 @@ def process_ocr(job_data):
 
         page_id = job_data.get("pageId")
         callback_payload = {
+            "jobId": job_data.get("jobId"),
             "imageId": image_id,
             "pageId": page_id,
             "modelIdentifier": model_identifier,

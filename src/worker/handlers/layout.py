@@ -48,6 +48,7 @@ def process_layout(job_data):
         print("[Layout] No OCR regions found, skipping layout analysis.", flush=True)
         # Still send callback so pipeline continues
         callback_payload = {
+            "jobId": job_data.get("jobId"),
             "imageId": image_id,
             "pageId": page_id,
             "regionTypes": [],
@@ -133,6 +134,7 @@ def process_layout(job_data):
 
     # 4. Send enriched layout callback
     callback_payload = {
+        "jobId": job_data.get("jobId"),
         "imageId": image_id,
         "pageId": page_id,
         "regionTypes": region_types,

@@ -326,6 +326,7 @@ def process_translation(job_data):
         logger.error(f"{req_prefix}All {failed_count} translation(s) failed — reporting error to backend")
 
     callback_payload = {
+        "jobId": job_data.get("jobId"),
         "imageId": image_id,
         "pageId": page_id,
         "translations": translations,

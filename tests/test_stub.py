@@ -4,7 +4,9 @@ from worker.handlers.stub import process_stub
 
 
 def test_process_stub_success():
-    job_data = {"imageId": "img-123"}
+    # AUDIT-P5: the callback must echo back the jobId it was dispatched with, so the backend can
+    # resolve the exact job row instead of guessing "newest job of this type for this image".
+    job_data = {"jobId": "job-abc", "imageId": "img-123"}
     mock_res = MagicMock()
     mock_res.status_code = 200
 
@@ -13,7 +15,7 @@ def test_process_stub_success():
         mock_post.assert_called_once()
         args, kwargs = mock_post.call_args
         assert "test_job" in args[0]
-        assert kwargs["json"] == {"imageId": "img-123"}
+        assert kwargs["json"] == {"jobId": "job-abc", "imageId": "img-123"}
 
 
 def test_process_stub_failure():

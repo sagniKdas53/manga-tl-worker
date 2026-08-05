@@ -12,7 +12,7 @@ def process_stub(job_data, job_type):
     # Mimic work
     time.sleep(0.5)
 
-    callback_payload = {"imageId": image_id}
+    callback_payload = {"jobId": job_data.get("jobId"), "imageId": image_id}
     try:
         res = requests.post(f"{CALLBACK_URL}/{job_type}", json=callback_payload, headers=BACKEND_HEADERS)
         print(f"[Stub - {job_type}] Callback status code: {res.status_code}", flush=True)

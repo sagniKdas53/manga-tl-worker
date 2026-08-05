@@ -96,7 +96,12 @@ def process_qa_re_ocr(job_data):
         print(f"[QA Re-OCR] Error during batch OCR process: {e}", flush=True)
         raise
 
-    callback_payload = {"imageId": image_id, "pageId": page_id, "results": results}
+    callback_payload = {
+        "jobId": job_data.get("jobId"),
+        "imageId": image_id,
+        "pageId": page_id,
+        "results": results,
+    }
 
     try:
         callback_url = f"{CALLBACK_URL}/qa-re-ocr"
