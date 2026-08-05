@@ -322,3 +322,100 @@ def test_translate_text_providers(mock_cloud):
             mock_tl.provider = prov
             res = translate_text("ja text", source_lang="ja", target_lang="en")
             assert "hello" in res
+
+
+# --- AUDIT-W9: local JSON mode was never actually enforced ---------------------------------------
+
+
+@patch("worker.services.translation.requests.post")
+@patch("worker.services.translation.os.environ.get")
+@patch("worker.utils.lock.acquire_lock")
+def test_try_local_ai_uses_response_format_not_ollamas_native_format_key(mock_lock, mock_env, mock_post):
+    """`format: "json"` is Ollama's *native* /api/chat field, and the endpoint is the OpenAI shim.
+
+    The shim at /v1/chat/completions ignores an unknown top-level `format`, so Ollama -- the default
+    local provider -- was the one case getting no JSON enforcement at all. Verified against the
+    deployed instance: `response_format` returns an object, `format` returns prose with a markdown
+    fence.
+    """
+    mock_env.side_effect = lambda k, default="": (
+        "ollama" if k == "LOCAL_LLM_PROVIDER" else "http://test:11434" if k == "LOCAL_LLM_ENDPOINT" else default
+    )
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
+    mock_post.return_value = mock_resp
+
+    try_local_ai("prompt", "text", response_schema={"type": "object"})
+
+    payload = _local_ai_payload(mock_post)
+    assert payload.get("response_format") == {"type": "json_object"}
+    assert "format" not in payload
+
+
+@patch("worker.services.translation.requests.post")
+@patch("worker.services.translation.os.environ.get")
+@patch("worker.utils.lock.acquire_lock")
+def test_try_local_ai_sends_no_json_constraint_without_a_schema(mock_lock, mock_env, mock_post):
+    mock_env.side_effect = lambda k, default="": (
+        "ollama" if k == "LOCAL_LLM_PROVIDER" else "http://test:11434" if k == "LOCAL_LLM_ENDPOINT" else default
+    )
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"choices": [{"message": {"content": "plain"}}]}
+    mock_post.return_value = mock_resp
+
+    try_local_ai("prompt", "text")
+
+    payload = _local_ai_payload(mock_post)
+    assert "response_format" not in payload
+    assert "format" not in payload
+
+
+@patch("worker.services.translation.requests.post")
+@patch("worker.services.translation.os.environ.get")
+def test_try_local_vlm_vision_uses_response_format_too(mock_env, mock_post):
+    """The identical branch is duplicated in the second local call site."""
+    mock_env.side_effect = lambda k, default="": (
+        "ollama" if k == "LOCAL_LLM_PROVIDER" else "http://test:11434" if k == "LOCAL_LLM_ENDPOINT" else default
+    )
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
+    mock_post.return_value = mock_resp
+
+    try_local_vlm_vision("model", "prompt", "base64", response_schema={"type": "object"})
+
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload.get("response_format") == {"type": "json_object"}
+    assert "format" not in payload
+
+
+@patch("worker.services.translation.requests.post")
+@patch("worker.utils.lock.acquire_lock")
+def test_both_local_call_sites_agree_on_the_deployed_defaults(mock_lock, mock_post, monkeypatch):
+    """The two local paths defaulted differently: try_local_ai to lmstudio, the VLM one to ollama.
+
+    docker-compose.yml and .env.example both ship ollama/gemma4:e4b, so try_local_ai's
+    `format`/`response_format` branch took the opposite path from the deployed configuration --
+    which is why the bug above was never seen in the one place someone would have looked.
+    """
+    for var in ("LOCAL_LLM_PROVIDER", "LOCAL_LLM_ENDPOINT", "LOCAL_LLM_MODEL", "LLM_PROVIDER", "LLM_ENDPOINT"):
+        monkeypatch.delenv(var, raising=False)
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
+    mock_post.return_value = mock_resp
+
+    try_local_ai("prompt", "text")
+    tl_url = mock_post.call_args.args[0] if mock_post.call_args.args else mock_post.call_args.kwargs["url"]
+    tl_model = mock_post.call_args.kwargs["json"]["model"]
+
+    mock_post.reset_mock()
+    try_local_vlm_vision("model", "prompt", "base64")
+    vlm_url = mock_post.call_args.args[0] if mock_post.call_args.args else mock_post.call_args.kwargs["url"]
+
+    assert tl_url == vlm_url == "http://ollama:11434/v1/chat/completions"
+    # gemma4:e4b is what docker-compose.yml and .env.example ship, and it is a real tag.
+    assert tl_model == "gemma4:e4b"

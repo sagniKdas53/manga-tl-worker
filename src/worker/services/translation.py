@@ -525,9 +525,13 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
     req_prefix = f"[{request_id}] " if request_id else ""
     enforce_rate_limit()
 
-    local_provider = os.environ.get("LOCAL_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "lmstudio")).lower().strip()
+    # These defaults must match try_local_vlm_vision, docker-compose.yml and .env.example. They
+    # used to disagree four ways -- this path alone said lmstudio/gemma3:4b -- so it took the
+    # opposite endpoint and format branch from the deployed configuration, which is why the
+    # response_format bug below went unnoticed in the one place anyone would have looked.
+    local_provider = os.environ.get("LOCAL_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "ollama")).lower().strip()
     local_endpoint = os.environ.get("LOCAL_LLM_ENDPOINT", os.environ.get("LLM_ENDPOINT", "")).strip()
-    model = os.environ.get("LOCAL_LLM_MODEL", "gemma3:4b")
+    model = os.environ.get("LOCAL_LLM_MODEL", "gemma4:e4b")
 
     if not local_endpoint:
         if local_provider == "ollama":
@@ -559,10 +563,10 @@ def try_local_ai(prompt, text, response_schema=None, request_id=None):
     }
 
     if response_schema:
-        if local_provider == "ollama":
-            payload["format"] = "json"
-        else:
-            payload["response_format"] = {"type": "json_object"}
+        # `format: "json"` is Ollama's *native* /api/chat field; the endpoint above is its
+        # OpenAI-compatible /v1/chat/completions shim, which ignores the unknown key. Verified
+        # against a live instance: response_format returns an object, format returns prose.
+        payload["response_format"] = {"type": "json_object"}
 
     response = None
     for endpoint in endpoints_to_try:
@@ -976,10 +980,8 @@ def try_local_vlm_vision(
     }
 
     if response_schema:
-        if local_provider == "ollama":
-            payload["format"] = "json"
-        else:
-            payload["response_format"] = {"type": "json_object"}
+        # Same shim/native mismatch as try_local_ai -- this branch was duplicated verbatim.
+        payload["response_format"] = {"type": "json_object"}
 
     from worker.utils.lock import acquire_lock
 
