@@ -408,7 +408,11 @@ def process_ocr(job_data):
         # this host. We must serialize these local predictions using the "ocr" lock to avoid CPU/GPU
         # overload and OOM crashes. This local bottleneck will be resolved when remote workers on
         # dedicated machines are supported, allowing parallel detection and full OCR job queues.
-        with acquire_lock("ocr"):
+        # node_scoped: this lock guards *this host's* CPU/GPU, not a shared service, so it must stay
+        # per-container — a deployment-wide "ocr" lock would serialise detection across every
+        # worker. AUDIT-W4 changed the default the other way for locks like local-llm, which do
+        # guard a shared endpoint.
+        with acquire_lock("ocr", node_scoped=True):
             # Try PaddleOCR (PP-OCRv5) first — reader is lazily created per language
             paddle_ocr_reader = model_manager.get_paddle_ocr_reader(source_language) if use_paddle_ocr else None
             paddle_ocr_detector = model_manager.get_paddle_ocr_detector(source_language) if not use_paddle_ocr else None
