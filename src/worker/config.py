@@ -131,7 +131,9 @@ if not YOLO_MODEL_PATH:
     LOCAL_PATH = (
         "/home/sagnik/Projects/docker-composes/manga-library/data/worker/huggingface/models/yolo11n_bubble.onnx"
     )
-    DOCKER_PATH = "/root/.cache/huggingface/models/yolo11n_bubble.onnx"
+    # AUDIT-D2: the container no longer runs as root, so the cache lives under the
+    # worker user's home rather than /root.
+    DOCKER_PATH = "/home/worker/.cache/huggingface/models/yolo11n_bubble.onnx"
     YOLO_MODEL_PATH = LOCAL_PATH if os.path.exists(LOCAL_PATH) else DOCKER_PATH
 
 YOLO_CONF_THRESHOLD = float(os.environ.get("YOLO_CONF_THRESHOLD", "0.25"))
