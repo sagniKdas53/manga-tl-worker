@@ -4,6 +4,7 @@ try_cloud_ai, try_cloud_ai_vision, and try_cloud_ai_vision_batch.
 Includes native prompt caching support for OpenRouter and Anthropic.
 """
 
+import threading
 import time
 from dataclasses import dataclass
 
@@ -14,7 +15,7 @@ from tenacity.stop import stop_after_attempt
 from tenacity.wait import wait_exponential
 
 from worker.config import logger
-from worker.provider_config import get_provider_registry
+from worker.provider_config import get_config_loader, get_provider_registry
 from worker.utils.rate_limit import enforce_rate_limit, estimate_cost
 
 # Anthropic already sent max_tokens; everyone else was sending none at all, so the ceiling was
@@ -61,7 +62,15 @@ class LLMResponse:
         return self.finish_reason == "length"
 
 
-# Provider cooldown registry
+# Provider cooldown registry.
+#
+# These are read and written from every job thread. Individual dict operations are atomic under the
+# GIL, but the 429 bookkeeping is a read-modify-write (get, +1, set) and interleaved 429s from the
+# same provider collapsed into a single increment — so the exponential backoff never escalated
+# under exactly the load that produces concurrent 429s. _STATE_LOCK guards the compound updates;
+# plain single-key reads elsewhere are left unlocked deliberately, since a stale cooldown read only
+# costs one extra attempt.
+_STATE_LOCK = threading.Lock()
 PROVIDER_COOLDOWNS: dict[str, float] = {}
 PROVIDER_CONSECUTIVE_429S: dict[str, int] = {}
 
@@ -100,8 +109,17 @@ def wait_for_cooldown(provider: str, max_wait: float = 60.0):
         time.sleep(sleep_time)
 
 
-# Provider endpoint registry
+# Provider endpoint registry.
+#
+# Mutated in place rather than rebound, because translation.py and the test suite hold references
+# to this exact dict.
 PROVIDER_REGISTRY: dict[str, dict] = get_provider_registry()
+
+
+def reload_provider_registry() -> None:
+    """Rebuild PROVIDER_REGISTRY from the current provider configuration."""
+    PROVIDER_REGISTRY.clear()
+    PROVIDER_REGISTRY.update(get_provider_registry())
 
 
 def normalize_model_name(provider: str, model: str) -> str:
@@ -137,6 +155,13 @@ class LLMClient:
         self.routing_strategy = routing_strategy
         self.session_id = session_id
         self.req_prefix = f"[{request_id}] " if request_id else ""
+
+        # PROVIDER_REGISTRY was built once at import, so editing providers.json needed a worker
+        # restart to take effect — while the backend has had ProviderConfigCache.reload() all
+        # along. Pick up an edited file here instead: one stat on a call that is about to spend
+        # seconds in HTTP.
+        if get_config_loader().reload_if_changed():
+            reload_provider_registry()
 
         provider_info = PROVIDER_REGISTRY.get(provider, {})
         self.url = provider_info.get("url", "")
@@ -213,6 +238,16 @@ class LLMClient:
                         "cache_control": {"type": "ephemeral"},
                     }
                 ]
+            if response_schema and not self._degraded_format:
+                # Anthropic has no `response_format`; the Messages API spells structured output as
+                # output_config.format, and its json_schema variant takes the schema directly
+                # rather than the OpenAI name/schema/strict wrapper used below.
+                payload["output_config"] = {
+                    "format": {
+                        "type": "json_schema",
+                        "schema": response_schema,
+                    }
+                }
         else:
             payload = {
                 "model": self.model,
@@ -303,24 +338,23 @@ class LLMClient:
             raise TransientAPIError(f"Connection error: {e}") from e
 
         if response.status_code == 429:
-            retry_after = response.headers.get("Retry-After")
-            cooldown_time = 10.0
-            if retry_after and retry_after.isdigit():
-                cooldown_time = float(retry_after)
-            consecutive = PROVIDER_CONSECUTIVE_429S.get(self.provider, 0) + 1
-            PROVIDER_CONSECUTIVE_429S[self.provider] = consecutive
-            multiplier = min(2 ** (consecutive - 1), COOLDOWN_MAX_SECONDS / COOLDOWN_BASE_SECONDS)
-            cooldown_time = max(cooldown_time, COOLDOWN_BASE_SECONDS * multiplier)
-            PROVIDER_COOLDOWNS[self.provider] = time.time() + cooldown_time
+            cooldown_time = self._register_rate_limit(response.headers.get("Retry-After"))
             raise TransientAPIError(f"Rate limited (429), cooldown: {cooldown_time}s", status_code=429)
 
         if response.status_code == 400 and not self._degraded_format:
-            current_rf = payload.get("response_format", {})
-            if current_rf.get("type") == "json_schema":
+            if payload.get("response_format", {}).get("type") == "json_schema":
                 logger.warning(f"{self.req_prefix}400 with json_schema — degrading to json_object")
                 payload["response_format"] = {"type": "json_object"}
                 self._degraded_format = True
                 raise TransientAPIError("Degrading json_schema to json_object", status_code=400)
+            if "output_config" in payload:
+                # Structured outputs are not available on every Anthropic model, and there is no
+                # json_object tier to step down to. Drop the constraint and let the caller's JSON
+                # system prompt carry it — which is exactly the behaviour before it was added.
+                logger.warning(f"{self.req_prefix}400 with output_config — dropping structured output")
+                payload.pop("output_config")
+                self._degraded_format = True
+                raise TransientAPIError("Dropping unsupported output_config", status_code=400)
 
         if response.status_code >= 500:
             raise TransientAPIError(f"Server error: {response.status_code}", status_code=response.status_code)
@@ -331,7 +365,8 @@ class LLMClient:
             # up to 3 times. On the 2026-08-02 drained run one invalid neurometric key produced 323
             # identical 401s and failed 11 of 50 translation jobs. Parking the provider on cooldown
             # makes call() short-circuit the rest of those attempts and says why, once, loudly.
-            PROVIDER_AUTH_FAILURES[self.provider] = time.time() + AUTH_FAILURE_COOLDOWN_SECONDS
+            with _STATE_LOCK:
+                PROVIDER_AUTH_FAILURES[self.provider] = time.time() + AUTH_FAILURE_COOLDOWN_SECONDS
             raise PermanentAPIError(
                 f"Authentication failed for provider '{self.provider}' ({response.status_code}) — check its API "
                 f"key. Skipping this provider for {AUTH_FAILURE_COOLDOWN_SECONDS:.0f}s. {response.text}"
@@ -342,13 +377,36 @@ class LLMClient:
 
         return self._parse_response(response.json(), time.perf_counter() - start)
 
+    def _register_rate_limit(self, retry_after: str | None) -> float:
+        """Record a 429 and return the cooldown it installs.
+
+        The consecutive-429 count is a read-modify-write over a dict shared by every job thread, so
+        it has to be done under the lock or concurrent 429s lose increments and the backoff stays
+        flat at exactly the moment it should be escalating.
+        """
+        cooldown_time = 10.0
+        if retry_after and retry_after.isdigit():
+            cooldown_time = float(retry_after)
+        with _STATE_LOCK:
+            consecutive = PROVIDER_CONSECUTIVE_429S.get(self.provider, 0) + 1
+            PROVIDER_CONSECUTIVE_429S[self.provider] = consecutive
+            multiplier = min(2 ** (consecutive - 1), COOLDOWN_MAX_SECONDS / COOLDOWN_BASE_SECONDS)
+            cooldown_time = max(cooldown_time, COOLDOWN_BASE_SECONDS * multiplier)
+            PROVIDER_COOLDOWNS[self.provider] = time.time() + cooldown_time
+        return cooldown_time
+
     def _parse_response(self, data: dict, elapsed: float) -> LLMResponse:
         """Normalize response JSON from Anthropic or OpenAI format."""
-        PROVIDER_CONSECUTIVE_429S.pop(self.provider, None)
-        PROVIDER_AUTH_FAILURES.pop(self.provider, None)
+        with _STATE_LOCK:
+            PROVIDER_CONSECUTIVE_429S.pop(self.provider, None)
+            PROVIDER_AUTH_FAILURES.pop(self.provider, None)
         if self.is_anthropic:
-            content_list = data.get("content", [])
-            content = content_list[0].get("text", "") if content_list else ""
+            # content[0] is not reliably the text block — a thinking block precedes it whenever
+            # thinking is on — and .get("text") yields None on any block that is not text.
+            content = next(
+                (b.get("text") or "" for b in data.get("content", []) if b.get("type", "text") == "text"),
+                "",
+            )
             usage = data.get("usage", {})
             prompt_tokens = usage.get("input_tokens", 0)
             completion_tokens = usage.get("output_tokens", 0)
@@ -358,7 +416,10 @@ class LLMClient:
             finish_reason = "length" if data.get("stop_reason") == "max_tokens" else "stop"
         else:
             choices = data.get("choices", [])
-            content = choices[0].get("message", {}).get("content", "") if choices else ""
+            # `or ""` rather than a .get default: providers send an explicit null content alongside
+            # a refusal, and a default only applies to a *missing* key. json.loads(None) downstream
+            # raises TypeError instead of reporting a parse failure.
+            content = (choices[0].get("message", {}).get("content") or "") if choices else ""
             finish_reason = choices[0].get("finish_reason") or "" if choices else ""
             usage = data.get("usage") or {}
             prompt_tokens = usage.get("prompt_tokens") or 0

@@ -93,7 +93,29 @@ class ProviderConfigLoader:
         self.defaults: dict[str, str | None] = {}
         self.version: int = 1
         self.raw_data: dict[str, Any] = {}
+        self._loaded_mtime: float | None = None
         self.load_and_validate()
+
+    def _config_mtime(self) -> float | None:
+        try:
+            return os.stat(self.config_path).st_mtime
+        except OSError:
+            return None
+
+    def reload_if_changed(self) -> bool:
+        """Re-read providers.json when it has been edited since the last load.
+
+        Cheap enough to call per LLMClient construction — one stat against a call that then spends
+        seconds in an HTTP request. Returns True when a reload actually happened.
+        """
+        if not self.config_path:
+            return False
+        mtime = self._config_mtime()
+        if mtime is None or mtime == self._loaded_mtime:
+            return False
+        logger.info(f"providers.json changed on disk (mtime {mtime}); reloading provider configuration.")
+        self.load_and_validate()
+        return True
 
     def load_and_validate(self):
         if not self.config_path or not os.path.exists(self.config_path):
@@ -107,6 +129,10 @@ class ProviderConfigLoader:
             logger.error(f"Failed to parse providers.json at '{self.config_path}': {e}")
             return
 
+        # Reload has to drop providers that were deleted from the file, not just overwrite the ones
+        # that remain — the loop below only ever adds.
+        self.providers = {}
+        self._loaded_mtime = self._config_mtime()
         self.version = self.raw_data.get("version", 1)
         self.defaults = self.raw_data.get("defaults", {})
 
@@ -259,6 +285,12 @@ def get_config_loader() -> ProviderConfigLoader:
     return _global_loader
 
 
+def reset_config_loader() -> None:
+    """Drop the singleton so the next get_config_loader() re-resolves the path and reloads."""
+    global _global_loader
+    _global_loader = None
+
+
 def get_provider_registry() -> dict[str, dict]:
     loader = get_config_loader()
     registry = loader.get_provider_registry()
@@ -310,7 +342,10 @@ def get_provider_registry() -> dict[str, dict]:
                 "auth_header": "x-api-key",
                 "auth_prefix": "",
                 "extra_headers": {"anthropic-version": "2023-06-01"},
-                "default_model": "claude-3-5-sonnet-20241022",
+                # claude-3-5-sonnet-20241022 was retired on 2025-10-28 and now 404s, so this
+                # fallback branch could only ever fail. Sonnet is the right tier here: this is
+                # high-volume per-page translation/OCR, not deep reasoning.
+                "default_model": "claude-sonnet-5",
                 "is_anthropic": True,
             },
         }
