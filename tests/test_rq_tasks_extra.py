@@ -14,20 +14,35 @@ def test_check_stale_job_missing_image_id():
 def test_check_stale_job_image_exists():
     mock_res = MagicMock()
     mock_res.status_code = 200
-    with patch("requests.get", return_value=mock_res):
+    with patch("requests.head", return_value=mock_res):
         assert check_stale_job("queue:ocr", {"imageId": "img-1"}) is False
 
 
 def test_check_stale_job_image_not_found():
     mock_res = MagicMock()
     mock_res.status_code = 404
-    with patch("requests.get", return_value=mock_res):
+    with patch("requests.head", return_value=mock_res):
         assert check_stale_job("queue:ocr", {"imageId": "img-1"}) is True
 
 
 def test_check_stale_job_exception():
-    with patch("requests.get", side_effect=Exception("Network error")):
+    with patch("requests.head", side_effect=Exception("Network error")):
         assert check_stale_job("queue:ocr", {"imageId": "img-1"}) is False
+
+
+def test_check_stale_job_uses_head_with_a_timeout():
+    """AUDIT-W7: this was a GET against the heaviest endpoint, and the only call here with no
+    timeout — so a wedged backend held a worker slot open indefinitely, and every job paid for a
+    presigned URL plus every panel, region and layer just to read a status code."""
+    mock_res = MagicMock()
+    mock_res.status_code = 200
+    with patch("requests.head", return_value=mock_res) as mock_head, patch("requests.get") as mock_get:
+        check_stale_job("queue:ocr", {"imageId": "img-1"})
+
+    mock_get.assert_not_called()
+    mock_head.assert_called_once()
+    _, kwargs = mock_head.call_args
+    assert kwargs["timeout"] == 5, "a stale-job check without a timeout can hang a worker slot"
 
 
 def test_update_job_status():

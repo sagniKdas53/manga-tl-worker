@@ -33,7 +33,11 @@ def check_stale_job(queue_name, job_data):
             return False
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
         try:
-            res = requests.get(backend_url, headers=BACKEND_HEADERS)
+            # AUDIT-W7: HEAD, not GET — all we read is the status code, and the GET handler builds
+            # a presigned URL plus every panel, region and layer for the image before we throw it
+            # away. And a timeout, which this call alone was missing: without one a wedged backend
+            # holds a worker slot open indefinitely.
+            res = requests.head(backend_url, headers=BACKEND_HEADERS, timeout=5)
             if res.status_code == 200:
                 # If image exists we can proceed. Future logic for specific cancellation can go here.
                 return False
