@@ -38,6 +38,29 @@ def test_enforce_rate_limit(mock_time):
 
 
 @patch("worker.utils.rate_limit.time")
+def test_unset_rate_limit_is_unlimited(mock_time, monkeypatch):
+    """AUDIT-W2: with RATE_LIMIT unset nothing throttles — including a provider with no rateLimits.
+
+    docker-compose.yml used to ship `RATE_LIMIT=${RATE_LIMIT:-10}`, so the fallback bucket was
+    always populated and a provider added to providers.json without its own `rateLimits` silently
+    inherited one call every 6 seconds. The compose default is now empty, which makes this the
+    behaviour the deployment actually gets.
+    """
+    monkeypatch.delenv("RATE_LIMIT", raising=False)
+    mock_time.time.return_value = 100
+
+    import worker.utils.rate_limit as rlimit
+
+    # A call one millisecond ago would sleep under any non-zero limit.
+    rlimit.PROVIDER_LAST_REQUEST_TIME = {"global": 99.999, "no-limits-provider": 99.999}
+
+    enforce_rate_limit()
+    enforce_rate_limit(provider="no-limits-provider", provider_rpm=None)
+
+    mock_time.sleep.assert_not_called()
+
+
+@patch("worker.utils.rate_limit.time")
 def test_enforce_rate_limit_does_not_log_as_translation(mock_time, capsys):
     """AUDIT-Q3: the limiter is shared by translation, OCR and QA — it must not claim to be one.
 

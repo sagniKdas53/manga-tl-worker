@@ -18,6 +18,9 @@ def enforce_rate_limit(provider: str | None = None, provider_rpm: float | None =
     if provider and provider_rpm and provider_rpm > 0:
         rpm = float(provider_rpm)
     else:
+        # AUDIT-W2: unset means unlimited, and unset is now what ships. A provider added to
+        # providers.json without `rateLimits` must not silently inherit a throttle from an env var
+        # that was aimed at something else. Every provider that wants a limit carries its own.
         rate_limit_env = os.environ.get("RATE_LIMIT", "").strip()
         if rate_limit_env:
             try:

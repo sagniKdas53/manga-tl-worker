@@ -8,7 +8,9 @@
       "displayName": "OpenRouter",
       "type": "openai-compatible",
       "baseUrl": "https://openrouter.ai/api/v1/chat/completions",
-      "authHeader": "Authorization"
+      "authHeader": "Authorization",
+      "defaultQALLMModel": "test/qa-llm-default",
+      "defaultQAVLMModel": "test/qa-vlm-default"
     },
     "openai": {
       "displayName": "OpenAI",
@@ -38,7 +40,8 @@
       "displayName": "Cloudflare",
       "type": "openai-compatible",
       "baseUrl": "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions",
-      "authHeader": "Authorization"
+      "authHeader": "Authorization",
+      "defaultQALLMModel": "test/cf-qa-llm-default"
     },
     "neurometric": {
       "displayName": "Neurometric",

@@ -151,7 +151,10 @@ def test_process_qa_llm_success(mock_qa_config, mock_post, mock_get, mock_try_cl
 def test_process_qa_vlm_cloud_success(
     mock_qa_config, mock_post, mock_get, mock_minio, mock_download, mock_try_cloud_vlm
 ):
-    mock_qa_config.provider = "gemini"
+    # AUDIT-W1: this was "gemini", which is not in config/providers.json at all — it only ever
+    # resolved because QA_DEFAULT_VLM_MODELS in qa.py listed it. Defaults come from providers.json
+    # now, so the provider has to be a real one.
+    mock_qa_config.provider = "openrouter"
     mock_qa_config.resolve_key.return_value = "fake-key"
     mock_qa_config.vlm_model = ""
 
@@ -237,7 +240,10 @@ def test_process_qa_vlm_local_fallback(
     mock_try_cloud_vlm,
     mock_try_local_vlm,
 ):
-    mock_qa_config.provider = "gemini"
+    # AUDIT-W1: this was "gemini", which is not in config/providers.json at all — it only ever
+    # resolved because QA_DEFAULT_VLM_MODELS in qa.py listed it. Defaults come from providers.json
+    # now, so the provider has to be a real one.
+    mock_qa_config.provider = "openrouter"
     mock_qa_config.resolve_key.return_value = "fake-key"
     mock_qa_config.vlm_model = ""
 

@@ -17,6 +17,7 @@ from worker.config import (
     minio_client,
     redis_client,
 )
+from worker.provider_config import get_config_loader
 from worker.services.translation import (
     try_cloud_ai,
     try_cloud_ai_vision,
@@ -24,28 +25,6 @@ from worker.services.translation import (
     try_local_vlm_vision,
 )
 from worker.utils.image import download_image
-
-# Fallback models, used only when neither the job nor QA_CONFIG names one.
-#
-# These tables are the *only* per-provider knowledge QA needs. It used to dispatch on a hardcoded
-# if/elif over openrouter/gemini/nvidia in four separate places, which meant cloudflare and
-# neurometric — both selectable in the UI and both present in config/providers.json — fell off the
-# end and returned None. That None then fell through to the local-LLM branch, which returned
-# something unparseable, which yielded results = [], which completed QA with zero findings and no
-# error anywhere (AUDIT-W1). LLMClient already resolves any provider in providers.json, so the
-# dispatch is now generic and a provider missing from these tables simply needs an explicit model.
-QA_DEFAULT_LLM_MODELS = {
-    "openrouter": "meta-llama/llama-3-8b-instruct:free",
-    "gemini": "gemini-1.5-pro",
-    "nvidia": "google/gemma-3n-e4b-it",
-}
-
-QA_DEFAULT_VLM_MODELS = {
-    "openrouter": "google/gemini-1.5-pro",
-    "gemini": "gemini-1.5-pro",
-    "nvidia": "nvidia/nemotron-nano-12b-v2-vl",
-}
-
 
 # `directFix` and `escalation` used to be optional, and the model simply never emitted them: the
 # 20260803-084755 run produced qaStatus "direct_fix" 10 times with zero directFix payloads and
@@ -180,18 +159,39 @@ def _sanitize_qa_results(results, ocr_regions, label="LLM"):
     return kept
 
 
-def _resolve_qa_model(prov: str, api_key: str | None, user_model: str | None, defaults: dict) -> str | None:
+def _qa_default_model(prov: str, task: str) -> str | None:
+    """The provider's own QA default, read from config/providers.json.
+
+    AUDIT-W1: this used to be two tables in this file listing openrouter/gemini/nvidia, so
+    cloudflare and neurometric — both selectable in the UI and both in providers.json — had no
+    default at all, while `gemini` had one but is not a configured provider. providers.json is
+    already the single source of truth for every other default (`defaultTLModel`,
+    `defaultOCRModel`); QA now reads `defaultQALLMModel` / `defaultQAVLMModel` from the same place.
+    `task` is the providers.json key: "qaLLM" or "qaVLM".
+
+    Reloads on an edited file for the same reason LLMClient does — one stat against a call that is
+    about to spend seconds in HTTP — so adding a provider does not need a worker restart.
+    """
+    loader = get_config_loader()
+    loader.reload_if_changed()
+    pconfig = loader.providers.get(prov)
+    if pconfig is None:
+        return None
+    return pconfig.defaults.get(task)
+
+
+def _resolve_qa_model(prov: str, api_key: str | None, user_model: str | None, task: str) -> str | None:
     """Resolve the model for a QA call, logging the reason when the call cannot be made."""
     if not prov:
         return None
     if not api_key:
         logger.warning(f"[QA] No API key configured for provider '{prov}' — skipping.")
         return None
-    model = user_model or defaults.get(prov)
+    model = user_model or _qa_default_model(prov, task)
     if not model:
         logger.warning(
-            f"[QA] Provider '{prov}' has no model configured and no built-in default — "
-            "set one on the chapter, series, or global settings."
+            f"[QA] Provider '{prov}' has no model configured and no '{task}' default in "
+            "providers.json — set one on the chapter, series, or global settings."
         )
         return None
     return model
@@ -199,7 +199,7 @@ def _resolve_qa_model(prov: str, api_key: str | None, user_model: str | None, de
 
 def _qa_cloud_llm(prov, api_key, user_model, prompt, routing_strategy):
     """Text QA against any provider in config/providers.json."""
-    model = _resolve_qa_model(prov, api_key, user_model, QA_DEFAULT_LLM_MODELS)
+    model = _resolve_qa_model(prov, api_key, user_model, "qaLLM")
     if not model:
         return None
     try:
@@ -218,7 +218,7 @@ def _qa_cloud_llm(prov, api_key, user_model, prompt, routing_strategy):
 
 def _qa_cloud_vlm(prov, api_key, user_model, prompt, base64_image, routing_strategy):
     """Vision QA against any provider in config/providers.json."""
-    model = _resolve_qa_model(prov, api_key, user_model, QA_DEFAULT_VLM_MODELS)
+    model = _resolve_qa_model(prov, api_key, user_model, "qaVLM")
     if not model:
         return None
     try:

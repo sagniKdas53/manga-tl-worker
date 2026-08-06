@@ -1,3 +1,7 @@
+import json
+import os
+import time
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -211,22 +215,60 @@ class TestQaProviderDispatch:
         assert result == '{"results": []}'
         assert mock_call.call_args.args[0] == provider
 
-    def test_falls_back_to_the_builtin_default_model(self):
+    def test_llm_falls_back_to_the_providers_json_default(self):
         with patch("worker.handlers.qa.try_cloud_ai", return_value="{}") as mock_call:
             qa._qa_cloud_llm("openrouter", "key", None, "prompt", None)
-        assert mock_call.call_args.args[2] == qa.QA_DEFAULT_LLM_MODELS["openrouter"]
+        assert mock_call.call_args.args[2] == "test/qa-llm-default"
+
+    def test_vlm_falls_back_to_the_providers_json_default(self):
+        with patch("worker.handlers.qa.try_cloud_ai_vision", return_value="{}") as mock_call:
+            qa._qa_cloud_vlm("openrouter", "key", None, "prompt", "b64", None)
+        assert mock_call.call_args.args[2] == "test/qa-vlm-default"
+
+    def test_a_provider_the_old_tables_never_listed_now_has_a_default(self):
+        # cloudflare was absent from QA_DEFAULT_LLM_MODELS, so before AUDIT-W1 this resolved to
+        # None. providers.json has carried its defaultQALLMModel all along.
+        with patch("worker.handlers.qa.try_cloud_ai", return_value="{}") as mock_call:
+            qa._qa_cloud_llm("cloudflare", "key", None, "prompt", None)
+        assert mock_call.call_args.args[2] == "test/cf-qa-llm-default"
 
     def test_returns_none_without_an_api_key(self):
         with patch("worker.handlers.qa.try_cloud_ai") as mock_call:
             assert qa._qa_cloud_llm("cloudflare", "", "m", "prompt", None) is None
         mock_call.assert_not_called()
 
-    def test_returns_none_when_no_model_can_be_resolved(self):
-        # A provider outside the default table must be given an explicit model rather than
-        # silently doing nothing.
-        with patch("worker.handlers.qa.try_cloud_ai") as mock_call:
-            assert qa._qa_cloud_llm("neurometric", "key", None, "prompt", None) is None
+    def test_returns_none_when_the_task_has_no_default(self):
+        # cloudflare has a qaLLM default but no qaVLM one — the real neurometric entry has exactly
+        # this shape (defaultQAVLMModel: null). Per-task, not per-provider.
+        with patch("worker.handlers.qa.try_cloud_ai_vision") as mock_call:
+            assert qa._qa_cloud_vlm("cloudflare", "key", None, "prompt", "b64", None) is None
         mock_call.assert_not_called()
+
+    def test_returns_none_for_a_provider_absent_from_providers_json(self):
+        with patch("worker.handlers.qa.try_cloud_ai") as mock_call:
+            assert qa._qa_cloud_llm("not-a-provider", "key", None, "prompt", None) is None
+        mock_call.assert_not_called()
+
+    def test_picks_up_a_providers_json_edit_without_a_restart(self, tmp_path, monkeypatch):
+        from worker.provider_config import get_config_loader, reset_config_loader
+
+        original = Path(os.environ["PROVIDERS_CONFIG"])
+        edited = tmp_path / "providers.json"
+        edited.write_text(original.read_text(), encoding="utf-8")
+        monkeypatch.setenv("PROVIDERS_CONFIG", str(edited))
+        reset_config_loader()
+        try:
+            get_config_loader()  # load once, so the reload is genuinely mtime-driven
+            config = json.loads(edited.read_text())
+            config["providers"]["openrouter"]["defaultQALLMModel"] = "test/edited-on-disk"
+            edited.write_text(json.dumps(config), encoding="utf-8")
+            os.utime(edited, (time.time() + 10, time.time() + 10))
+
+            with patch("worker.handlers.qa.try_cloud_ai", return_value="{}") as mock_call:
+                qa._qa_cloud_llm("openrouter", "key", None, "prompt", None)
+            assert mock_call.call_args.args[2] == "test/edited-on-disk"
+        finally:
+            reset_config_loader()
 
     def test_provider_exception_is_swallowed_into_none(self):
         with patch("worker.handlers.qa.try_cloud_ai", side_effect=RuntimeError("boom")):
