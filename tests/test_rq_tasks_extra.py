@@ -1,6 +1,14 @@
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-from worker.rq_tasks import check_stale_job, process_job_rq, update_job_status
+import requests
+
+from worker.rq_tasks import (
+    _patch_job_status,
+    check_stale_job,
+    process_job_rq,
+    update_job_status,
+)
 
 
 def test_check_stale_job_non_image_queue():
@@ -45,14 +53,90 @@ def test_check_stale_job_uses_head_with_a_timeout():
     assert kwargs["timeout"] == 5, "a stale-job check without a timeout can hang a worker slot"
 
 
+def _ok_response():
+    """A 200 the status-update path will accept.
+
+    The response used to be an unconfigured MagicMock, which was fine while nothing read it.
+    AUDIT-P6 makes the code inspect status_code, and a bare MagicMock compares as NotImplemented
+    against an int — so the response has to be a real one now.
+    """
+    res = MagicMock()
+    res.status_code = 200
+    return res
+
+
+@contextmanager
+def _no_retry_backoff():
+    """Drop tenacity's waits for the duration of a test.
+
+    Deliberately not done by patching `time.sleep`: that patches an attribute on the shared time
+    module object and silently disarms sleeps in code under test elsewhere. This replaces the
+    sleep callable on this one Retrying instance and puts it back afterwards.
+    """
+    original = _patch_job_status.retry.sleep
+    _patch_job_status.retry.sleep = lambda _: None
+    try:
+        yield
+    finally:
+        _patch_job_status.retry.sleep = original
+
+
 def test_update_job_status():
     with patch("requests.patch") as mock_patch:
+        mock_patch.return_value = _ok_response()
         update_job_status("job-1", "PROCESSING", error="some error", attempt=2)
         mock_patch.assert_called_once()
         _, kwargs = mock_patch.call_args
         assert kwargs["json"]["status"] == "PROCESSING"
         assert kwargs["json"]["error"] == "some error"
         assert kwargs["json"]["attempt"] == "2"
+
+
+def test_update_job_status_retries_a_timeout():
+    """AUDIT-P6: a COMPLETED lost to one socket timeout re-runs the whole stage.
+
+    The backend has no other source of truth for job completion, so the row stays PROCESSING and
+    the stale sweeper requeues it ten minutes later — on top of results that already landed.
+    """
+    timeout = requests.exceptions.Timeout("read timed out")
+    with patch("requests.patch") as mock_patch, _no_retry_backoff():
+        mock_patch.side_effect = [timeout, timeout, _ok_response()]
+        update_job_status("job-1", "COMPLETED")
+        assert mock_patch.call_count == 3, "a timed-out COMPLETED must be retried, not printed and dropped"
+
+
+def test_update_job_status_retries_a_server_error():
+    """AUDIT-P6, the half the entry does not mention: requests does not raise on a 500.
+
+    The original call never looked at the response, so a 5xx lost the update with no exception at
+    all — quieter than the timeout the entry describes, and identically expensive.
+    """
+    error = MagicMock()
+    error.status_code = 503
+    error.text = "upstream unavailable"
+    with patch("requests.patch") as mock_patch, _no_retry_backoff():
+        mock_patch.side_effect = [error, _ok_response()]
+        update_job_status("job-1", "COMPLETED")
+        assert mock_patch.call_count == 2, "a 5xx must be retried — requests raises nothing on it"
+
+
+def test_update_job_status_gives_up_on_404():
+    """A deleted or cancelled job is gone for good; spending the retry budget on it is waste."""
+    gone = MagicMock()
+    gone.status_code = 404
+    gone.text = "not found"
+    with patch("requests.patch") as mock_patch, _no_retry_backoff():
+        mock_patch.return_value = gone
+        update_job_status("job-1", "COMPLETED")
+        assert mock_patch.call_count == 1, "a 404 job row will not come back — do not retry it"
+
+
+def test_update_job_status_survives_exhausting_its_retries():
+    """The caller is mid-pipeline; a backend that stays down must not take the job down with it."""
+    with patch("requests.patch") as mock_patch, _no_retry_backoff():
+        mock_patch.side_effect = requests.exceptions.ConnectionError("refused")
+        update_job_status("job-1", "COMPLETED")
+        assert mock_patch.call_count == 4, "four attempts, then give up"
 
 
 def test_process_job_rq_stale():
