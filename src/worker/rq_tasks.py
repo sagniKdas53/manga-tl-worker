@@ -158,7 +158,6 @@ def process_job_rq(queue_name, job_data):
         elif queue_name in (
             "queue:region-redo-ocr",
             "queue:region-redo-tl",
-            "queue:region-redo",
         ):
             process_region_redo(job_data)
         elif queue_name == "queue:render":

@@ -42,9 +42,19 @@ def cleanup_audit_cache():
             max_age = 24 * 3600
             if os.path.exists(QA_AUDIT_CACHE_DIR):
                 files = glob.glob(os.path.join(QA_AUDIT_CACHE_DIR, "*.jpg"))
-                count = sum(
-                    1 for f in files if os.path.isfile(f) and (now - os.path.getmtime(f)) > max_age and not os.remove(f)
-                )
+                # AUDIT-Q3: this was a `sum(1 for f in files if ... and not os.remove(f))` — the
+                # deletion happened as a side effect inside the generator, relying on os.remove
+                # returning None. Beyond being unreadable, one raising unlink aborted the whole
+                # sweep: the remaining files were never considered and the count never printed.
+                # Per-file, so a file that vanishes underneath us costs one file, not the sweep.
+                count = 0
+                for f in files:
+                    try:
+                        if os.path.isfile(f) and (now - os.path.getmtime(f)) > max_age:
+                            os.remove(f)
+                            count += 1
+                    except OSError as e:
+                        print(f"[Worker] Could not remove QA audit cache file {f}: {e}", flush=True)
                 print(f"[Worker] Cleaned up {count} old files in {QA_AUDIT_CACHE_DIR}.", flush=True)
         except Exception as e:
             print(f"[Worker] Error cleaning up QA audit cache: {e}", flush=True)

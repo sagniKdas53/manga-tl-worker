@@ -204,6 +204,31 @@ def test_process_job_rq_queues():
             mock_handler.assert_called_once_with(job_data)
 
 
+def test_process_job_rq_does_not_dispatch_bare_region_redo():
+    """AUDIT-Q3: `queue:region-redo` is a queue nothing produces and nothing consumes.
+
+    The backend only ever mints `region-redo-ocr` or `region-redo-tl`
+    (JobCoordinatorService.enqueueRegionRedo), the worker only advertises those two in
+    `/capabilities`, and concurrency.py classifies only those two as heavy/light — see
+    test_region_redo_removed_from_heavy. The bare name survived in the dispatcher alone, so a
+    job on it would have run a region redo while bypassing both the stale check and the
+    heavy/light slot accounting.
+    """
+    job_data = {"jobId": "job-1"}
+    mock_res = MagicMock()
+    mock_res.status_code = 200
+    mock_res.json.return_value = {"status": "PENDING"}
+
+    with (
+        patch("worker.rq_tasks.check_stale_job", return_value=False),
+        patch("requests.get", return_value=mock_res),
+        patch("worker.rq_tasks.update_job_status"),
+        patch("worker.rq_tasks.process_region_redo") as mock_handler,
+    ):
+        process_job_rq("queue:region-redo", job_data)
+        mock_handler.assert_not_called()
+
+
 def test_process_job_rq_error_retry():
     job_data = {"jobId": "job-1", "attempt": 1, "maxAttempts": 3}
     mock_res = MagicMock()

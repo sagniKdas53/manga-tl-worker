@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import MagicMock, patch
 
 from worker.services.translation import (
@@ -229,6 +230,34 @@ def test_translate_text(mock_env, mock_google, mock_cloud, mock_deepl):
 
     res = translate_text("test")
     assert res is None
+
+
+def test_translate_text_logs_no_phantom_cache_key(caplog):
+    """AUDIT-Q3: no cache key is logged, because there is no cache.
+
+    The cloud-LLM tier used to build `tl:{provider}:{model}:{hash(text)}` and log it with a
+    hardcoded `(hit=False)` before throwing it away. Nothing reads or writes that key anywhere in
+    the worker, so the line advertised a permanent 0% hit rate on a cache that does not exist —
+    and it fired once per text segment, not once per image. The entry filed this against
+    handlers/qa.py only; this copy was the third and the noisiest.
+    """
+    tl_config = MagicMock()
+    tl_config.provider = "openrouter"
+    tl_config.resolve_key.return_value = "a-key"
+    tl_config.llm_model = "some/model"
+
+    with (
+        caplog.at_level(logging.INFO),
+        patch("worker.config.TL_CONFIG", tl_config),
+        patch("worker.services.translation.try_cloud_ai", return_value="hello"),
+        patch("worker.services.translation.clean_translated_text", side_effect=lambda s: s),
+        patch("worker.services.translation.is_valid_translation", return_value=True),
+    ):
+        assert translate_text("test") == "hello"
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert messages, "expected the strategy log, so caplog is definitely wired up"
+    assert not [m for m in messages if "Cache key" in m or "hit=" in m]
 
 
 @patch("worker.services.translation.try_cloud_ai")

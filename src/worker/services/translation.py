@@ -753,8 +753,9 @@ def translate_text(
     else:
         # 1. Cloud LLM Layer
         if api_key:
-            cache_key = f"tl:{provider}:{user_model}:{hash(text)}"
-            logger.info(f"{req_prefix}Cache key: {cache_key} (hit=False)")
+            # AUDIT-Q3: a third phantom cache key lived here — the entry names only handlers/qa.py.
+            # Same shape, no TL cache behind it, and this one fired once per text segment rather
+            # than once per image, so it was the noisiest of the three.
             logger.info(f"{req_prefix}Trying provider '{provider}' with model '{user_model}'...")
             translated = try_cloud_ai(provider, api_key, user_model, prompt, request_id=request_id)
             if translated:

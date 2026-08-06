@@ -37,6 +37,30 @@ def test_enforce_rate_limit(mock_time):
     del os.environ["RATE_LIMIT"]
 
 
+@patch("worker.utils.rate_limit.time")
+def test_enforce_rate_limit_does_not_log_as_translation(mock_time, capsys):
+    """AUDIT-Q3: the limiter is shared by translation, OCR and QA — it must not claim to be one.
+
+    Both prints in enforce_rate_limit were prefixed `[Translation]`, so an OCR or QA stall showed
+    up in the worker log under the wrong stage.
+    """
+    mock_time.time.return_value = 100
+    os.environ["RATE_LIMIT"] = "60/min"
+
+    import worker.utils.rate_limit as rlimit
+
+    rlimit.PROVIDER_LAST_REQUEST_TIME = {"ocr-provider": 99.5}
+    enforce_rate_limit(provider="ocr-provider")
+    mock_time.sleep.assert_called_with(0.5)
+
+    out = capsys.readouterr().out
+    assert "Sleeping for 0.50 seconds" in out
+    assert "[RateLimit]" in out
+    assert "[Translation]" not in out
+
+    del os.environ["RATE_LIMIT"]
+
+
 @patch("worker.utils.rate_limit.requests")
 @patch("worker.utils.rate_limit.redis_client")
 def test_update_model_costs(mock_redis, mock_req, tmp_path):
