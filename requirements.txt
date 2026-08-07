@@ -2,7 +2,7 @@
 # rebuild silently picked up whatever was current on PyPI that day, major versions included.
 # The versions here are the ones the running worker was already on when they were taken, so
 # adopting them is behaviourally a no-op.
-redis==8.0.1
+redis==8.1.0
 minio==7.2.20
 paddleocr==3.7.0
 paddlepaddle==3.3.1
