@@ -202,6 +202,51 @@ def test_gate_does_not_apply_to_a_convex_mask():
     assert _grouped(cfg, ctx) == [[0, 1]]
 
 
+def test_gate_never_splits_fragments_whose_boxes_overlap():
+    """The gate measures the space *between* two fragments. Overlapping boxes have none.
+
+    _nearest_points collapses to a single point when the boxes overlap on both axes, so the
+    clearance call reports how close that point sits to the outline rather than anything about
+    separation -- and inside a tight balloon every column is within a character of the edge. The
+    gate therefore split adjacent columns of one sentence (sample9 r13, sample27 r10), sending the
+    translator a fragment with no verb. Overlap means one block, and the gate must stay silent.
+    """
+    overlapping = [
+        {"x": 100, "y": 100, "width": 40, "height": 200},
+        {"x": 130, "y": 120, "width": 40, "height": 200},  # 10px of x overlap, 180px of y
+    ]
+    cfg = GroupingConfig(threshold_ratio=2.0, waist_gate=1.0)
+    ctx = GroupingContext(clearance=lambda p, q: 0.0, solidity=0.5)  # maximally hostile
+    assert group_fragments(overlapping, cfg, ctx) == [[0, 1]]
+
+    # Touching edges are the boundary case: still a zero gap, still nothing to measure.
+    touching = [
+        {"x": 100, "y": 100, "width": 40, "height": 200},
+        {"x": 140, "y": 100, "width": 40, "height": 200},
+    ]
+    assert group_fragments(touching, cfg, ctx) == [[0, 1]]
+
+    # But a real gap must still be vetoable, or the fix has disabled the gate outright.
+    assert _grouped(cfg, ctx) == [[0], [1]]
+
+
+def test_gate_still_applies_to_boxes_that_only_clip_corners():
+    """The exemption above is for one block, not for any intersection at all.
+
+    Fragments in two different balloons of one fused blob can still cross at the corners. On
+    sample9 such a pair shared 10% of its shorter side while the two columns of a single sentence
+    shared 100%, and letting the corner case through the exemption cost a merger -- the expensive
+    direction -- to save a split.
+    """
+    corner = [
+        {"x": 100, "y": 100, "width": 40, "height": 200},
+        {"x": 130, "y": 280, "width": 40, "height": 200},  # 10px x, 20px y: corners only
+    ]
+    cfg = GroupingConfig(threshold_ratio=2.0, waist_gate=1.0)
+    ctx = GroupingContext(clearance=lambda p, q: 0.0, solidity=0.5)
+    assert group_fragments(corner, cfg, ctx) == [[0], [1]]
+
+
 def test_gate_can_only_withhold_merges_never_create_them():
     """Over the random corpus, gated grouping is always a refinement of ungated grouping."""
     rng = random.Random(7)

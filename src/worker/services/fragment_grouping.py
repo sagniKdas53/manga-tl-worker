@@ -168,6 +168,16 @@ def _waist_veto(config: GroupingConfig, context: GroupingContext | None):
         return None
 
     def veto(r1: dict, r2: dict, vertical: bool) -> bool:
+        # Fragments whose boxes overlap on both axes have no white space between them, so there is
+        # no separation to measure and nothing this gate can legitimately say. _should_merge joins
+        # them on its first rule, which is not a proximity judgement -- it means "these are one
+        # block". Measuring anyway asks the distance field about a zero-length segment, and what
+        # comes back is how close that single point sits to the balloon outline; inside a tight
+        # balloon every column is within a character of the edge, so the veto fired on adjacent
+        # columns of one sentence -- splitting sample9 r13 and sample27 r10 mid-sentence, which
+        # sends the translator a fragment with no verb.
+        if _boxes_overlap(r1, r2):
+            return False
         char_size = max(r1["width"], r2["width"]) if vertical else max(r1["height"], r2["height"])
         if char_size <= 0:
             return False
@@ -176,6 +186,31 @@ def _waist_veto(config: GroupingConfig, context: GroupingContext | None):
         return context.clearance(p, q) < config.waist_gate * char_size
 
     return veto
+
+
+# How much of the shorter side two intersecting boxes must share, on at least one axis, before
+# they count as one text block rather than two that happen to clip corners. Two parallel columns
+# of one sentence run alongside each other and share nearly all of their length; two fragments in
+# different balloons of a fused blob overlap only where their corners cross.
+BLOCK_OVERLAP_SHARE = 0.5
+
+
+def _boxes_overlap(r1: dict, r2: dict) -> bool:
+    """Are these two fragments one block, with no white space between them to measure?
+
+    Requires an intersection on both axes -- touching edges count, the gap is still zero -- and
+    that the intersection covers at least half the shorter box along one of them. Measured on
+    sample9: the two columns of one sentence share 100% of their height, while a cross-balloon
+    pair in the same blob shares 10%, so the veto must apply to the second and not the first.
+    """
+    x_overlap = min(r1["x"] + r1["width"], r2["x"] + r2["width"]) - max(r1["x"], r2["x"])
+    y_overlap = min(r1["y"] + r1["height"], r2["y"] + r2["height"]) - max(r1["y"], r2["y"])
+    if x_overlap < 0 or y_overlap < 0:
+        return False
+
+    x_share = x_overlap / max(1, min(r1["width"], r2["width"]))
+    y_share = y_overlap / max(1, min(r1["height"], r2["height"]))
+    return max(x_share, y_share) >= BLOCK_OVERLAP_SHARE
 
 
 def _nearest_points(r1: dict, r2: dict) -> tuple[tuple[float, float], tuple[float, float]]:
