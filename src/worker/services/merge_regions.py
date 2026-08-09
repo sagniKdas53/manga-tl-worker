@@ -3,6 +3,12 @@ import logging
 import os
 import re
 
+from worker.services.fragment_grouping import (
+    DEFAULT_THRESHOLD_RATIO,
+    GroupingConfig,
+    group_fragments,
+)
+
 logger = logging.getLogger("translation")
 
 
@@ -75,13 +81,20 @@ def _merged_mask_polygon(regions, comp):
     return json.dumps(largest)
 
 
-def merge_ocr_regions(regions: list, reading_direction: str = "rtl", threshold_ratio: float | None = None) -> list:
+def merge_ocr_regions(
+    regions: list,
+    reading_direction: str = "rtl",
+    threshold_ratio: float | None = None,
+    grouping: GroupingConfig | None = None,
+) -> list:
     """Merge OCR line-level detections into logical speech balloon groups.
 
     Args:
         regions: List of OCR region dicts with x, y, width, height, text keys
         reading_direction: 'rtl' or 'ltr'
         threshold_ratio: Optional override for the merge proximity threshold multiplier
+        grouping: Optional full grouping configuration. When given it supersedes
+            reading_direction and threshold_ratio, which are then ignored.
 
     Returns:
         Merged region list with concatenated text and union bounding boxes.
@@ -89,81 +102,20 @@ def merge_ocr_regions(regions: list, reading_direction: str = "rtl", threshold_r
     if not regions:
         return []
 
-    # Get configuration threshold if not provided
-    if threshold_ratio is None:
-        try:
-            threshold_ratio = float(os.environ.get("OCR_MERGE_THRESHOLD", "0.50"))
-        except ValueError:
-            threshold_ratio = 0.50
+    if grouping is None:
+        # Get configuration threshold if not provided
+        if threshold_ratio is None:
+            try:
+                threshold_ratio = float(os.environ.get("OCR_MERGE_THRESHOLD", str(DEFAULT_THRESHOLD_RATIO)))
+            except ValueError:
+                threshold_ratio = DEFAULT_THRESHOLD_RATIO
+        grouping = GroupingConfig(threshold_ratio=threshold_ratio, reading_direction=reading_direction)
 
-    # Compute average height and width to establish relative proximity guidelines
-    avg_height = sum(r["height"] for r in regions) / len(regions)
-    avg_width = sum(r["width"] for r in regions) / len(regions)
-
-    # For vertical Japanese text (typically reading_direction == "rtl"),
-    # the character/font size is represented by the line's width, so the vertical gap
-    # threshold should be scaled relative to avg_width rather than avg_height.
-    # For horizontal text (LTR), the character size is represented by the line's height.
-    char_size_vertical = avg_width if reading_direction == "rtl" else avg_height
-
-    max_vertical_gap = char_size_vertical * threshold_ratio
-    max_horizontal_gap = avg_width * threshold_ratio
+    reading_direction = grouping.reading_direction
+    threshold_ratio = grouping.threshold_ratio
 
     n = len(regions)
-    adj = {i: [] for i in range(n)}
-
-    for i in range(n):
-        for j in range(i + 1, n):
-            r1 = regions[i]
-            r2 = regions[j]
-
-            # Calculate horizontal gap
-            r1_x2 = r1["x"] + r1["width"]
-            r2_x2 = r2["x"] + r2["width"]
-            x_overlap = max(0, min(r1_x2, r2_x2) - max(r1["x"], r2["x"]))
-            x_dist = 0 if x_overlap > 0 else max(0, r2["x"] - r1_x2, r1["x"] - r2_x2)
-
-            # Calculate vertical gap
-            r1_y2 = r1["y"] + r1["height"]
-            r2_y2 = r2["y"] + r2["height"]
-            y_overlap = max(0, min(r1_y2, r2_y2) - max(r1["y"], r2["y"]))
-            y_dist = 0 if y_overlap > 0 else max(0, r2["y"] - r1_y2, r1["y"] - r2_y2)
-
-            # Conditions to merge:
-            # 1. Overlap both horizontally and vertically
-            # 2. Horizontal overlap and vertical proximity
-            # 3. Vertical overlap and horizontal proximity
-            # 4. Close diagonally
-            should_merge = False
-            if (
-                (x_overlap > 0 and y_overlap > 0)
-                or (x_overlap > 0 and y_dist <= max_vertical_gap)
-                or (y_overlap > 0 and x_dist <= max_horizontal_gap)
-                or (x_dist <= max_horizontal_gap and y_dist <= max_vertical_gap)
-            ):
-                should_merge = True
-
-            if should_merge:
-                adj[i].append(j)
-                adj[j].append(i)
-
-    # Find connected components (clusters) using BFS
-    visited = [False] * n
-    components = []
-
-    for i in range(n):
-        if not visited[i]:
-            comp = []
-            queue = [i]
-            visited[i] = True
-            while queue:
-                curr = queue.pop(0)
-                comp.append(curr)
-                for neighbor in adj[curr]:
-                    if not visited[neighbor]:
-                        visited[neighbor] = True
-                        queue.append(neighbor)
-            components.append(comp)
+    components = group_fragments(regions, grouping)
 
     # Merge each component into a single region
     merged_regions = []
