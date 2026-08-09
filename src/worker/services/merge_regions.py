@@ -6,6 +6,7 @@ import re
 from worker.services.fragment_grouping import (
     DEFAULT_THRESHOLD_RATIO,
     GroupingConfig,
+    GroupingContext,
     group_fragments,
 )
 
@@ -86,6 +87,7 @@ def merge_ocr_regions(
     reading_direction: str = "rtl",
     threshold_ratio: float | None = None,
     grouping: GroupingConfig | None = None,
+    context: GroupingContext | None = None,
 ) -> list:
     """Merge OCR line-level detections into logical speech balloon groups.
 
@@ -95,6 +97,8 @@ def merge_ocr_regions(
         threshold_ratio: Optional override for the merge proximity threshold multiplier
         grouping: Optional full grouping configuration. When given it supersedes
             reading_direction and threshold_ratio, which are then ignored.
+        context: Optional per-call geometry (balloon clearance field and mask solidity). Inert
+            unless the configuration enables a gate that consults it.
 
     Returns:
         Merged region list with concatenated text and union bounding boxes.
@@ -115,7 +119,7 @@ def merge_ocr_regions(
     threshold_ratio = grouping.threshold_ratio
 
     n = len(regions)
-    components = group_fragments(regions, grouping)
+    components = group_fragments(regions, grouping, context)
 
     # Merge each component into a single region
     merged_regions = []

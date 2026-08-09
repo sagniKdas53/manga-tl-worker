@@ -16,7 +16,11 @@ import random
 
 import pytest
 
-from worker.services.fragment_grouping import GroupingConfig, group_fragments
+from worker.services.fragment_grouping import (
+    GroupingConfig,
+    GroupingContext,
+    group_fragments,
+)
 
 
 def _legacy_components(regions, reading_direction, threshold_ratio):
@@ -144,6 +148,87 @@ def test_config_defaults_are_the_shipped_values():
     cfg = GroupingConfig()
     assert cfg.threshold_ratio == 0.50
     assert cfg.reading_direction == "rtl"
+
+
+TWO_COLUMNS = [
+    {"x": 100, "y": 100, "width": 40, "height": 200},
+    {"x": 150, "y": 100, "width": 40, "height": 200},
+]
+
+
+def _grouped(config, context=None):
+    return group_fragments(TWO_COLUMNS, config, context)
+
+
+def test_two_adjacent_columns_merge_without_the_gate():
+    """Baseline for the gate tests: distance alone joins these."""
+    assert _grouped(GroupingConfig(threshold_ratio=2.0)) == [[0, 1]]
+
+
+def test_context_without_gate_changes_nothing():
+    """A context is inert unless waist_gate is set, so callers may always pass one."""
+    ctx = GroupingContext(clearance=lambda p, q: 0.0, solidity=0.5)
+    assert _grouped(GroupingConfig(threshold_ratio=2.0), ctx) == [[0, 1]]
+
+
+def test_gate_without_context_changes_nothing():
+    """And a gate is inert without geometry to evaluate it against."""
+    cfg = GroupingConfig(threshold_ratio=2.0, waist_gate=1.0)
+    assert _grouped(cfg) == [[0, 1]]
+    assert _grouped(cfg, GroupingContext()) == [[0, 1]]
+
+
+def test_gate_splits_when_the_path_is_pinched():
+    """Low clearance on a pinched mask withholds the merge distance would have allowed."""
+    cfg = GroupingConfig(threshold_ratio=2.0, waist_gate=1.0)
+    ctx = GroupingContext(clearance=lambda p, q: 5.0, solidity=0.7)  # 5px << 1.0 * 40px
+    assert _grouped(cfg, ctx) == [[0], [1]]
+
+
+def test_gate_allows_when_the_path_is_open():
+    cfg = GroupingConfig(threshold_ratio=2.0, waist_gate=1.0)
+    ctx = GroupingContext(clearance=lambda p, q: 80.0, solidity=0.7)  # 80px >> 1.0 * 40px
+    assert _grouped(cfg, ctx) == [[0, 1]]
+
+
+def test_gate_does_not_apply_to_a_convex_mask():
+    """The headline safety property: a mask with no waist cannot trigger a split.
+
+    sample27's borderless shout sits at solidity 0.958, where the clearance measurement is noise.
+    """
+    cfg = GroupingConfig(threshold_ratio=2.0, waist_gate=1.0)
+    ctx = GroupingContext(clearance=lambda p, q: 0.0, solidity=0.958)
+    assert _grouped(cfg, ctx) == [[0, 1]]
+
+
+def test_gate_can_only_withhold_merges_never_create_them():
+    """Over the random corpus, gated grouping is always a refinement of ungated grouping."""
+    rng = random.Random(7)
+    for _ in range(60):
+        frags = _random_page(rng, rng.randint(2, 10))
+        base = group_fragments(frags, GroupingConfig(threshold_ratio=1.0))
+        gated = group_fragments(
+            frags,
+            GroupingConfig(threshold_ratio=1.0, waist_gate=1.0),
+            GroupingContext(clearance=lambda p, q: rng.uniform(0, 60), solidity=0.6),
+        )
+        assert len(gated) >= len(base)
+        base_pairs = {(i, j) for comp in base for i in comp for j in comp if i < j}
+        gated_pairs = {(i, j) for comp in gated for i in comp for j in comp if i < j}
+        assert gated_pairs <= base_pairs, "the gate created a grouping distance did not allow"
+
+
+def test_nearest_points_on_overlapping_and_disjoint_axes():
+    from worker.services.fragment_grouping import _nearest_points
+
+    a = {"x": 0, "y": 0, "width": 10, "height": 10}
+    b = {"x": 30, "y": 0, "width": 10, "height": 10}
+    # Disjoint in x, fully overlapping in y: the segment runs along the middle of the overlap.
+    assert _nearest_points(a, b) == ((10.0, 5.0), (30.0, 5.0))
+    # Overlapping on both axes: a zero-length segment at the centre of the intersection.
+    c = {"x": 5, "y": 5, "width": 10, "height": 10}
+    p, q = _nearest_points(a, c)
+    assert p == q == (7.5, 7.5)
 
 
 def test_config_is_immutable():
