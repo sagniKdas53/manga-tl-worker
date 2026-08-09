@@ -20,6 +20,7 @@ from worker.services.fragment_grouping import (
     GroupingConfig,
     GroupingContext,
     group_fragments,
+    resolve_vertical,
 )
 
 
@@ -216,6 +217,52 @@ def test_gate_can_only_withhold_merges_never_create_them():
         base_pairs = {(i, j) for comp in base for i in comp for j in comp if i < j}
         gated_pairs = {(i, j) for comp in gated for i in comp for j in comp if i < j}
         assert gated_pairs <= base_pairs, "the gate created a grouping distance did not allow"
+
+
+def _cols(n, w=40, h=200):
+    """n vertical columns, i.e. tall narrow boxes."""
+    return [{"x": 100 + i * 60, "y": 100, "width": w, "height": h} for i in range(n)]
+
+
+def _lines(n, w=200, h=30):
+    """n horizontal lines, i.e. wide short boxes."""
+    return [{"x": 100, "y": 100 + i * 50, "width": w, "height": h} for i in range(n)]
+
+
+def test_orientation_defaults_to_the_binding_direction():
+    """Off by default: 'rtl' still means vertical even when every box is a horizontal line."""
+    assert resolve_vertical(_lines(5), GroupingConfig(reading_direction="rtl")) is True
+    assert resolve_vertical(_cols(5), GroupingConfig(reading_direction="ltr")) is False
+
+
+def test_vote_reads_orientation_off_the_fragments():
+    cfg = GroupingConfig(reading_direction="rtl", orientation="vote")
+    assert resolve_vertical(_lines(5), cfg) is False, "5 wide lines are horizontal despite rtl"
+    assert resolve_vertical(_cols(5), cfg) is True
+
+
+def test_vote_falls_back_when_the_page_is_genuinely_mixed():
+    """No side reaching 60% of the cast weight means the binding direction is the safer answer."""
+    mixed = _cols(2, w=40, h=200) + _lines(2, w=200, h=40)
+    assert resolve_vertical(mixed, GroupingConfig(reading_direction="rtl", orientation="vote")) is True
+    assert resolve_vertical(mixed, GroupingConfig(reading_direction="ltr", orientation="vote")) is False
+
+
+def test_square_fragments_abstain_rather_than_voting():
+    """Single CJK glyphs are near-square and carry no orientation evidence either way."""
+    squares = [{"x": i * 40, "y": 0, "width": 30, "height": 30} for i in range(6)]
+    cfg = GroupingConfig(reading_direction="rtl", orientation="vote")
+    assert resolve_vertical(squares, cfg) is True, "abstentions must not flip the fallback"
+    # One long horizontal line among squares still wins: votes are weighted by the longer side.
+    assert resolve_vertical(squares + _lines(1, w=400, h=30), cfg) is False
+
+
+def test_vote_does_not_disturb_a_genuinely_vertical_page():
+    """C3's ship gate: detection must not flip the common case."""
+    frags = _cols(4)
+    plain = group_fragments(frags, GroupingConfig(threshold_ratio=0.35))
+    voted = group_fragments(frags, GroupingConfig(threshold_ratio=0.35, orientation="vote"))
+    assert voted == plain
 
 
 def test_nearest_points_on_overlapping_and_disjoint_axes():

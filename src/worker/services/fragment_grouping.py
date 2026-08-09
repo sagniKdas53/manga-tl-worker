@@ -32,9 +32,11 @@ class GroupingConfig:
 
     Args:
         threshold_ratio: Proximity budget as a multiple of the estimated character size.
-        reading_direction: 'rtl' or 'ltr'. Note this is a *binding* setting being used as a
-            text-orientation flag -- see BUG-6 in docs/region_threshold_validation_2026-08-08.md.
-            Deriving orientation from fragment geometry instead is a future field here.
+        reading_direction: 'rtl' or 'ltr'. This is a *binding* setting (which way pages turn),
+            and by default it is also read as a text-orientation flag, which is BUG-6.
+        orientation: 'reading_direction' (the default, and the bug) or 'vote', which derives
+            orientation from the fragments' own aspect ratios and falls back to the binding
+            direction only when they carry no signal.
         waist_gate: Clearance veto, in characters. When set, two fragments inside a pinched
             balloon mask are kept apart if the path between them squeezes closer than this to the
             outline. `None` disables it, which is the shipped behaviour.
@@ -44,6 +46,7 @@ class GroupingConfig:
 
     threshold_ratio: float = DEFAULT_THRESHOLD_RATIO
     reading_direction: str = "rtl"
+    orientation: str = "reading_direction"
     waist_gate: float | None = None
     waist_max_solidity: float = DEFAULT_WAIST_MAX_SOLIDITY
 
@@ -87,15 +90,15 @@ def group_fragments(
     avg_height = sum(r["height"] for r in regions) / n
     avg_width = sum(r["width"] for r in regions) / n
 
-    # For vertical Japanese text (typically reading_direction == "rtl"), the character/font size is
-    # represented by the line's width, so the vertical gap threshold should be scaled relative to
-    # avg_width rather than avg_height. For horizontal text (LTR), it is the line's height.
-    char_size_vertical = avg_width if config.reading_direction == "rtl" else avg_height
+    # For vertical Japanese text the character/font size is the line's *width*, since a line is one
+    # column, so the vertical gap budget scales from avg_width. For horizontal text it is the
+    # line's height. Choosing the wrong axis inflates the budget by the length of a whole line --
+    # measured on sample23, 214px instead of 33px.
+    vertical = resolve_vertical(regions, config)
+    char_size_vertical = avg_width if vertical else avg_height
 
     max_vertical_gap = char_size_vertical * config.threshold_ratio
     max_horizontal_gap = avg_width * config.threshold_ratio
-
-    vertical = config.reading_direction == "rtl"
     adj = {i: [] for i in range(n)}
     for i in range(n):
         for j in range(i + 1, n):
@@ -108,6 +111,48 @@ def group_fragments(
             adj[j].append(i)
 
     return _connected_components(adj, n)
+
+
+# A box must be this much longer than it is tall (or vice versa) to vote on orientation. Below it
+# the box is near-square -- a single CJK glyph or a short interjection -- and carries no evidence.
+ORIENTATION_ASPECT = 1.2
+# And the winning side must hold this share of the cast weight, otherwise the page is too mixed to
+# call and the binding direction is the safer answer.
+ORIENTATION_MAJORITY = 0.60
+
+
+def resolve_vertical(regions: list, config: GroupingConfig) -> bool:
+    """Is this group's text set vertically?
+
+    `reading_direction` is a binding setting -- which way pages turn -- not a text-orientation one.
+    They coincide for typical manga, so every Japanese job arrives as 'rtl' and every
+    horizontally-set Japanese page (profile pages, narration blocks, author notes) gets vertical
+    geometry applied to horizontal lines. That is BUG-6.
+
+    The fragments already know the answer. Votes are weighted by the longer side, so one long
+    narration line outweighs several square SFX glyphs rather than being outvoted by them.
+    """
+    binding_vertical = config.reading_direction != "ltr"
+    if config.orientation != "vote":
+        return binding_vertical
+
+    vertical_weight = horizontal_weight = 0.0
+    for r in regions:
+        w, h = max(1, r["width"]), max(1, r["height"])
+        weight = float(max(w, h))
+        if h / w >= ORIENTATION_ASPECT:
+            vertical_weight += weight
+        elif w / h >= ORIENTATION_ASPECT:
+            horizontal_weight += weight
+
+    total = vertical_weight + horizontal_weight
+    if total <= 0:
+        return binding_vertical
+    if vertical_weight / total >= ORIENTATION_MAJORITY:
+        return True
+    if horizontal_weight / total >= ORIENTATION_MAJORITY:
+        return False
+    return binding_vertical
 
 
 def _waist_veto(config: GroupingConfig, context: GroupingContext | None):
