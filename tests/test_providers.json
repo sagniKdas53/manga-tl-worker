@@ -36,18 +36,12 @@
       "baseUrl": "https://integrate.api.nvidia.com/v1/chat/completions",
       "authHeader": "Authorization"
     },
-    "cloudflare": {
-      "displayName": "Cloudflare",
-      "type": "openai-compatible",
-      "baseUrl": "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions",
-      "authHeader": "Authorization",
-      "defaultQALLMModel": "test/cf-qa-llm-default"
-    },
     "neurometric": {
       "displayName": "Neurometric",
       "type": "openai-compatible",
       "baseUrl": "https://api.neurometric.ai/v1/chat/completions",
-      "authHeader": "Authorization"
+      "authHeader": "Authorization",
+      "defaultQALLMModel": "test/neuro-qa-llm-default"
     }
   }
 }

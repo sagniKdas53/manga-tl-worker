@@ -163,8 +163,8 @@ def _qa_default_model(prov: str, task: str) -> str | None:
     """The provider's own QA default, read from config/providers.json.
 
     AUDIT-W1: this used to be two tables in this file listing openrouter/gemini/nvidia, so
-    cloudflare and neurometric — both selectable in the UI and both in providers.json — had no
-    default at all, while `gemini` had one but is not a configured provider. providers.json is
+    neurometric — selectable in the UI and in providers.json — had no default at all, while
+    `gemini` had one but is not a configured provider. providers.json is
     already the single source of truth for every other default (`defaultTLModel`,
     `defaultOCRModel`); QA now reads `defaultQALLMModel` / `defaultQAVLMModel` from the same place.
     `task` is the providers.json key: "qaLLM" or "qaVLM".

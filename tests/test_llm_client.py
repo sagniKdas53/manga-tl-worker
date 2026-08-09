@@ -90,41 +90,6 @@ def test_llm_client_openrouter_caching_and_session(mock_post):
 
 
 @patch("worker.services.llm_client.requests.post")
-def test_llm_client_cloudflare_schema_and_session(mock_post):
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {
-        "choices": [{"message": {"content": '{"translatedText": "Cloudflare Hi"}'}}],
-        "usage": {"prompt_tokens": 80, "completion_tokens": 15},
-    }
-    mock_post.return_value = mock_resp
-
-    client = LLMClient(
-        provider="cloudflare",
-        api_key="cf_token_test",
-        model="@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-        session_id="cf-session-123",
-    )
-    res = client.complete(
-        messages=[{"role": "user", "content": "Hi"}],
-        response_schema={"type": "object", "properties": {"translatedText": {"type": "string"}}},
-    )
-
-    assert res is not None
-    assert res.content == '{"translatedText": "Cloudflare Hi"}'
-
-    posted_json = mock_post.call_args.kwargs["json"]
-    # For Cloudflare, json_schema is passed directly, not wrapped under name/schema
-    assert posted_json["response_format"] == {
-        "type": "json_schema",
-        "json_schema": {"type": "object", "properties": {"translatedText": {"type": "string"}}},
-    }
-    # Check x-session-affinity header
-    headers = mock_post.call_args.kwargs["headers"]
-    assert headers.get("x-session-affinity") == "cf-session-123"
-
-
-@patch("worker.services.llm_client.requests.post")
 def test_llm_client_null_token_details(mock_post):
     mock_resp = MagicMock()
     mock_resp.status_code = 200

@@ -193,12 +193,12 @@ def test_process_qa_reject_sfx(mock_cloud, mock_redis, mock_requests):
 class TestQaProviderDispatch:
     """AUDIT-W1: QA dispatched on a hardcoded openrouter/gemini/nvidia if/elif in four places.
 
-    cloudflare and neurometric are selectable in the UI and present in config/providers.json, but
-    fell off the end of every chain and returned None — which then fell through to the broken local
-    fallback and completed QA with zero findings and no error.
+    neurometric is selectable in the UI and present in config/providers.json, but fell off the end
+    of every chain and returned None — which then fell through to the broken local fallback and
+    completed QA with zero findings and no error.
     """
 
-    @pytest.mark.parametrize("provider", ["cloudflare", "neurometric", "openrouter", "nvidia"])
+    @pytest.mark.parametrize("provider", ["neurometric", "openrouter", "nvidia"])
     def test_llm_reaches_every_configured_provider(self, provider):
         with patch("worker.handlers.qa.try_cloud_ai", return_value='{"results": []}') as mock_call:
             result = qa._qa_cloud_llm(provider, "key", "some/model", "prompt", "lowest-cost")
@@ -207,7 +207,7 @@ class TestQaProviderDispatch:
         assert mock_call.call_args.args[0] == provider
         assert mock_call.call_args.args[2] == "some/model"
 
-    @pytest.mark.parametrize("provider", ["cloudflare", "neurometric", "openrouter", "nvidia"])
+    @pytest.mark.parametrize("provider", ["neurometric", "openrouter", "nvidia"])
     def test_vlm_reaches_every_configured_provider(self, provider):
         with patch("worker.handlers.qa.try_cloud_ai_vision", return_value='{"results": []}') as mock_call:
             result = qa._qa_cloud_vlm(provider, "key", "some/model", "prompt", "b64", "lowest-cost")
@@ -226,22 +226,22 @@ class TestQaProviderDispatch:
         assert mock_call.call_args.args[2] == "test/qa-vlm-default"
 
     def test_a_provider_the_old_tables_never_listed_now_has_a_default(self):
-        # cloudflare was absent from QA_DEFAULT_LLM_MODELS, so before AUDIT-W1 this resolved to
+        # neurometric was absent from QA_DEFAULT_LLM_MODELS, so before AUDIT-W1 this resolved to
         # None. providers.json has carried its defaultQALLMModel all along.
         with patch("worker.handlers.qa.try_cloud_ai", return_value="{}") as mock_call:
-            qa._qa_cloud_llm("cloudflare", "key", None, "prompt", None)
-        assert mock_call.call_args.args[2] == "test/cf-qa-llm-default"
+            qa._qa_cloud_llm("neurometric", "key", None, "prompt", None)
+        assert mock_call.call_args.args[2] == "test/neuro-qa-llm-default"
 
     def test_returns_none_without_an_api_key(self):
         with patch("worker.handlers.qa.try_cloud_ai") as mock_call:
-            assert qa._qa_cloud_llm("cloudflare", "", "m", "prompt", None) is None
+            assert qa._qa_cloud_llm("neurometric", "", "m", "prompt", None) is None
         mock_call.assert_not_called()
 
     def test_returns_none_when_the_task_has_no_default(self):
-        # cloudflare has a qaLLM default but no qaVLM one — the real neurometric entry has exactly
-        # this shape (defaultQAVLMModel: null). Per-task, not per-provider.
+        # neurometric has a qaLLM default but no qaVLM one (defaultQAVLMModel: null in the real
+        # config too). Per-task, not per-provider.
         with patch("worker.handlers.qa.try_cloud_ai_vision") as mock_call:
-            assert qa._qa_cloud_vlm("cloudflare", "key", None, "prompt", "b64", None) is None
+            assert qa._qa_cloud_vlm("neurometric", "key", None, "prompt", "b64", None) is None
         mock_call.assert_not_called()
 
     def test_returns_none_for_a_provider_absent_from_providers_json(self):

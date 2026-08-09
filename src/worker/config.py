@@ -241,7 +241,6 @@ class ModelConfig:
             "anthropic": ["ANTHROPIC_API_KEY", "API_KEY"],
             "openai": ["OPENAI_API_KEY", "API_KEY"],
             "neurometric": ["NEUROMETRIC_API_KEY", "API_KEY"],
-            "cloudflare": ["CLOUDFLARE_API_TOKEN", "API_KEY"],
         }
         candidates = env_var_map.get(prov, ["API_KEY"])
         for var in candidates:
