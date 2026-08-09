@@ -162,6 +162,37 @@ BUBBLE_CONTOUR_FALLBACK = os.environ.get("BUBBLE_CONTOUR_FALLBACK", "false").low
 BUBBLE_CONTOUR_MAX_GROWTH = float(os.environ.get("BUBBLE_CONTOUR_MAX_GROWTH", "5.0"))
 BUBBLE_CONTOUR_MAX_PAGE_FRACTION = float(os.environ.get("BUBBLE_CONTOUR_MAX_PAGE_FRACTION", "0.35"))
 
+# --- Fragment grouping -----------------------------------------------------------------------
+#
+# How OCR line fragments are grouped into regions. All four values were measured over seven
+# hand-annotated pages and validated over all forty corpus pages; see
+# docs/region_waist_probe_2026-08-09.md and corpus/runs/2026-08-09/region-grouping/.
+#
+# Proximity budget, as a multiple of the estimated character size: "join two fragments if the
+# white space between them is under this many characters wide". 0.35 replaces a hardcoded 2.0 on
+# the in-bubble path -- at 2.0 two touching balloons inside one YOLO blob are always joined, which
+# fuses two speakers into one translation unit and one flat fill. Over the annotated pages this
+# alone takes mergers 17 -> 5.
+OCR_MERGE_THRESHOLD = float(os.environ.get("OCR_MERGE_THRESHOLD", "0.35"))
+
+# Clearance veto. Two fragments inside one pinched balloon mask are kept apart when the path
+# between them squeezes within this many characters of the outline -- the geometric waist where
+# two balloons touch. Distance alone cannot separate those cases: within-balloon gaps (0.3-1
+# character) and cross-balloon gaps (1-2) overlap. Set to 0 to disable.
+OCR_WAIST_GATE = float(os.environ.get("OCR_WAIST_GATE", "1.0"))
+
+# ...but only inside masks below this solidity (area / convex hull area). A convex mask has no
+# waist to find and measuring one produces noise: below 0.90 the veto was exact on 8/8 annotated
+# bubbles, above 0.95 it was worse than distance.
+OCR_WAIST_MAX_SOLIDITY = float(os.environ.get("OCR_WAIST_MAX_SOLIDITY", "0.90"))
+
+# Where text orientation comes from. "vote" derives it from the fragments' own aspect ratios;
+# "reading_direction" reads it off the binding direction, which is BUG-6 -- binding direction is
+# which way pages turn, not which way text runs, so every horizontally-set Japanese page got
+# vertical geometry and its whole page collapsed into one or two regions (sample23: 2 regions
+# where there are 17).
+OCR_ORIENTATION = os.environ.get("OCR_ORIENTATION", "vote").strip().lower()
+
 
 def is_usable_model(model):
     """A model id counts as usable only if it is a real, non-sentinel value."""

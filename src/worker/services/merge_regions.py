@@ -107,7 +107,11 @@ def merge_ocr_regions(
         return []
 
     if grouping is None:
-        # Get configuration threshold if not provided
+        # Legacy entry: no configuration object, so fall back to the environment. Every call site
+        # in handlers/ocr.py now passes `grouping=` (see its grouping_config), so this path serves
+        # direct callers and tests only, and it deliberately keeps the pre-split default rather
+        # than tracking config.OCR_MERGE_THRESHOLD -- the frozen equivalence test in
+        # test_fragment_grouping.py asserts that no-argument behaviour is unchanged.
         if threshold_ratio is None:
             try:
                 threshold_ratio = float(os.environ.get("OCR_MERGE_THRESHOLD", str(DEFAULT_THRESHOLD_RATIO)))

@@ -17,12 +17,18 @@ from worker.config import (
     BUBBLE_CONTOUR_MAX_PAGE_FRACTION,
     CALLBACK_URL,
     OCR_CONFIG,
+    OCR_MERGE_THRESHOLD,
+    OCR_ORIENTATION,
+    OCR_WAIST_GATE,
+    OCR_WAIST_MAX_SOLIDITY,
     YOLO_MASK_EROSION,
     logger,
     redis_client,
 )
 from worker.model_manager import model_manager
 from worker.services.bubble_detector import detect_bubbles_yolo
+from worker.services.bubble_geometry import bubble_grouping_context
+from worker.services.fragment_grouping import GroupingConfig
 from worker.services.layout import bubble_compare
 from worker.services.merge_regions import merge_ocr_regions
 from worker.services.ocr import parse_paddle_ocr_results
@@ -34,6 +40,23 @@ from worker.services.translation import (
 from worker.utils.image import calculate_overlap_area, download_image, downscale_for_ocr
 from worker.utils.lock import acquire_lock
 from worker.utils.text import detect_language
+
+
+def grouping_config(reading_direction):
+    """One configuration for all three merge call sites in this handler.
+
+    They used to disagree by accident -- the in-bubble path hardcoded 2.0 while the other two read
+    OCR_MERGE_THRESHOLD -- so a deployment could tune one and silently leave the others alone.
+    The clearance veto is inert wherever no mask is passed, so the same object is correct on the
+    paths that have no balloon.
+    """
+    return GroupingConfig(
+        threshold_ratio=OCR_MERGE_THRESHOLD,
+        reading_direction=reading_direction,
+        orientation=OCR_ORIENTATION,
+        waist_gate=OCR_WAIST_GATE if OCR_WAIST_GATE > 0 else None,
+        waist_max_solidity=OCR_WAIST_MAX_SOLIDITY,
+    )
 
 
 def sort_fragments_vertical(fragments, reading_direction="rtl"):
@@ -601,8 +624,16 @@ def process_ocr(job_data):
                         )
                     continue
 
-                # Run proximity merging inside the bubble to separate multiple semantic bubbles
-                merged_bubble_regions = merge_ocr_regions(assigned_frags, reading_direction, threshold_ratio=2.0)
+                # Run proximity merging inside the bubble to separate multiple semantic bubbles.
+                # This is where BUG-2 lives: one YOLO blob routinely holds two touching balloons,
+                # and joining them fuses two speakers into one translation unit and one flat fill,
+                # which nothing downstream can undo. The mask is in scope here, so the grouping
+                # gets the balloon's geometry as well as the text distance.
+                merged_bubble_regions = merge_ocr_regions(
+                    assigned_frags,
+                    grouping=grouping_config(reading_direction),
+                    context=bubble_grouping_context(bubble_mask, bubble["mask_polygon"]),
+                )
 
                 for r_sub in merged_bubble_regions:
                     if len(merged_bubble_regions) == 1:
@@ -660,7 +691,10 @@ def process_ocr(job_data):
             # 5. Add unmatched fragments as merged standalone regions (direct text / SFX)
             unmatched_frags = [f for f in raw_fragments if f.get("bubble_idx", -1) == -1]
             if unmatched_frags:
-                merged_unmatched = merge_ocr_regions(unmatched_frags, reading_direction)
+                # No bubble, so no mask and no clearance veto -- this path stays on distance alone,
+                # and gets the orientation vote, which is the only lever that reaches a page where
+                # YOLO found nothing at all.
+                merged_unmatched = merge_ocr_regions(unmatched_frags, grouping=grouping_config(reading_direction))
 
                 for idx, r_sub in enumerate(merged_unmatched):
                     rx, ry, rw, rh = (
@@ -1149,7 +1183,7 @@ def process_ocr(job_data):
                     }
                 )
 
-            regions = merge_ocr_regions(regions, reading_direction)
+            regions = merge_ocr_regions(regions, grouping=grouping_config(reading_direction))
 
         panel_regions_map = {}
         unmapped_regions = []
