@@ -778,16 +778,29 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
                     draw.rectangle([ex, ey, ex + ew, ey + eh], fill=bg_color_hex)
 
             # Draw Text
+            #
+            # This inset box is what fit_text_in_box_py actually wraps and centres lines against
+            # (its polygon path computes each line's horizontal span from box_y/max_height, not
+            # from ex/ey/ew/eh) -- the draw step below must centre and clamp against the exact
+            # same box, or a line the fit computed for the bubble's wide middle can end up drawn a
+            # few pixels off, at a height where an oval mask has already narrowed. That was
+            # invisible at the small font sizes the old width//3 cap produced; larger text reaches
+            # further toward the taper, where the same few-pixel drift becomes visible overflow.
+            text_box_x = ex + 4
+            text_box_y = ey + 4
+            text_box_w = int((ew - 8) * 0.95)  # 5% safety margin
+            text_box_h = int((eh - 8) * 0.95)  # 5% safety margin
+
             font_name = el.get("font") or "Comic Neue"
             fit = fit_text_in_box_py(
                 text,
-                int((ew - 8) * 0.95),  # 5% safety margin
-                int((eh - 8) * 0.95),  # 5% safety margin
+                text_box_w,
+                text_box_h,
                 font_name=font_name,
                 default_font_size=int(font_size),
                 shape=("elliptical" if box_shape == "elliptical" else "rectangular"),
-                box_x=ex + 4,  # type: ignore
-                box_y=ey + 4,  # type: ignore
+                box_x=text_box_x,  # type: ignore
+                box_y=text_box_y,  # type: ignore
                 mask_polygon=mask_polygon,
                 bold=bold,
                 italic=italic,
@@ -798,13 +811,13 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
             if font:
                 line_height = f_size * 1.2
                 total_height = len(fit["lines"]) * line_height
-                start_y = ey + (eh - total_height) / 2
+                start_y = text_box_y + (text_box_h - total_height) / 2
 
                 for i, line in enumerate(fit["lines"]):
                     line_center_x = (
                         fit["lineCenters"][i]
                         if (fit.get("lineCenters") and i < len(fit["lineCenters"]))
-                        else (ex + ew / 2)
+                        else (text_box_x + text_box_w / 2)
                     )
 
                     try:
@@ -824,8 +837,8 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
                     # or end right of it -- the centre comes from the mask span, the width from the
                     # glyphs. Keep whatever fits inside the box inside it, so an off-centre line
                     # cannot walk into the next panel or off the page.
-                    if line_width <= ew:
-                        line_x = min(max(line_x, ex), ex + ew - line_width)
+                    if line_width <= text_box_w:
+                        line_x = min(max(line_x, text_box_x), text_box_x + text_box_w - line_width)
                     line_y = start_y + i * line_height
                     draw.text((line_x, line_y), line, fill=text_color_hex, font=font)
 
