@@ -83,6 +83,29 @@ def test_shrinks_to_fit_the_width_instead_of_breaking_words():
     assert widest_line(res, bold=True) <= 95
 
 
+def test_grows_past_the_old_width_over_three_cap_in_a_narrow_tall_box():
+    """D7 (docs/render_quality_gap_2026-08-05.md): `max_width // 3` capped the search before it
+    ever ran, on the assumption that a line needs roughly 3 characters' worth of width. That
+    punished tall narrow boxes -- the shape of a vertical Japanese speech bubble -- far more than
+    wide ones. sample1's `safe_text_w=145, safe_text_h=259` bubble capped at 48px under the old
+    rule (`min(259//2, 145//3, 72)`); short text in the same box should now clear that.
+    """
+    res = fit_text_in_box_py(
+        text="Big bro...",
+        max_width=145,
+        max_height=259,
+        font_name="Comic Neue",
+        default_font_size=16,
+        shape="rectangular",
+        box_x=0,
+        box_y=0,
+    )
+
+    assert res["fontSize"] > 48
+    assert not res["overflow"]
+    assert widest_line(res) <= 145
+
+
 def test_prefers_a_smaller_size_over_a_line_that_overhangs_the_box():
     """The polygon and ellipse paths fall back to a wrap that ignores their own line spans.
 

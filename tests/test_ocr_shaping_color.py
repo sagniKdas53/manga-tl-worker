@@ -18,7 +18,27 @@ def test_detect_background_color():
     # Run background color detection
     color = detect_background_color(img, 20, 20, 60, 60)
     # The borders of the 60x60 region at (20,20) should be untouched by the text and have value #e0e0e0
+    assert color is not None
     assert color.lower() == "#e0e0e0"
+
+
+def test_detect_background_color_refuses_textured_border():
+    # Random noise stands in for real art/photo detail: no flat colour to sample, so the caller
+    # should get None (skip the fill) rather than a misleading median (D1/D3). A checkerboard
+    # would not exercise this properly -- an exact 50/50 split sits right at the median's
+    # breakdown point, where a slight sampling imbalance collapses MAD back to 0.
+    rng = np.random.default_rng(0)
+    img = rng.integers(0, 256, size=(100, 100, 3), dtype=np.uint8)
+
+    assert detect_background_color(img, 20, 20, 60, 60) is None
+
+
+def test_detect_background_color_poly_refuses_textured_interior():
+    rng = np.random.default_rng(0)
+    img = rng.integers(0, 256, size=(100, 100, 3), dtype=np.uint8)
+
+    poly = [[10, 10], [90, 10], [90, 90], [10, 90]]
+    assert detect_background_color_poly(img, poly) is None
 
 
 def test_detect_bubble_contour():
@@ -50,6 +70,7 @@ def test_detect_background_color_poly():
     # Polygon mask for the whole region
     poly = [[10, 10], [90, 10], [90, 90], [10, 90]]
     color = detect_background_color_poly(img, poly)
+    assert color is not None
     assert color.lower() == "#e0e0e0"
 
 

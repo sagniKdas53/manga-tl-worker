@@ -29,8 +29,10 @@ def test_detect_background_color():
     img[:] = (255, 0, 0)  # BGR (Blue)
     assert detect_background_color(img, 10, 10, 20, 20) == "#0000ff"
 
-    assert detect_background_color(None, 0, 0, 10, 10) == "#ffffff"
-    assert detect_background_color(img, 200, 200, 10, 10) == "#ffffff"  # out of bounds
+    # None/out-of-bounds means "nothing to sample" -- skip the fill rather than guess white,
+    # which is just as wrong a guess as the median on real artwork (D1/D3).
+    assert detect_background_color(None, 0, 0, 10, 10) is None
+    assert detect_background_color(img, 200, 200, 10, 10) is None  # out of bounds
 
 
 def test_detect_background_color_poly():
@@ -39,9 +41,9 @@ def test_detect_background_color_poly():
     poly = [[10, 10], [50, 10], [50, 50], [10, 50]]
     assert detect_background_color_poly(img, poly) == "#00ff00"
 
-    assert detect_background_color_poly(None, poly) == "#ffffff"
-    assert detect_background_color_poly(img, "invalid") == "#ffffff"
-    assert detect_background_color_poly(img, "[[1,1]]") == "#ffffff"  # <3 pts
+    assert detect_background_color_poly(None, poly) is None
+    assert detect_background_color_poly(img, "invalid") is None
+    assert detect_background_color_poly(img, "[[1,1]]") is None  # <3 pts
 
 
 def test_get_split_polygon():

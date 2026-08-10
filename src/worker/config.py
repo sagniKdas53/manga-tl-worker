@@ -162,6 +162,17 @@ BUBBLE_CONTOUR_FALLBACK = os.environ.get("BUBBLE_CONTOUR_FALLBACK", "false").low
 BUBBLE_CONTOUR_MAX_GROWTH = float(os.environ.get("BUBBLE_CONTOUR_MAX_GROWTH", "5.0"))
 BUBBLE_CONTOUR_MAX_PAGE_FRACTION = float(os.environ.get("BUBBLE_CONTOUR_MAX_PAGE_FRACTION", "0.35"))
 
+# D1/D3 (docs/render_quality_gap_2026-08-05.md): a flat median-colour fill only disguises a region
+# that is actually close to flat. Above this per-channel median absolute deviation the sampled
+# area has real detail (line art, screentone, a picture frame) and painting one colour over it is
+# a paint bucket, not erasure -- worst on free-floating text, which has no balloon interior to be
+# flat in the first place. MAD rather than stddev because a handful of anti-aliased text-edge
+# pixels in the sample would otherwise spike a plain stddev on an otherwise-flat region; taken
+# per-channel and maxed rather than over the flattened array, because a saturated solid colour
+# (e.g. pure blue) has large B-vs-R separation despite being spatially perfectly flat. A starting
+# guess, not yet measured against an annotated set the way WAIST_MAX_SOLIDITY was.
+BACKGROUND_FILL_MAX_SPREAD = float(os.environ.get("BACKGROUND_FILL_MAX_SPREAD", "20.0"))
+
 # --- Fragment grouping -----------------------------------------------------------------------
 #
 # How OCR line fragments are grouped into regions. All four values were measured over seven

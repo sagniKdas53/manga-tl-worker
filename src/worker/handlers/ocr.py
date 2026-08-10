@@ -12,6 +12,7 @@ import requests
 
 from worker.config import (
     BACKEND_HEADERS,
+    BACKGROUND_FILL_MAX_SPREAD,
     BUBBLE_CONTOUR_FALLBACK,
     BUBBLE_CONTOUR_MAX_GROWTH,
     BUBBLE_CONTOUR_MAX_PAGE_FRACTION,
@@ -102,10 +103,30 @@ def sort_fragments_vertical(fragments, reading_direction="rtl"):
     return sorted_fragments
 
 
+def _pixel_spread(pixels: np.ndarray) -> float:
+    """Per-channel median absolute deviation, maxed across channels.
+
+    Robust in the two ways a plain stddev over the flattened array is not: a handful of
+    anti-aliased text-edge pixels in an otherwise-flat sample barely moves a median-based
+    measure, and computing per-channel (then taking the max) rather than over B/G/R mixed
+    together means a saturated solid colour reads as flat instead of "spread" by its own
+    channel separation.
+    """
+    medians = np.median(pixels, axis=0)
+    return float(np.max(np.median(np.abs(pixels - medians), axis=0)))
+
+
 def detect_background_color(img, x, y, w, h):
-    """Auto-detect the background color of a region using border pixels of the crop."""
+    """Auto-detect the background color of a region using border pixels of the crop.
+
+    Returns None when the sampled border is not close to a flat colour (D1/D3,
+    docs/render_quality_gap_2026-08-05.md). Painting a median colour over line art or a busy
+    photo replaces detail with a solid slab; a caller that gets None should skip the backdrop
+    fill entirely rather than fall back to white, which is just as wrong a guess as the median
+    on real artwork.
+    """
     if img is None:
-        return "#ffffff"
+        return None
     img_h, img_w = img.shape[:2]
     x1 = max(0, int(x))
     y1 = max(0, int(y))
@@ -113,7 +134,7 @@ def detect_background_color(img, x, y, w, h):
     y2 = min(img_h, int(y + h))
 
     if x2 <= x1 or y2 <= y1:
-        return "#ffffff"
+        return None
 
     crop = img[y1:y2, x1:x2]
 
@@ -130,11 +151,11 @@ def detect_background_color(img, x, y, w, h):
     border_pixels.extend(crop[margin:-margin, 0:margin].reshape(-1, 3))
     border_pixels.extend(crop[margin:-margin, -margin:].reshape(-1, 3))
 
-    if len(border_pixels) == 0:
-        median_bgr = np.median(crop.reshape(-1, 3), axis=0)
-    else:
-        border_pixels = np.array(border_pixels)
-        median_bgr = np.median(border_pixels, axis=0)
+    sample = np.array(border_pixels) if len(border_pixels) > 0 else crop.reshape(-1, 3)
+    if _pixel_spread(sample) > BACKGROUND_FILL_MAX_SPREAD:
+        return None
+
+    median_bgr = np.median(sample, axis=0)
 
     # Convert BGR to RGB and format as hex
     r, g, b = int(median_bgr[2]), int(median_bgr[1]), int(median_bgr[0])
@@ -143,14 +164,18 @@ def detect_background_color(img, x, y, w, h):
 
 def detect_background_color_poly(img, mask_polygon):
     """Detect the background color of a region using its polygon mask.
-    If it fails, defaults to white (#ffffff).
+
+    Returns None -- meaning "do not fill" -- when there is no polygon, detection fails, or the
+    sampled interior is not close to flat. See detect_background_color for why None and not a
+    white fallback: on real artwork white is as wrong a guess as the median (D1/D3,
+    docs/render_quality_gap_2026-08-05.md).
     """
     if img is None or not mask_polygon:
-        return "#ffffff"
+        return None
     try:
         pts = json.loads(mask_polygon) if isinstance(mask_polygon, str) else mask_polygon
         if not isinstance(pts, list) or len(pts) < 3:
-            return "#ffffff"
+            return None
 
         h, w = img.shape[:2]
         # Create mask
@@ -166,14 +191,17 @@ def detect_background_color_poly(img, mask_polygon):
 
         pixels = img[mask == 255]
         if len(pixels) == 0:
-            return "#ffffff"
+            return None
+
+        if _pixel_spread(pixels) > BACKGROUND_FILL_MAX_SPREAD:
+            return None
 
         median_bgr = np.median(pixels, axis=0)
         r, g, b = int(median_bgr[2]), int(median_bgr[1]), int(median_bgr[0])
         return f"#{r:02x}{g:02x}{b:02x}"
     except Exception as e:
         print(f"[OCR] Error detecting color from poly: {e}", flush=True)
-        return "#ffffff"
+        return None
 
 
 def get_split_polygon(mask, bbox, img_w, img_h, margin=20):

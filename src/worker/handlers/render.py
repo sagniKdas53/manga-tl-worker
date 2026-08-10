@@ -573,7 +573,14 @@ def fit_text_in_box_py(
             "line_centers": [box_x + max_width / 2] * len(fallback_lines),
         }
 
-    max_start_size = min(max_height // 2, max_width // 3, 72)
+    # D7 (docs/render_quality_gap_2026-08-05.md): `max_width // 3` assumed roughly 3 characters
+    # per line and used that to cap the search before it ever ran. `fits_clean` below already
+    # rejects any size that overflows the box or breaks a word, so this pre-cap adds no safety --
+    # it only ever forecloses sizes the search would otherwise have accepted. It hit hardest on
+    # tall narrow boxes (vertical Japanese speech bubbles): sample1's `safe_text_w=145` capped the
+    # search at 48px before it could even try the ~60-70px mangatranslator.ai used for the same
+    # balloon.
+    max_start_size = min(max_height // 2, 72)
     start_size = max(max_start_size, default_font_size)
 
     min_font_size = 6
