@@ -4,9 +4,12 @@ import pytest
 
 from worker.handlers.render import (
     BAND_SAMPLE_FRACTIONS,
+    break_word_to_width,
     fit_text_in_box_py,
+    hyphen_positions,
     load_font,
     mask_span_for_band,
+    reassemble,
 )
 
 
@@ -66,13 +69,19 @@ def test_fit_text_polygon():
         assert abs(c - 50.0) < 10.0
 
 
-def test_shrinks_to_fit_the_width_instead_of_breaking_words():
+def test_sets_a_long_word_across_two_lines_rather_than_mangling_or_shrinking_it():
     """The size search used to test height only.
 
-    A word wider than the line it lands on is split per character, and that split is what made
+    A word wider than the line it lands on was split per character, and that split is what made
     every size "fit": the search kept growing the font until the height ran out and returned the
     largest size that mangles the text. Page 22 of Openrouter ch. 11 rendered "collection...??"
     as "collect" / "ion...??" this way, in a box tall enough for far more.
+
+    **Contract changed 2026-08-13 (D7 hyphenation).** The answer to an over-wide word used to be
+    to shrink the type until it fit whole, which in this 95px box means 12px. It is now to break
+    it at a legal point and carry a hyphen, which fits the same box at 21px. So the rule is no
+    longer "never split a word" -- it is "never split a word *illegally*": whatever comes out must
+    reassemble into exactly what went in.
     """
     res = fit_text_in_box_py(
         text="...How did I become a target for collection...??",
@@ -86,8 +95,10 @@ def test_shrinks_to_fit_the_width_instead_of_breaking_words():
         bold=True,
     )
 
-    assert " ".join(res["lines"]).split() == ["...How", "did", "I", "become", "a", "target", "for", "collection...??"]
+    assert reassemble(res["lines"]) == ["...How", "did", "I", "become", "a", "target", "for", "collection...??"]
     assert widest_line(res, bold=True) <= 95
+    assert res["fontSize"] > 12, "must use the hyphen to grow, not shrink to fit the word whole"
+    assert any(line.endswith("-") for line in res["lines"])
 
 
 def test_grows_past_the_old_width_over_three_cap_in_a_narrow_tall_box():
@@ -316,3 +327,67 @@ def test_breaks_a_word_rather_than_setting_lines_wider_than_the_box():
 
     assert widest_line(res, bold=True) <= 44
     assert res["fontSize"] < 43
+
+
+def test_hyphen_positions_ignores_surrounding_punctuation():
+    """Positions come from the word's letters, not from whatever punctuation is stuck to it.
+
+    Measured against the raw token, pyphen counts a leading quote toward its two-character
+    minimum and offers `"O-taku-kun` -- a break after a single letter of the actual word.
+    """
+    assert hyphen_positions("Opportunities") == [2, 5, 7, 9]
+    assert all(p >= 3 for p in hyphen_positions('"Otaku-kun'))
+    assert hyphen_positions("don't") == []
+    assert hyphen_positions("a") == []
+
+
+def test_break_word_prefers_a_legal_point_and_carries_the_hyphen():
+    font = load_font(20)
+    assert font is not None
+
+    head, tail = break_word_to_width("Opportunities", font.getlength, font.getlength("Opportun"))
+
+    assert head.endswith("-")
+    assert head[:-1] + tail == "Opportunities"
+    assert font.getlength(head) <= font.getlength("Opportun")
+
+
+def test_break_word_still_splits_when_no_legal_point_fits():
+    """A box narrower than the shortest legal head has no good answer, and the old
+    character-splitting behaviour is the least bad one -- better than a line outside the region."""
+    font = load_font(20)
+    assert font is not None
+
+    head, tail = break_word_to_width("Opportunities", font.getlength, font.getlength("Op"))
+
+    assert not head.endswith("-")
+    assert head + tail == "Opportunities"
+
+
+def test_reassemble_puts_a_hyphenated_word_back_but_not_a_mangled_one():
+    assert reassemble(["Op-", "portunities"]) == ["Opportunities"]
+    assert reassemble(["Otaku-", "kun"]) == ["Otakukun"]
+    assert reassemble(["collect", "ion"]) == ["collect", "ion"]
+    assert reassemble(["two", "words"]) == ["two", "words"]
+
+
+def test_hyphenation_fills_the_balloon_a_long_word_used_to_starve():
+    """D7's underfill: 190 of 351 corpus elements were held at median 0.38 fill by one word that
+    would not fit the width. sample1's third balloon is the shape of it."""
+    res = fit_text_in_box_py(
+        text="Opportunities like this don't come often... You're excited, right?",
+        max_width=125,
+        max_height=207,
+        font_name="Comic Neue",
+        default_font_size=12,
+        shape="rectangular",
+        box_x=0,
+        box_y=0,
+    )
+
+    fill = len(res["lines"]) * res["fontSize"] * 1.2 / 207
+    assert fill > 0.7, f"balloon still two-thirds empty (fill={fill:.2f})"
+    assert reassemble(res["lines"]) == [
+        w.replace("-", "")
+        for w in ["Opportunities", "like", "this", "don't", "come", "often...", "You're", "excited,", "right?"]
+    ]

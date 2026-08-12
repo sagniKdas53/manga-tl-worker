@@ -238,6 +238,88 @@ def draw_wrapped_text(draw, text, font, text_color, x, y, max_width, max_height,
 BAND_SAMPLE_FRACTIONS = (0.15, 0.35, 0.5, 0.65, 0.85)
 
 
+# Hyphenation dictionaries are a few hundred KB each and stateless once built.
+_HYPHENATORS: dict[str, object] = {}
+# Typographic minimums: never leave fewer than 2 characters before the break or 3 after it.
+HYPHEN_MIN_LEFT = 2
+HYPHEN_MIN_RIGHT = 3
+
+
+def hyphen_positions(word, lang="en_US"):
+    """Indices in `word` where a hyphen may legally be inserted, ascending.
+
+    Positions are computed on the word's alphabetic core, so surrounding punctuation cannot buy a
+    break that the letters do not justify -- `"Otaku-kun` would otherwise be offered a break after
+    `"O`, the quote counting toward the two-character minimum.
+    """
+    if not word:
+        return []
+    start = 0
+    end = len(word)
+    while start < end and not word[start].isalpha():
+        start += 1
+    while end > start and not word[end - 1].isalpha():
+        end -= 1
+    core = word[start:end]
+    if len(core) < HYPHEN_MIN_LEFT + HYPHEN_MIN_RIGHT:
+        return []
+
+    if lang not in _HYPHENATORS:
+        try:
+            import pyphen
+
+            _HYPHENATORS[lang] = pyphen.Pyphen(lang=lang, left=HYPHEN_MIN_LEFT, right=HYPHEN_MIN_RIGHT)
+        except Exception as e:
+            # No dictionary for this language, or pyphen missing. Fall back to not hyphenating,
+            # which is what the renderer did before this existed.
+            logger.warning("Hyphenation unavailable for %s (%s); setting without it", lang, e)
+            _HYPHENATORS[lang] = None
+    hyphenator = _HYPHENATORS[lang]
+    if hyphenator is None:
+        return []
+
+    try:
+        return [start + p for p in hyphenator.positions(core)]  # type: ignore[attr-defined]
+    except Exception:
+        return []
+
+
+def break_word_to_width(word, measure, width, lang="en_US"):
+    """Split `word` into a head that fits `width` and the rest.
+
+    Prefers the largest legal hyphenation point, so the head comes back with its hyphen attached.
+    Falls back to breaking between characters -- what the renderer did for every over-long word
+    before -- only when no legal point fits, which is the narrow-box case where the alternative is
+    text outside the region.
+    """
+    for position in sorted(hyphen_positions(word, lang), reverse=True):
+        head = word[:position] + "-"
+        if measure(head) <= width:
+            return head, word[position:]
+
+    # No legal break fits. Take as many characters as will.
+    cut = 1
+    while cut < len(word) and measure(word[: cut + 1]) <= width:
+        cut += 1
+    return word[:cut], word[cut:]
+
+
+def reassemble(lines):
+    """The words a set of wrapped lines carries, with hyphenated breaks put back together.
+
+    A line ending in a hyphen continues into the next without a space. Hyphens are then dropped
+    from the comparison entirely, because an inserted hyphen and a word's own hyphen are
+    indistinguishable once drawn -- and breaking at an existing hyphen is legal anyway. A break
+    that is *not* at a hyphen still shows up as two words and is still caught.
+    """
+    joined = ""
+    for i, line in enumerate(lines):
+        joined += line
+        if not line.endswith("-") and i < len(lines) - 1:
+            joined += " "
+    return [w.replace("-", "") for w in joined.split()]
+
+
 def mask_span_for_band(polygon, box_x, box_width, y_top, y_bottom):
     """The horizontal span a line occupying `y_top..y_bottom` can be set in.
 
@@ -290,6 +372,7 @@ def fit_text_in_box_py(
     mask_polygon=None,
     bold=False,
     italic=False,
+    lang="en_US",
 ):
     clean_text = (text or "").replace("\r\n", "\n")
     paragraphs = clean_text.split("\n")
@@ -405,21 +488,22 @@ def fit_text_in_box_py(
                                 if line_index >= N:
                                     return None
 
-                            current_word_part = ""
-                            for char in word:
-                                test_part = current_word_part + char
-                                next_span = get_line_span(line_index)
-                                next_allowed_w = (next_span["right"] - next_span["left"]) * 0.95
-                                if get_text_width(test_part) > next_allowed_w and current_word_part:
-                                    tentative_lines.append(current_word_part)
-                                    tentative_centers.append((next_span["left"] + next_span["right"]) / 2)
-                                    current_word_part = char
-                                    line_index += 1
-                                    if line_index >= N:
-                                        return None
-                                else:
-                                    current_word_part = test_part
-                            current_line = current_word_part
+                            # The width available is re-read for every piece: consecutive lines of a
+                            # curved balloon can differ by a lot, and a piece measured against the
+                            # line above it is how text ends up outside the outline.
+                            remaining = word
+                            while True:
+                                piece_span = get_line_span(line_index)
+                                piece_allowed = (piece_span["right"] - piece_span["left"]) * 0.95
+                                if get_text_width(remaining) <= piece_allowed or len(remaining) <= 1:
+                                    break
+                                head, remaining = break_word_to_width(remaining, get_text_width, piece_allowed, lang)
+                                tentative_lines.append(head)
+                                tentative_centers.append((piece_span["left"] + piece_span["right"]) / 2)
+                                line_index += 1
+                                if line_index >= N:
+                                    return None
+                            current_line = remaining
                         else:
                             test_line = (current_line + " " + word) if current_line else word
                             if get_text_width(test_line) > allowed_w and current_line:
@@ -489,15 +573,11 @@ def fit_text_in_box_py(
                     if word_width > max_width:
                         if current_line:
                             result_lines.append(current_line)
-                        current_word_part = ""
-                        for char in word:
-                            test_part = current_word_part + char
-                            if get_text_width(test_part) > max_width and current_word_part:
-                                result_lines.append(current_word_part)
-                                current_word_part = char
-                            else:
-                                current_word_part = test_part
-                        current_line = current_word_part
+                        remaining = word
+                        while get_text_width(remaining) > max_width and len(remaining) > 1:
+                            head, remaining = break_word_to_width(remaining, get_text_width, max_width, lang)
+                            result_lines.append(head)
+                        current_line = remaining
                     else:
                         test_line = (current_line + " " + word) if current_line else word
                         if get_text_width(test_line) > max_width and current_line:
@@ -549,19 +629,19 @@ def fit_text_in_box_py(
                             line_index += 1
                             if line_index >= N:
                                 return None
-                        current_word_part = ""
-                        for char in word:
-                            test_part = current_word_part + char
-                            current_allowed_w = get_line_allowed_width(line_index)
-                            if get_text_width(test_part) > current_allowed_w and current_word_part:
-                                tentative_lines.append(current_word_part)
-                                current_word_part = char
-                                line_index += 1
-                                if line_index >= N:
-                                    return None
-                            else:
-                                current_word_part = test_part
-                        current_line = current_word_part
+                        remaining = word
+                        while True:
+                            piece_allowed = get_line_allowed_width(line_index)
+                            if piece_allowed <= 0:
+                                return None
+                            if get_text_width(remaining) <= piece_allowed or len(remaining) <= 1:
+                                break
+                            head, remaining = break_word_to_width(remaining, get_text_width, piece_allowed, lang)
+                            tentative_lines.append(head)
+                            line_index += 1
+                            if line_index >= N:
+                                return None
+                        current_line = remaining
                     else:
                         test_line = (current_line + " " + word) if current_line else word
                         if get_text_width(test_line) > allowed_w and current_line:
@@ -619,21 +699,32 @@ def fit_text_in_box_py(
     # tall narrow boxes (vertical Japanese speech bubbles): sample1's `safe_text_w=145` capped the
     # search at 48px before it could even try the ~60-70px mangatranslator.ai used for the same
     # balloon.
-    max_start_size = min(max_height // 2, 72)
+    # The search only needs an upper *bound*; every candidate is still checked against the height,
+    # the width, the word rule and the mask below, so a generous bound cannot produce a bad layout,
+    # only a slower search (a few more bisection steps).
+    #
+    # Both of the old terms were doing damage. `72` is an absolute pixel count applied to pages
+    # from 832px to 6905px wide, so on the big ones it capped the type at a size the page's own
+    # lettering dwarfs. `max_height // 2` looks conservative and is worse: one line at h/2 with a
+    # 1.2 line-height fills exactly 60% of the box and no more, which is why the elements this cap
+    # bound sat at a median fill of exactly 0.60. A single line is bounded by the height check at
+    # h/1.2 anyway -- the halving was pure loss.
+    max_start_size = int(max_height)
     start_size = max(max_start_size, default_font_size)
 
     min_font_size = 6
     line_height_multiplier = 1.2
 
     def broke_a_word(res):
-        """True when the wrap cut a word apart to make it fit.
+        """True when the wrap cut a word apart in a way a reader cannot put back together.
 
-        Every wrapping path above falls through to splitting a word per character once the
-        word is wider than the line it has to go on, which is how "collection" comes out as
-        "collect" / "ion". Comparing the words that came out against the words that went in
-        detects that regardless of which path produced it.
+        Every wrapping path above splits an over-wide word, and since hyphenation that split is
+        usually at a legal point and carries a hyphen -- "Op-" / "portunities" is a word set across
+        two lines, not a broken one. What is still broken is a split with no hyphen at all, which
+        is what happens when no legal point fits: "collect" / "ion". `reassemble` puts the
+        hyphenated case back and leaves the other one showing.
         """
-        return " ".join(res["lines"]).split() != clean_text.split()
+        return reassemble(res["lines"]) != [w.replace("-", "") for w in clean_text.split()]
 
     def widest_line(res, f_size):
         font = font_at(f_size)
@@ -754,12 +845,35 @@ def fit_text_in_box_py(
     else:
         best_fs, best_res = best
 
+    def limiting_constraint(f_size):
+        """Which rule stopped the search one step above the size it chose.
+
+        Underfill (D7) is not one problem: a balloon can be two-thirds empty because a single long
+        word will not fit its width, because the absolute size cap bit, or because the text really
+        does fill it. Those want different fixes, and from outside the function they are
+        indistinguishable -- hence reporting it rather than guessing. Cheap: the size above the
+        chosen one has usually been evaluated already by the search.
+        """
+        if f_size >= start_size:
+            return "size_cap"
+        res, fits_height, _, _ = evaluate(f_size + 1)
+        if not fits_height:
+            return "height"
+        if widest_line(res, f_size + 1) > max_width:
+            return "width"
+        if broke_a_word(res):
+            return "unbreakable_word"
+        if not stays_inside_mask(res, f_size + 1):
+            return "mask"
+        return "none"
+
     total_height = len(best_res["lines"]) * best_fs * line_height_multiplier
     return {
         "fontSize": best_fs,
         "lines": best_res["lines"],
         "overflow": total_height > max_height,
         "lineCenters": best_res["line_centers"],
+        "limitedBy": limiting_constraint(best_fs),
     }
 
 
