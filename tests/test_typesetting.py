@@ -1,6 +1,13 @@
 import json
 
-from worker.handlers.render import fit_text_in_box_py, load_font
+import pytest
+
+from worker.handlers.render import (
+    BAND_SAMPLE_FRACTIONS,
+    fit_text_in_box_py,
+    load_font,
+    mask_span_for_band,
+)
 
 
 def widest_line(res, font_name="Comic Neue", bold=False):
@@ -189,3 +196,123 @@ def test_keeps_using_a_mask_that_contains_the_box():
     )
 
     assert len(res["lineCenters"]) == len(res["lines"])
+
+
+def ellipse_polygon(cx, cy, rx, ry, n=64):
+    """A closed elliptical mask, the shape most speech balloons actually are."""
+    import math
+
+    return [[cx + rx * math.cos(2 * math.pi * i / n), cy + ry * math.sin(2 * math.pi * i / n)] for i in range(n)]
+
+
+def span_over_band(polygon, box_x, max_width, y_top, y_bottom):
+    """The span available across a band, measured independently of the renderer's own sampling.
+
+    Deliberately does not go through `BAND_SAMPLE_FRACTIONS`: a rod that moves with the code
+    under test cannot catch the code moving. Each call below asks for a single row (a degenerate
+    band), so the fractions cannot affect where it samples.
+    """
+    left = None
+    right = None
+    for t in (0.15, 0.3, 0.45, 0.6, 0.75, 0.85):
+        y = y_top + t * (y_bottom - y_top)
+        row = mask_span_for_band(polygon, box_x, max_width, y, y)
+        if row is None:
+            continue
+        left = row[0] if left is None else max(left, row[0])
+        right = row[1] if right is None else min(right, row[1])
+    if left is None or right is None or right <= left:
+        return None
+    return (left, right)
+
+
+def lines_outside_mask(res, polygon, box_x, box_y, max_width, max_height, font_name="Comic Neue"):
+    """Lines whose drawn extent leaves the mask, measured the way the renderer draws them."""
+    font = load_font(res["fontSize"], font_name=font_name)
+    assert font is not None
+    line_height = res["fontSize"] * 1.2
+    y_start = box_y + (max_height - len(res["lines"]) * line_height) / 2
+    outside = []
+    for idx, line in enumerate(res["lines"]):
+        if not line.strip():
+            continue
+        width = font.getlength(line)
+        center = res["lineCenters"][idx]
+        top = y_start + idx * line_height
+        span = span_over_band(polygon, box_x, max_width, top, top + line_height)
+        if span is None:
+            continue
+        if center - width / 2 < span[0] - 0.5 or center + width / 2 > span[1] + 0.5:
+            outside.append(line)
+    return outside
+
+
+def test_mask_span_is_measured_over_the_line_band_not_its_centreline():
+    """D6: a curved balloon closes in above and below a line's midline, so the span at the centre
+    row overstates what the line can use. sample1's bottom-left balloon is the measured case."""
+    diamond = [[50, 0], [100, 50], [50, 100], [0, 50]]
+
+    # A band from y=30 to y=54, on a diamond that is widest at its waist (y=50). The narrowest
+    # ink row in that band is its top, where the diamond is 60 wide; its centre row is 84 wide.
+    narrowest_row = mask_span_for_band(diamond, 0, 100, 33.6, 33.6)
+    band = mask_span_for_band(diamond, 0, 100, 30, 54)
+
+    assert narrowest_row is not None and band is not None
+    assert band[1] - band[0] == pytest.approx(narrowest_row[1] - narrowest_row[0])
+
+
+def test_no_line_escapes_an_oval_balloon():
+    """The D6 regression, in the shape that produced it: an oval mask, a box that is its bounding
+    rectangle, and text long enough to want the full width. Every line has to stay inside the
+    outline over its own band, not merely inside the box."""
+    polygon = ellipse_polygon(100, 130, 90, 120)
+    box_x, box_y, box_w, box_h = 10, 10, 180, 240
+
+    res = fit_text_in_box_py(
+        text="I'll cover for us with Mom and the others.",
+        max_width=box_w,
+        max_height=box_h,
+        font_name="Comic Neue",
+        default_font_size=16,
+        shape="elliptical",
+        box_x=box_x,
+        box_y=box_y,
+        mask_polygon=json.dumps(polygon),
+    )
+
+    assert lines_outside_mask(res, polygon, box_x, box_y, box_w, box_h) == []
+    # And it has not paid for that by collapsing the type -- the box is 240 tall.
+    assert res["fontSize"] >= 20
+
+
+def test_band_sampling_spans_the_ink_not_the_leading():
+    """The band is the ascender-to-descender run, not the whole 1.2em line box. Sampling the full
+    box would let a tail row that no glyph reaches veto a line that fits."""
+    assert min(BAND_SAMPLE_FRACTIONS) > 0.0
+    assert max(BAND_SAMPLE_FRACTIONS) < 1.0
+    assert 0.5 in BAND_SAMPLE_FRACTIONS
+
+
+def test_breaks_a_word_rather_than_setting_lines_wider_than_the_box():
+    """When no size sets the text whole, the text still has to stay inside its box.
+
+    The fallback used to test height alone, so it grew the type until the *height* ran out while
+    the lines got arbitrarily wider than the region. sample27's "(PLAYFUL RETRACTION)" gloss is a
+    44px-wide box that came out at 43px type -- lines twice the width of the box, drawn across the
+    neighbouring balloon. A broken word is ugly and stays put; overflow lands on someone else's
+    panel.
+    """
+    res = fit_text_in_box_py(
+        text="...Just kidding! (PLAYFUL RETRACTION)",
+        max_width=44,
+        max_height=208,
+        font_name="Comic Neue",
+        default_font_size=12,
+        shape="rectangular",
+        box_x=515,
+        box_y=972,
+        bold=True,
+    )
+
+    assert widest_line(res, bold=True) <= 44
+    assert res["fontSize"] < 43

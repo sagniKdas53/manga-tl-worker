@@ -227,6 +227,57 @@ def draw_wrapped_text(draw, text, font, text_color, x, y, max_width, max_height,
         current_y += line_heights[i]
 
 
+# Where across a line's box the mask is measured, as fractions of the box.
+#
+# The centre alone is what D6 was: it misses that a curved balloon closes in above and below the
+# midline, so a line sized to its own midline poked out through the outline. Measuring the whole
+# 1.2em line box is the opposite error -- the top and bottom of that box are leading, no glyph
+# reaches them, and a balloon that pinches at a tail row there would veto a line that in fact has
+# nothing to draw at that height. These fractions bound the band the ink actually occupies,
+# ascender to descender.
+BAND_SAMPLE_FRACTIONS = (0.15, 0.35, 0.5, 0.65, 0.85)
+
+
+def mask_span_for_band(polygon, box_x, box_width, y_top, y_bottom):
+    """The horizontal span a line occupying `y_top..y_bottom` can be set in.
+
+    The mask's widest run at each sampled row, clipped to the box, intersected across the band --
+    so the answer is the width available over the line's whole height, not just at its midline.
+    Returns None when no sampled row reaches the mask, which is the caller's cue to fall back to
+    the box.
+    """
+    left = None
+    right = None
+    n_pts = len(polygon)
+    for t in BAND_SAMPLE_FRACTIONS:
+        y = y_top + t * (y_bottom - y_top)
+        crossings = []
+        for i in range(n_pts):
+            x1, y1 = polygon[i][0], polygon[i][1]
+            x2, y2 = polygon[(i + 1) % n_pts][0], polygon[(i + 1) % n_pts][1]
+            if (y1 <= y < y2) or (y2 <= y < y1):
+                crossings.append(x1 + (y - y1) * (x2 - x1) / (y2 - y1))
+        if len(crossings) < 2:
+            continue
+        crossings.sort()
+        row = None
+        widest = 0
+        for i in range(0, len(crossings) - 1, 2):
+            run_left = max(crossings[i], box_x)
+            run_right = min(crossings[i + 1], box_x + box_width)
+            if run_right - run_left > widest:
+                widest = run_right - run_left
+                row = (run_left, run_right)
+        if row is None:
+            continue
+        left = row[0] if left is None else max(left, row[0])
+        right = row[1] if right is None else min(right, row[1])
+
+    if left is None or right is None or right - left <= 0:
+        return None
+    return (left, right)
+
+
 def fit_text_in_box_py(
     text,
     max_width,
@@ -307,40 +358,28 @@ def fit_text_in_box_py(
                 current_line = ""
 
                 def get_line_span(idx):
+                    """The span a line at `idx` can actually occupy.
+
+                    D6 (docs/render_quality_gap_2026-08-05.md): this used to measure the mask at
+                    the line's *centre* y, but glyphs occupy the whole line band, and a curved
+                    balloon is narrower at the band's edges than at its middle. A line sized to
+                    the centre row therefore pokes out through the outline above and below its
+                    own midline -- 286 lines across the 40-page corpus, in 137 of 351 elements.
+                    Sampling the band and keeping the narrowest run makes the span the text can
+                    actually be set in.
+                    """
                     total_text_height = N * line_height
                     y_start = box_y + (max_height - total_text_height) / 2
-                    line_center_y = y_start + (idx + 0.5) * line_height
+                    line_top = y_start + idx * line_height
+                    span = mask_span_for_band(polygon_points, box_x, max_width, line_top, line_top + line_height)
 
-                    intersects = []
-                    n_pts = len(polygon_points)  # type: ignore
-                    for i in range(n_pts):
-                        p1 = polygon_points[i]  # type: ignore
-                        p2 = polygon_points[(i + 1) % n_pts]  # type: ignore
-                        x1, y1 = p1[0], p1[1]
-                        x2, y2 = p2[0], p2[1]
-                        if (y1 <= line_center_y < y2) or (y2 <= line_center_y < y1):
-                            ix = x1 + (line_center_y - y1) * (x2 - x1) / (y2 - y1)
-                            intersects.append(ix)
-
-                    if len(intersects) >= 2:
-                        intersects.sort()
-                        best_span = {"left": box_x, "right": box_x + max_width}
-                        max_overlap_len = 0
-                        for i in range(0, len(intersects) - 1, 2):
-                            segment_left = intersects[i]
-                            segment_right = intersects[i + 1]
-                            overlap_left = max(segment_left, box_x)
-                            overlap_right = min(segment_right, box_x + max_width)
-                            overlap_len = overlap_right - overlap_left
-                            if overlap_len > max_overlap_len:
-                                max_overlap_len = overlap_len
-                                best_span = {
-                                    "left": overlap_left,
-                                    "right": overlap_right,
-                                }
-                        if max_overlap_len > 0:
-                            return best_span
-                    return {"left": box_x, "right": box_x + max_width}
+                    # No sampled row reaches the mask (the line sits off the end of a balloon
+                    # shorter than its text), or the band pinches to nothing at a spike or tail.
+                    # The box is the honest answer in both cases -- it is what the caller asked
+                    # for and what the pre-band code returned.
+                    if span is None:
+                        return {"left": box_x, "right": box_x + max_width}
+                    return {"left": span[0], "right": span[1]}
 
                 for para in paragraphs:
                     if not para:
@@ -613,6 +652,39 @@ def fit_text_in_box_py(
             widest = max(widest, w)
         return widest
 
+    def stays_inside_mask(res, f_size):
+        """True when every line, as drawn, stays within the mask across its own band.
+
+        The box-width test above cannot see this: a line can be well inside a box and still cross
+        the balloon outline, because the box is the mask's bounding rectangle and the mask curves
+        in. Measured here against the same geometry the draw uses -- each line's centre, its width
+        at this size, and the span available over the band it occupies.
+        """
+        if not polygon_points:
+            return True
+        font = font_at(f_size)
+        if not font:
+            return True
+        lines = res["lines"]
+        centers = res.get("line_centers") or []
+        line_height = f_size * line_height_multiplier
+        y_start = box_y + (max_height - len(lines) * line_height) / 2
+        for idx, line in enumerate(lines):
+            if not line.strip():
+                continue
+            try:
+                w = font.getlength(line)
+            except Exception:
+                w = len(line) * (f_size * 0.5)
+            center = centers[idx] if idx < len(centers) else box_x + max_width / 2
+            top = y_start + idx * line_height
+            span = mask_span_for_band(polygon_points, box_x, max_width, top, top + line_height)
+            if span is None:
+                continue
+            if center - w / 2 < span[0] - 0.5 or center + w / 2 > span[1] + 0.5:
+                return False
+        return True
+
     evaluated = {}
 
     def evaluate(f_size):
@@ -622,18 +694,27 @@ def fit_text_in_box_py(
         res = wrap_text_py(clean_text, f_size)
         total = len(res["lines"]) * f_size * line_height_multiplier
         fits_height = total <= max_height
-        fits_clean = fits_height and not broke_a_word(res) and widest_line(res, f_size) <= max_width
-        evaluated[f_size] = (res, fits_height, fits_clean)
+        fits_clean = (
+            fits_height
+            and not broke_a_word(res)
+            and widest_line(res, f_size) <= max_width
+            and stays_inside_mask(res, f_size)
+        )
+        # Contained is the weaker promise: the text is inside its box, but a word may have been
+        # broken to get it there. It is what the last-resort tier below searches on.
+        fits_contained = fits_height and widest_line(res, f_size) <= max_width
+        evaluated[f_size] = (res, fits_height, fits_clean, fits_contained)
         return evaluated[f_size]
 
-    def largest_size_where(clean):
+    def largest_size_where(criterion):
         low = min_font_size
         high = start_size
         best = None
         while low <= high:
             mid = (low + high) // 2
-            res, fits_height, fits_clean = evaluate(mid)
-            if fits_clean if clean else fits_height:
+            res, fits_height, fits_clean, fits_contained = evaluate(mid)
+            ok = {"clean": fits_clean, "contained": fits_contained, "height": fits_height}[criterion]
+            if ok:
                 best = (mid, res)
                 low = mid + 1
             else:
@@ -648,13 +729,24 @@ def fit_text_in_box_py(
     # spills sideways out of the bubble still reported the same "fits" as one that does not. The
     # search then kept growing the font until the *height* ran out and returned the largest size
     # that mangles the text rather than the largest size that sets it.
-    best = largest_size_where(clean=True)
+    best = largest_size_where("clean")
 
-    # Nothing sets cleanly -- a single word longer than the box is wide even at 6px, say. Fall back
-    # to the old height-only rule so such a region still gets the largest legible size we can give
-    # it, rather than collapsing to the minimum.
+    # Nothing sets cleanly -- a single word longer than the box is wide even at 6px, say. Keep the
+    # text inside its box and break the word, rather than the other way round.
+    #
+    # Height alone used to be the fallback, and it is a bad trade: it grows the type until the
+    # *height* runs out while the lines get arbitrarily wider than the box. sample27's
+    # "...Just kidding! (PLAYFUL RETRACTION)" is a 44px-wide box that came out at 43px type --
+    # lines twice the width of the region, drawn across the neighbouring balloon and the art. A
+    # broken word is ugly and local; text outside its box lands on someone else's panel.
     if best is None:
-        best = largest_size_where(clean=False)
+        best = largest_size_where("contained")
+
+    # And if even that is impossible -- a box narrower than a single glyph -- the height rule is
+    # all that is left, at which point the region is too small to set anything in legibly and the
+    # real answer is upstream (D10: it should not have been typeset at all).
+    if best is None:
+        best = largest_size_where("height")
 
     if best is None:
         best_fs = min_font_size
