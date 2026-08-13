@@ -173,6 +173,58 @@ BUBBLE_CONTOUR_MAX_PAGE_FRACTION = float(os.environ.get("BUBBLE_CONTOUR_MAX_PAGE
 # guess, not yet measured against an annotated set the way WAIST_MAX_SOLIDITY was.
 BACKGROUND_FILL_MAX_SPREAD = float(os.environ.get("BACKGROUND_FILL_MAX_SPREAD", "20.0"))
 
+# R1 (docs/issues.md): a balloon has to contain the text it is the balloon for.
+#
+# Fragments are assigned to whichever YOLO mask they overlap most, and "most" was the only test --
+# any overlap at all won, and the winner's geometry was then accepted as the region's balloon. YOLO
+# is a single-class segmenter and fires on the white *stroke* drawn around unenclosed lettering,
+# which is a text-shaped blob sitting exactly on the text. sample10's 待って is the case: the
+# accepted "balloon" was 0.60x the area of its own text, so a white glyph-shaped slab was painted
+# onto a yellow burst and "WAIT!" was set in the sliver left over.
+#
+# The test is coverage, not area ratio: a real balloon covers essentially all of its text, and a
+# tight-but-genuine small balloon (a lone "!?") would fail an area-ratio test that this passes.
+# 0.75 leaves room for a fragment whose box overhangs a curved outline at the corners.
+BUBBLE_MIN_TEXT_COVERAGE = float(os.environ.get("BUBBLE_MIN_TEXT_COVERAGE", "0.75"))
+
+# R2 (docs/issues.md): what to do for a region that has no flat colour to match.
+#
+# Returning None meant "draw nothing", which put English on top of unerased Japanese -- the worst
+# of the available outcomes, and the one thing no reference output ever does. mangatranslator.ai
+# does not erase sample10's yellow blanket lettering better than we can; it declines to erase it
+# and draws a new flat balloon over it instead. This is that: cover the source text with a
+# synthesized balloon in the region's dominant colour.
+#
+# Dominant, not median: the median of a shaded yellow blanket is a muddy mid-tone, while the
+# quantised mode is the yellow a reader would name. Bin width 16 over each channel.
+COVER_FILL_ENABLED = os.environ.get("COVER_FILL_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+COVER_FILL_QUANT = int(os.environ.get("COVER_FILL_QUANT", "16"))
+# Padding around the source text's extent, as a fraction of the shorter side of that extent.
+COVER_FILL_PAD_FRACTION = float(os.environ.get("COVER_FILL_PAD_FRACTION", "0.18"))
+# How far outside the text box to sample for that dominant colour. Sampling *inside* the box
+# samples the lettering: unenclosed manga text carries a thick white stroke so it reads against
+# artwork, and on sample10's yellow blanket that stroke is the most common colour in the box --
+# which made "the region's dominant colour" come back white. Wider than the drawn margin, so the
+# sample is background rather than the edge of the shape about to be painted.
+COVER_FILL_RING_FRACTION = float(os.environ.get("COVER_FILL_RING_FRACTION", "0.35"))
+
+# Minimum WCAG contrast between lettering and the backdrop under it before the renderer overrides
+# the text colour. 3.0 is the large-text threshold, and lettering sized to fill a balloon is large
+# text. Only reached because R2 introduced backdrops sampled from artwork: a text colour is chosen
+# without reference to the fill, so a balloon covering a dark panel arrived as black on near-black.
+CONTRAST_FLOOR = float(os.environ.get("CONTRAST_FLOOR", "3.0"))
+
+# R3 (docs/issues.md): sound effects and unreadable regions are not dialogue.
+#
+# The references leave sfx in the artwork untouched. We typeset them, and when the recogniser
+# misreads one the translator turns the garbage into a confident sentence and we paint a slab on
+# the artwork to hold it -- sample10's misread `cu3gichi` became "Deadline countdown activated!".
+TYPESET_SFX = os.environ.get("TYPESET_SFX", "false").lower() in ("1", "true", "yes", "on")
+# A region with no balloon *and* a recogniser this unsure of itself is not a line of dialogue.
+# Both halves are required: unenclosed lettering read confidently is real dialogue (sample10's
+# yellow blanket), and a low score inside a balloon is still a line somebody said.
+JUNK_REGION_MIN_CONFIDENCE = float(os.environ.get("JUNK_REGION_MIN_CONFIDENCE", "0.55"))
+
 # --- Fragment grouping -----------------------------------------------------------------------
 #
 # How OCR line fragments are grouped into regions. All four values were measured over seven

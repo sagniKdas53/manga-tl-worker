@@ -18,6 +18,7 @@ from worker.services.translation import (
     is_valid_translation,
     parse_and_validate_batch,
     should_translate_region,
+    should_typeset_region,
     translate_batch_llm,
     translate_text,
 )
@@ -78,7 +79,12 @@ def process_translation(job_data):
     unmatched_regions = []
 
     for r in ocr_regions:
-        if not should_translate_region(r):
+        if not should_typeset_region(r):
+            # R3: leave the artwork alone. An empty translation draws nothing at all -- the render
+            # loop skips the element before it paints the backdrop -- so the sound effect stays as
+            # the artist drew it instead of being covered by a slab holding an invented sentence.
+            resolved_translations[r["id"]] = {"translatedText": ""}
+        elif not should_translate_region(r):
             # Bypass translation for garbage, keep original text
             resolved_translations[r["id"]] = {"translatedText": r["text"]}
         else:

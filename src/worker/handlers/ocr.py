@@ -3,6 +3,7 @@ import concurrent.futures
 import gc
 import json
 import logging
+import math
 import os
 from functools import cmp_to_key
 
@@ -16,7 +17,12 @@ from worker.config import (
     BUBBLE_CONTOUR_FALLBACK,
     BUBBLE_CONTOUR_MAX_GROWTH,
     BUBBLE_CONTOUR_MAX_PAGE_FRACTION,
+    BUBBLE_MIN_TEXT_COVERAGE,
     CALLBACK_URL,
+    COVER_FILL_ENABLED,
+    COVER_FILL_PAD_FRACTION,
+    COVER_FILL_QUANT,
+    COVER_FILL_RING_FRACTION,
     OCR_CONFIG,
     OCR_MERGE_THRESHOLD,
     OCR_ORIENTATION,
@@ -202,6 +208,160 @@ def detect_background_color_poly(img, mask_polygon):
     except Exception as e:
         print(f"[OCR] Error detecting color from poly: {e}", flush=True)
         return None
+
+
+def ring_pixels(img, x, y, width, height):
+    """Pixels in the band just outside a text box: what the text is sitting *on*.
+
+    Sampling inside the box samples the lettering. Unenclosed manga text is drawn with a thick
+    white stroke around each glyph precisely so it reads against artwork, and on sample10's yellow
+    blanket that stroke is the single most common colour in the box -- so "the dominant colour of
+    this region" came back white, and R2's covering balloon would have been a white slab. The band
+    outside the text is background by construction.
+    """
+    h, w = img.shape[:2]
+    pad = max(3, round(min(width, height) * COVER_FILL_RING_FRACTION))
+    ox1, oy1 = max(0, int(x) - pad), max(0, int(y) - pad)
+    ox2, oy2 = min(w, int(x + width) + pad), min(h, int(y + height) + pad)
+    if ox2 <= ox1 or oy2 <= oy1:
+        return None
+
+    outer = np.zeros((h, w), dtype=np.uint8)
+    outer[oy1:oy2, ox1:ox2] = 255
+    ix1, iy1 = max(0, int(x)), max(0, int(y))
+    ix2, iy2 = min(w, int(x + width)), min(h, int(y + height))
+    if ix2 > ix1 and iy2 > iy1:
+        outer[iy1:iy2, ix1:ix2] = 0
+    pixels = img[outer == 255]
+    return pixels if len(pixels) else None
+
+
+def dominant_color(img, mask_polygon=None, box=None, ring=False):
+    """The colour a reader would name for this region, as `#rrggbb`.
+
+    The mode of a coarsely quantised histogram, refined to the median of the winning bin. The
+    median of the raw pixels is the wrong answer here: over sample10's shaded yellow blanket it
+    lands on a muddy mid-tone halfway between the lit and shadowed halves, and a balloon painted in
+    it reads as dirty. The mode picks the lit yellow, which is what the reference used.
+
+    With `ring=True` the sample is the band just outside `box` rather than its interior -- see
+    :func:`ring_pixels` for why that is what R2 wants.
+    """
+    if img is None:
+        return None
+    h, w = img.shape[:2]
+    pixels = None
+    if ring and box:
+        pixels = ring_pixels(img, *box)
+    if pixels is None and mask_polygon:
+        try:
+            pts = json.loads(mask_polygon) if isinstance(mask_polygon, str) else mask_polygon
+            if isinstance(pts, list) and len(pts) >= 3:
+                mask = np.zeros((h, w), dtype=np.uint8)
+                cv2.fillPoly(mask, [np.array(pts, dtype=np.int32)], 255)  # type: ignore
+                pixels = img[mask == 255]
+        except Exception as e:
+            logger.warning("dominant_color: unusable polygon (%s)", e)
+    if pixels is None and box:
+        x, y, bw, bh = (int(v) for v in box)
+        x1, y1 = max(0, x), max(0, y)
+        x2, y2 = min(w, x + bw), min(h, y + bh)
+        if x2 > x1 and y2 > y1:
+            pixels = img[y1:y2, x1:x2].reshape(-1, 3)
+    if pixels is None or len(pixels) == 0:
+        return None
+
+    q = max(2, COVER_FILL_QUANT)
+    binned = (pixels // q).astype(np.int32)
+    keys = binned[:, 0] * 65536 + binned[:, 1] * 256 + binned[:, 2]
+    values, counts = np.unique(keys, return_counts=True)
+    winner = values[int(np.argmax(counts))]
+    median_bgr = np.median(pixels[keys == winner], axis=0)
+    r, g, b = int(median_bgr[2]), int(median_bgr[1]), int(median_bgr[0])
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def cover_balloon_polygon(x, y, width, height, img_w, img_h, corner_steps=6):
+    """A rounded-rectangle polygon covering the source text, plus a margin.
+
+    The margin is proportional to the text extent rather than absolute, because these pages run
+    from 832px to 6905px wide and every absolute pixel constant in this pipeline has eventually had
+    to be replaced by a proportional one.
+    """
+    pad = max(2, round(min(width, height) * COVER_FILL_PAD_FRACTION))
+    x1 = max(0, int(x) - pad)
+    y1 = max(0, int(y) - pad)
+    x2 = min(img_w, int(x + width) + pad)
+    y2 = min(img_h, int(y + height) + pad)
+    if x2 <= x1 or y2 <= y1:
+        return None
+
+    r = max(1.0, min(x2 - x1, y2 - y1) * 0.22)
+    pts = []
+    for cx, cy, start in (
+        (x2 - r, y1 + r, -90.0),
+        (x2 - r, y2 - r, 0.0),
+        (x1 + r, y2 - r, 90.0),
+        (x1 + r, y1 + r, 180.0),
+    ):
+        for i in range(corner_steps + 1):
+            a = math.radians(start + 90.0 * i / corner_steps)
+            pts.append([round(cx + r * math.cos(a)), round(cy + r * math.sin(a))])
+    return pts
+
+
+def cover_fill_for_region(img, mask_polygon, x, y, width, height):
+    """How to erase this region: `(color, polygon)`.
+
+    When the region is close enough to flat, this is the existing behaviour -- its own median
+    colour over its own outline, which is honest erasure -- and `polygon` comes back as the mask
+    that was passed in.
+
+    Otherwise it is R2. There is no flat colour and often no real outline, so instead of drawing
+    nothing and leaving English on top of unerased Japanese, we hand back a *new* balloon covering
+    the source text, in the region's dominant colour. Nothing downstream needs to learn a new
+    field: a synthesized balloon is just a mask polygon, and the renderer already fills one of
+    those with `backgroundColor`.
+
+    It is visibly an addition to the artwork rather than a repair of it. That is the trade the
+    references make too, and it beats the alternative we currently ship, which is illegible.
+
+    A region with **no** mask always gets a synthesized shape, whichever way the colour was found.
+    Sampling the border of a text box that sits on a flat-enough area does give a usable colour --
+    the yellow of sample10's burst comes back that way -- but with no polygon to paint it into, the
+    renderer falls back to the element's own box, which after R1 rejected a balloon is the sliver
+    the glyphs occupy. Right colour, wrong shape, and the source lettering still shows around it.
+    """
+    flat = detect_background_color_poly(img, mask_polygon) if mask_polygon else None
+    if flat is not None:
+        return flat, mask_polygon
+    if img is None:
+        return None, mask_polygon
+
+    if not mask_polygon:
+        flat = detect_background_color(img, x, y, width, height)
+    covering = flat or dominant_color(img, mask_polygon, box=(x, y, width, height), ring=True)
+    if covering is None or not COVER_FILL_ENABLED:
+        return covering, mask_polygon
+    img_h, img_w = img.shape[:2]
+    poly = cover_balloon_polygon(x, y, width, height, img_w, img_h)
+    if poly is None:
+        return covering, mask_polygon
+    return covering, poly
+
+
+def bubble_covers_text(mask, fx1, fy1, fx2, fy2):
+    """Does this balloon mask actually contain that text box? (R1)
+
+    Overlap alone decided this before, and overlap alone cannot tell a balloon from the white
+    stroke drawn around unenclosed lettering -- the stroke sits exactly on the text, so it wins the
+    overlap contest against every real balloon on the page while covering only the glyphs.
+    """
+    area = (fx2 - fx1) * (fy2 - fy1)
+    if area <= 0:
+        return False
+    covered = int(np.count_nonzero(mask[fy1:fy2, fx1:fx2]))
+    return covered / area >= BUBBLE_MIN_TEXT_COVERAGE
 
 
 def get_split_polygon(mask, bbox, img_w, img_h, margin=20):
@@ -622,6 +782,24 @@ def process_ocr(job_data):
                         if overlap > max_overlap:
                             max_overlap = overlap
                             best_b_idx = b_idx
+
+                    # R1: winning the overlap contest is not the same as being this text's balloon.
+                    # A balloon that does not cover its own text is not a balloon -- it is the
+                    # white stroke around unenclosed lettering, which YOLO scores as a bubble and
+                    # which beats every real balloon on overlap because it sits on the glyphs.
+                    # Rejecting it here drops the fragment to the unmatched path below, where it
+                    # gets covered geometry instead of a text-shaped slab painted over the artwork.
+                    if best_b_idx >= 0 and not bubble_covers_text(bubble_masks[best_b_idx], fx1, fy1, fx2, fy2):
+                        logger.info(
+                            "[YOLO] Rejected bubble %d for fragment at (%d,%d,%dx%d): covers under %.0f%% of its text",
+                            best_b_idx,
+                            fx1,
+                            fy1,
+                            fx2 - fx1,
+                            fy2 - fy1,
+                            BUBBLE_MIN_TEXT_COVERAGE * 100,
+                        )
+                        best_b_idx = -1
                 frag["bubble_idx"] = best_b_idx
 
             # 4. Group fragments for each bubble and merge them (or create default crop if empty and we are using Cloud VLM)
@@ -1028,7 +1206,9 @@ def process_ocr(job_data):
                                     flush=True,
                                 )
                                 continue
-                            bg_color = detect_background_color_poly(img, r["poly_pts"])
+                            bg_color, r["poly_pts"] = cover_fill_for_region(
+                                img, r["poly_pts"], r["x"], r["y"], r["width"], r["height"]
+                            )
                             if r["type"] == "bubble":
                                 regions.append(
                                     {
@@ -1093,7 +1273,9 @@ def process_ocr(job_data):
                 for r in candidate_regions:
                     final_text = r["text"]
                     if final_text:
-                        bg_color = detect_background_color_poly(img, r["poly_pts"])
+                        bg_color, r["poly_pts"] = cover_fill_for_region(
+                            img, r["poly_pts"], r["x"], r["y"], r["width"], r["height"]
+                        )
                         if r["type"] == "bubble":
                             regions.append(
                                 {
@@ -1178,11 +1360,7 @@ def process_ocr(job_data):
                     bx, by, bw, bh = x, y, width, height
 
                 mask_polygon = bubble_box.get("maskPolygon") if use_bubble_contour else None  # type: ignore
-                bg_color = (
-                    detect_background_color_poly(img, mask_polygon)
-                    if mask_polygon
-                    else detect_background_color(img, x, y, width, height)
-                )
+                bg_color, mask_polygon = cover_fill_for_region(img, mask_polygon, x, y, width, height)
 
                 regions.append(
                     {

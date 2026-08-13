@@ -7,7 +7,7 @@ import uuid
 
 import requests
 
-from worker.config import logger
+from worker.config import JUNK_REGION_MIN_CONFIDENCE, TYPESET_SFX, logger
 from worker.services.llm_client import (  # noqa: F401
     PROVIDER_COOLDOWNS,
     LLMClient,
@@ -62,7 +62,7 @@ Inject necessary context naturally into the translation when handling ambiguous 
 Region type handling:
 - "speech": Translate as natural dialogue.
 - "narration": Translate as third-person narrative prose.
-- "sfx": Transliterate the sound effect AND provide an English equivalent in parentheses (e.g. "DOKAA (WHAM)").
+- "sfx": Give the English sound word only, no romaji and no parentheses. GOOD: "WHAM". BAD: "DOKAA (WHAM)".
 - "caption": Translate as editorial/scene-setting text.
 - "sign": Translate literally, noting it's environmental text.
 
@@ -84,7 +84,6 @@ Rules:
 - Keep names unchanged and ensure consistent character names across the chapter.
 - Preserve tone and emotion, matching the context of previous dialogue.
 - Inject necessary context naturally into the translation when handling ambiguous Japanese pronouns or subjects.
-- Do not explain.
 - Do not explain.
 - Do not add notes.
 - Do not add quotation marks.
@@ -176,6 +175,46 @@ def is_valid_translation(source, translated, request_id=None):
                 f"translation={translated}"
             )
             return False
+
+    return True
+
+
+def should_typeset_region(region):
+    """Should this region get English drawn onto the page at all? (R3, docs/issues.md)
+
+    Distinct from :func:`should_translate_region`, which decides whether to *spend a model call*.
+    A region that fails that one keeps its source text and is still drawn; a region that fails this
+    one is left as the artist drew it, which for a sound effect is what every reference output
+    does and what our own pages should have been doing all along.
+
+    Two cases:
+
+    - **Sound effects.** The references leave び ぇぇ ええ and ギチィ untouched. We set English over
+      them, which means painting a slab on the artwork to do it.
+    - **Unenclosed text the recogniser could not read.** Both halves matter. Lettering outside a
+      balloon read confidently is real dialogue -- sample10's yellow blanket -- and a poor score
+      inside a balloon is still a line somebody said. Together they are the signature of a
+      stylised sound effect the recogniser guessed at, and a guess is what the translator then
+      turns into a fluent sentence: sample10's misread `cu3gichi` became "Deadline countdown activated!", which
+      appears nowhere in the manga and which we painted onto a desk.
+    """
+    region_type = region.get("regionType") or region.get("region_type")
+    if region_type == "sfx" and not TYPESET_SFX:
+        print(f"[Typeset Filter] Leaving sfx region as drawn: '{region.get('text', '')}'", flush=True)
+        return False
+
+    confidence = region.get("confidence")
+    if confidence is None:
+        confidence = 1.0
+    bubble_id = region.get("bubbleId") or region.get("bubble_id") or ""
+    enclosed = bool(bubble_id) and not str(bubble_id).startswith("direct_text")
+    if not enclosed and confidence < JUNK_REGION_MIN_CONFIDENCE:
+        print(
+            f"[Typeset Filter] Leaving unenclosed low-confidence region as drawn "
+            f"({confidence:.2f} < {JUNK_REGION_MIN_CONFIDENCE}): '{region.get('text', '')}'",
+            flush=True,
+        )
+        return False
 
     return True
 
@@ -835,7 +874,7 @@ Preserve:
 Region type handling:
 - "speech": Translate as natural dialogue.
 - "narration": Translate as third-person narrative prose.
-- "sfx": Transliterate the sound effect AND provide a {tgt_name} equivalent in parentheses (e.g. "DOKAA (WHAM)").
+- "sfx": Give the {tgt_name} sound word only, no romanization and no parentheses. GOOD: "WHAM". BAD: "DOKAA (WHAM)".
 - "caption": Translate as editorial/scene-setting text.
 - "sign": Translate literally, noting it's environmental text.
 

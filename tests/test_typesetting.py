@@ -391,3 +391,29 @@ def test_hyphenation_fills_the_balloon_a_long_word_used_to_starve():
         w.replace("-", "")
         for w in ["Opportunities", "like", "this", "don't", "come", "often...", "You're", "excited,", "right?"]
     ]
+
+
+def test_lettering_stays_legible_on_a_backdrop_sampled_from_artwork():
+    """R2 gave the renderer backdrops it never used to see.
+
+    A region's text colour is decided without reference to its fill and defaults to black, so a
+    covering balloon sampled from a dark panel arrived as black text on near-black. sample10's
+    bottom-left corner: white-stroked lettering on a dark panel, no balloon, dominant colour
+    #33272d.
+    """
+    from worker.handlers.render import readable_text_color
+
+    assert readable_text_color("#33272d", "#000000") == "#ffffff"
+    assert readable_text_color("#ffffff", "#000000") == "#000000", "already legible, leave it"
+    assert readable_text_color("#fddd54", "#000000") == "#000000", "black on the yellow is fine"
+    assert readable_text_color("#101010", "#ffffff") == "#ffffff", "already legible, leave it"
+
+
+def test_a_deliberate_low_contrast_pairing_is_left_alone():
+    """The floor is legibility, not taste. Mid-grey on white is a choice somebody could have made;
+    black on black is not."""
+    from worker.handlers.render import readable_text_color
+
+    assert readable_text_color("#ffffff", "#767676") == "#767676"
+    assert readable_text_color(None, "#000000") == "#000000", "no fill: nothing to contrast against"
+    assert readable_text_color("not-a-colour", "#000000") == "#000000"

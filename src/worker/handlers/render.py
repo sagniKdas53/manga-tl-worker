@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 from worker.config import (
     BACKEND_HEADERS,
     CALLBACK_URL,
+    CONTRAST_FLOOR,
     logger,
     minio_client,
     redis_client,
@@ -877,6 +878,40 @@ def fit_text_in_box_py(
     }
 
 
+def _relative_luminance(hex_color):
+    """WCAG relative luminance of an `#rrggbb` string, or None if it is not one."""
+    if not hex_color or not isinstance(hex_color, str) or not hex_color.startswith("#") or len(hex_color) != 7:
+        return None
+    try:
+        channels = [int(hex_color[i : i + 2], 16) / 255.0 for i in (1, 3, 5)]
+    except ValueError:
+        return None
+    linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def readable_text_color(bg_hex, fg_hex, floor=CONTRAST_FLOOR):
+    """`fg_hex`, unless it is illegible on `bg_hex`, in which case black or white.
+
+    R2 gave the renderer a backdrop colour it never used to see. A region's text colour is decided
+    without reference to it -- the default is black -- so a covering balloon sampled from a dark
+    panel arrived as black text on a near-black fill. sample10's bottom-left corner is the case:
+    white-stroked lettering on a dark panel, no balloon, dominant colour #33272d.
+
+    Only fires below the floor, so a deliberate colour pairing that is merely low-contrast is left
+    alone; black on black is never deliberate. 3.0 is WCAG's large-text threshold, and lettering
+    set to fill a balloon is large text.
+    """
+    bg = _relative_luminance(bg_hex)
+    fg = _relative_luminance(fg_hex)
+    if bg is None or fg is None:
+        return fg_hex
+    lighter, darker = max(bg, fg), min(bg, fg)
+    if (lighter + 0.05) / (darker + 0.05) >= floor:
+        return fg_hex
+    return "#000000" if bg > 0.4 else "#ffffff"
+
+
 def render_image_core(image_id, page_id=None, chapter_id=None):
     try:
         render_target_id = image_id
@@ -955,7 +990,7 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
             eh = int(el.get("maxHeight") or 50)
 
             bg_color_hex = el.get("backgroundColor")
-            text_color_hex = el.get("textColor") or "#000000"
+            text_color_hex = readable_text_color(el.get("backgroundColor"), el.get("textColor") or "#000000")
 
             font_size = float(el.get("size") or 12.0)
             font_weight = el.get("fontWeight") or "normal"
