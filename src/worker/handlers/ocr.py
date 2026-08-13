@@ -17,6 +17,7 @@ from worker.config import (
     BUBBLE_CONTOUR_FALLBACK,
     BUBBLE_CONTOUR_MAX_GROWTH,
     BUBBLE_CONTOUR_MAX_PAGE_FRACTION,
+    BUBBLE_MAX_SELF_CONTAINMENT,
     BUBBLE_MIN_TEXT_COVERAGE,
     CALLBACK_URL,
     COVER_FILL_ENABLED,
@@ -351,17 +352,30 @@ def cover_fill_for_region(img, mask_polygon, x, y, width, height):
 
 
 def bubble_covers_text(mask, fx1, fy1, fx2, fy2):
-    """Does this balloon mask actually contain that text box? (R1)
+    """Is this mask plausibly the balloon that holds that text box? (R1)
 
-    Overlap alone decided this before, and overlap alone cannot tell a balloon from the white
-    stroke drawn around unenclosed lettering -- the stroke sits exactly on the text, so it wins the
-    overlap contest against every real balloon on the page while covering only the glyphs.
+    Assignment is by greatest overlap and nothing else, which cannot tell a balloon from two things
+    that beat one on overlap. Both are rejected here, and they are separate tests because they are
+    separate failures -- see `BUBBLE_MIN_TEXT_COVERAGE` in config.py for the corpus measurement that
+    replaced a single coverage threshold, which had no separation in it at all.
+
+    - *the balloon is inside its own text*: YOLO fires on the white outline drawn around unenclosed
+      lettering, a text-shaped blob sitting exactly on the glyphs. A container cannot be contained
+      by its contents.
+    - *the balloon barely touches its text*: with no floor on overlap, a region can be handed a
+      balloon that meets it by half a percent.
+
+    Only meaningful for a *detected* contour. The raw OCR rectangle standing in for a balloon is
+    engulfed by its own text by construction, and callers must not put one through this.
     """
     area = (fx2 - fx1) * (fy2 - fy1)
     if area <= 0:
         return False
-    covered = int(np.count_nonzero(mask[fy1:fy2, fx1:fx2]))
-    return covered / area >= BUBBLE_MIN_TEXT_COVERAGE
+    overlap = int(np.count_nonzero(mask[fy1:fy2, fx1:fx2]))
+    if overlap / area < BUBBLE_MIN_TEXT_COVERAGE:
+        return False
+    balloon = int(np.count_nonzero(mask))
+    return not (balloon > 0 and overlap / balloon >= BUBBLE_MAX_SELF_CONTAINMENT)
 
 
 def get_split_polygon(mask, bbox, img_w, img_h, margin=20):
@@ -791,13 +805,12 @@ def process_ocr(job_data):
                     # gets covered geometry instead of a text-shaped slab painted over the artwork.
                     if best_b_idx >= 0 and not bubble_covers_text(bubble_masks[best_b_idx], fx1, fy1, fx2, fy2):
                         logger.info(
-                            "[YOLO] Rejected bubble %d for fragment at (%d,%d,%dx%d): covers under %.0f%% of its text",
+                            "[YOLO] Rejected bubble %d for fragment at (%d,%d,%dx%d): not a container for it",
                             best_b_idx,
                             fx1,
                             fy1,
                             fx2 - fx1,
                             fy2 - fy1,
-                            BUBBLE_MIN_TEXT_COVERAGE * 100,
                         )
                         best_b_idx = -1
                 frag["bubble_idx"] = best_b_idx

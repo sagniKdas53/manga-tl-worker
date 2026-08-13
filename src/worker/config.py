@@ -182,10 +182,32 @@ BACKGROUND_FILL_MAX_SPREAD = float(os.environ.get("BACKGROUND_FILL_MAX_SPREAD", 
 # accepted "balloon" was 0.60x the area of its own text, so a white glyph-shaped slab was painted
 # onto a yellow burst and "WAIT!" was set in the sliver left over.
 #
-# The test is coverage, not area ratio: a real balloon covers essentially all of its text, and a
-# tight-but-genuine small balloon (a lone "!?") would fail an area-ratio test that this passes.
-# 0.75 leaves room for a fragment whose box overhangs a curved outline at the corners.
-BUBBLE_MIN_TEXT_COVERAGE = float(os.environ.get("BUBBLE_MIN_TEXT_COVERAGE", "0.75"))
+# **Measured over all 40 corpus pages, 2026-08-13, and the first version of this test was wrong.**
+# It asked only "does the balloon cover its text", at 0.75. Coverage turns out to have no threshold
+# in it: over 351 elements the values run smoothly from 0.005 to 1.0 with no gap, verified-correct
+# rejections sit anywhere from 0.005 to 0.749, and probable false positives interleave with them
+# throughout. At 0.75 it flagged 19 elements, of which roughly half read as ordinary dialogue in a
+# real balloon whose merged text box simply overhangs the outline.
+#
+# What does separate them is that there are two distinct failures, and coverage only sees part of
+# each:
+#
+# - **a stroke mistaken for a balloon.** YOLO fires on the white outline drawn around unenclosed
+#   lettering, which is a text-shaped blob sitting exactly on the text, so the "balloon" ends up
+#   entirely *inside* its own text box. A container cannot be contained by its contents. Over the
+#   corpus this flags 5 of 239 real contours at 0.95 and every one is correct: sample10's 待って and
+#   its dark-panel twin, page 19's `WAARU (CLANG)` and `IMAJI (MENTAL IMAGE)`, and page 20's
+#   vertical column on bare white panel. The next value down is 0.936 and is genuine dialogue.
+# - **a balloon assigned to text it barely touches.** Assignment is by greatest overlap with no
+#   floor, so a region can be handed a balloon that overlaps it by half a percent. Below 0.25 the
+#   corpus holds 5 elements — `综`, `写`, `*`, `Meya Me (GULP GULP)`, `So… (sound of conclusion)` —
+#   all junk or sfx, and the next value up is 0.476.
+#
+# Together they flag ~10 of 239 (4%) against the first version's 19, and every one has been looked
+# at. Only apply these to a *detected* contour: a 4-point polygon is the raw OCR rectangle standing
+# in for a balloon, and it is engulfed by its own text by construction.
+BUBBLE_MIN_TEXT_COVERAGE = float(os.environ.get("BUBBLE_MIN_TEXT_COVERAGE", "0.25"))
+BUBBLE_MAX_SELF_CONTAINMENT = float(os.environ.get("BUBBLE_MAX_SELF_CONTAINMENT", "0.95"))
 
 # R2 (docs/issues.md): what to do for a region that has no flat colour to match.
 #

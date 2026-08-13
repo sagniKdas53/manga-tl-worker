@@ -97,20 +97,20 @@ def test_split_polygon_and_safe_area():
 # --- R1/R2 (docs/issues.md) -------------------------------------------------------------------
 
 
-def test_a_balloon_that_does_not_cover_its_text_is_rejected():
-    """R1. sample10's 待って: dark type with a white stroke around each glyph, on a yellow burst.
-
-    YOLO scores the stroke as a bubble. It sits exactly on the glyphs, so it beats every real
-    balloon on the page on overlap -- and the geometry that came back was 0.60x the area of its
-    own text, which is impossible for a container. Accepting it painted a glyph-shaped white slab
-    onto the burst and set "WAIT!" in the sliver left over.
+def test_a_balloon_inside_its_own_text_is_rejected():
+    """R1, first failure. sample10's 待って: dark type with a white stroke around each glyph, on a
+    yellow burst. YOLO scores the stroke as a bubble, and since it sits exactly on the glyphs it
+    beats every real balloon on the page on overlap. A container cannot be contained by its
+    contents. Over the corpus this flags 5 of 239 real contours and all five are correct.
     """
     from worker.handlers.ocr import bubble_covers_text
 
     text_box = (100, 100, 200, 300)  # x1, y1, x2, y2
 
+    # Wholly inside the text box, while still covering more than a quarter of it -- so the
+    # rejection has to come from the containment test, not from the overlap floor below.
     stroke = np.zeros((400, 400), dtype=np.uint8)
-    stroke[140:260, 130:170] = 255  # a glyph-shaped sliver inside the text box
+    stroke[120:280, 120:185] = 255  # covers 0.52 of the text, engulfed 1.00
     assert not bubble_covers_text(stroke, *text_box)
 
     balloon = np.zeros((400, 400), dtype=np.uint8)
@@ -118,17 +118,36 @@ def test_a_balloon_that_does_not_cover_its_text_is_rejected():
     assert bubble_covers_text(balloon, *text_box)
 
 
-def test_a_tight_but_real_balloon_still_passes():
-    """The reason the test is coverage and not an area ratio.
+def test_a_balloon_that_barely_touches_its_text_is_rejected():
+    """R1, second failure. Assignment is by greatest overlap with no floor at all, so a region can
+    be handed a balloon that meets it by half a percent -- page 13's `综` scored 0.005. Below 0.25
+    the corpus holds five elements and every one is junk or sfx; the next value up is 0.476."""
+    from worker.handlers.ocr import bubble_covers_text
 
-    A lone "!?" in a balloon barely bigger than itself is a real balloon, and an area-ratio test
-    tuned to reject the glyph stroke would throw it away too.
+    elsewhere = np.zeros((400, 400), dtype=np.uint8)
+    elsewhere[95:115, 95:115] = 255  # clips one corner of the text box and sits mostly outside
+    elsewhere[60:95, 60:115] = 255
+    assert not bubble_covers_text(elsewhere, 100, 100, 200, 300)
+
+
+def test_a_real_balloon_whose_text_overhangs_it_is_kept():
+    """Why the first version of this test was wrong.
+
+    It asked only "does the balloon cover its text", at 0.75. Measured over 351 corpus elements
+    coverage runs smoothly from 0.005 to 1.0 with no gap in it: verified-correct rejections sit
+    anywhere from 0.005 to 0.749 and false positives interleave with them. At 0.75 it threw away
+    ordinary dialogue in real balloons whose merged text box overhangs the outline -- page 11's
+    "S-sorry, um... are you Reimi?" at 0.672, page 16's "Hehe! How about..." at 0.695.
     """
     from worker.handlers.ocr import bubble_covers_text
 
-    mask = np.zeros((200, 200), dtype=np.uint8)
-    cv2.rectangle(mask, (48, 48), (104, 104), (255,), -1)
-    assert bubble_covers_text(mask, 50, 50, 102, 102)
+    # A wide balloon under a tall merged text box: the box overhangs it top and bottom while the
+    # balloon spills out either side. Coverage 0.692 -- under the old 0.75 bar, so this whole class
+    # was being thrown away -- and engulfed 0.416, which is nothing like a stroke.
+    balloon = np.zeros((400, 400), dtype=np.uint8)
+    cv2.ellipse(balloon, (150, 200), (150, 70), 0, 0, 360, (255,), -1)
+
+    assert bubble_covers_text(balloon, 100, 100, 200, 300)
 
 
 def test_a_shaded_region_gets_covered_instead_of_abandoned():
