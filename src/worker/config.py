@@ -4,6 +4,7 @@ import contextvars
 import json
 import logging
 import os
+import re
 
 import redis
 from minio import Minio
@@ -111,6 +112,32 @@ logger = logging.getLogger("translation")
 # configuration here. Truncating by default keeps DEBUG usable; set LOG_PAYLOAD_MAX_CHARS=0 for the
 # sessions where the whole blob is the point.
 LOG_PAYLOAD_MAX_CHARS = int(os.environ.get("LOG_PAYLOAD_MAX_CHARS", "2000"))
+
+
+_URL_SECRET_RE = re.compile(r"([?&](?:key|api_key|apikey|access_token|token)=)([^&\s\"']+)", re.I)
+_BEARER_RE = re.compile(r"(Bearer\s+)([A-Za-z0-9._\-]{8,})", re.I)
+
+
+def redact(text):
+    """Strip credentials out of a string before it is logged.
+
+    Aimed at exception text. ``requests`` puts the request URL into the string form of its
+    exceptions — ``400 Client Error: Bad Request for url: https://...?key=<secret>`` — so any
+    ``logger.error(f"... failed: {e}")` on a provider call writes the key to the log verbatim, in
+    full, at a level nothing suppresses. Verified: the key survives str(e) intact.
+
+    One provider path builds such a URL today (the direct Gemini endpoint in services/ocr.py takes
+    its key as `?key=`; every other provider sends an Authorization header). That path is not
+    reachable in this deployment — the configured `google/gemini-*` models are served through
+    OpenRouter — but it is live in the code and would start leaking the moment a direct Gemini key
+    is configured. Moving that key to the `x-goog-api-key` header is the root-cause fix and is
+    tracked in TODO.md; this is the belt to its braces, and it covers any future caller that logs an
+    exception carrying a URL secret without having to remember this rule.
+    """
+    if not text:
+        return text
+    text = _URL_SECRET_RE.sub(r"\1<redacted>", str(text))
+    return _BEARER_RE.sub(r"\1<redacted>", text)
 
 
 def log_payload(value, indent=2):

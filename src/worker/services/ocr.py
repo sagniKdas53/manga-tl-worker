@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import requests
 
+from worker.config import redact
 from worker.model_manager import model_manager
 from worker.utils.image import downscale_for_ocr
 
@@ -238,7 +239,7 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None, ro
         else:
             logger.error(f"[OCR Redo] Cloud OCR error {res.status_code} from provider={provider}")
     except Exception as e:
-        logger.error(f"[OCR Redo] Cloud OCR HTTP post failed: {e}")
+        logger.error(f"[OCR Redo] Cloud OCR HTTP post failed: {redact(e)}")
     return None
 
 
@@ -274,7 +275,7 @@ def perform_redo_ocr(img_crop_bytes, lang, qa_feedback=None):
                         )
                         return text, confidence
             except Exception as e:
-                logger.error(f"[OCR Redo] Cloud AI OCR with model '{current_model}' failed: {e}")
+                logger.error(f"[OCR Redo] Cloud AI OCR with model '{current_model}' failed: {redact(e)}")
 
     # Try local PaddleOCR first — use the lazy-init reader for the region's language
     _redo_paddle_reader = None
