@@ -8,12 +8,12 @@ import requests
 from PIL import Image
 
 from worker.config import (
-    BACKEND_HEADERS,
     CALLBACK_URL,
     QA_CONFIG,
     QA_MODE,
+    backend_headers,
     is_usable_model,
-    logger,
+    log_payload,
     minio_client,
     redis_client,
 )
@@ -25,6 +25,8 @@ from worker.services.translation import (
     try_local_vlm_vision,
 )
 from worker.utils.image import download_image
+
+logger = logging.getLogger(__name__)
 
 # `directFix` and `escalation` used to be optional, and the model simply never emitted them: the
 # 20260803-084755 run produced qaStatus "direct_fix" 10 times with zero directFix payloads and
@@ -133,27 +135,24 @@ def _sanitize_qa_results(results, ocr_regions, label="LLM"):
         kept.append(r)
 
     if discarded:
-        print(
+        logger.info(
             f"[QA] Discarded {len(discarded)} unusable {label} result(s): {'; '.join(discarded[:5])}"
-            f"{' ...' if len(discarded) > 5 else ''}",
-            flush=True,
+            f"{' ...' if len(discarded) > 5 else ''}"
         )
 
     missing = len(known_ids) - len(kept) if known_ids else 0
     if kept and missing > 0:
-        print(
+        logger.info(
             f"[QA] {label} returned a verdict for {len(kept)}/{len(known_ids)} regions — "
-            "the response was probably truncated.",
-            flush=True,
+            "the response was probably truncated."
         )
 
     # A `failed` verdict with no escalation gives the backend nothing to act on, so it falls back
     # to re-translating the same source text. Surface it; the schema now requires the object.
     unactionable = [r["regionId"] for r in kept if r.get("qaStatus") == "failed" and not r.get("escalation")]
     if unactionable:
-        print(
-            f"[QA] {len(unactionable)} failed region(s) carry no escalation block; re-OCR cannot be routed for them.",
-            flush=True,
+        logger.error(
+            f"[QA] {len(unactionable)} failed region(s) carry no escalation block; re-OCR cannot be routed for them."
         )
 
     return kept
@@ -212,7 +211,7 @@ def _qa_cloud_llm(prov, api_key, user_model, prompt, routing_strategy):
             routing_strategy=routing_strategy,
         )
     except Exception as e:
-        print(f"[QA] LLM QA via '{prov}' with model '{model}' failed: {e}", flush=True)
+        logger.error(f"[QA] LLM QA via '{prov}' with model '{model}' failed: {e}")
         return None
 
 
@@ -232,7 +231,7 @@ def _qa_cloud_vlm(prov, api_key, user_model, prompt, base64_image, routing_strat
             routing_strategy=routing_strategy,
         )
     except Exception as e:
-        print(f"[QA] VLM QA via '{prov}' with model '{model}' failed: {e}", flush=True)
+        logger.error(f"[QA] VLM QA via '{prov}' with model '{model}' failed: {e}")
         return None
 
 
@@ -264,22 +263,15 @@ def process_qa(job_data):
             qa_mode_resolved = "llm"
         else:
             qa_mode_resolved = "none"
-        print(
+        logger.info(
             f"[QA] AUTO mode resolved to '{qa_mode_resolved}' (provider={provider}, "
-            f"vlm={'yes' if has_vlm else 'no'}, llm={'yes' if has_llm else 'no'})",
-            flush=True,
+            f"vlm={'yes' if has_vlm else 'no'}, llm={'yes' if has_llm else 'no'})"
         )
 
-    print(
-        f"[QA] Processing image: {image_id}{progress_str} (mode={qa_mode_resolved})",
-        flush=True,
-    )
+    logger.info(f"[QA] Processing image: {image_id}{progress_str} (mode={qa_mode_resolved})")
 
     if job_data.get("qaAttempt", 0) > 0:
-        print(
-            "[QA] Skipping QA because qaAttempt > 0 (One pass only to prevent loops)",
-            flush=True,
-        )
+        logger.warning("[QA] Skipping QA because qaAttempt > 0 (One pass only to prevent loops)")
         _auto_pass_all(job_data)
         return
 
@@ -299,7 +291,7 @@ def process_qa(job_data):
 def _process_qa_hybrid(job_data):
     image_id = job_data.get("imageId")
     page_id = job_data.get("pageId")
-    print(f"[QA] Processing Hybrid QA check for page: {page_id or image_id}", flush=True)
+    logger.info(f"[QA] Processing Hybrid QA check for page: {page_id or image_id}")
 
     try:
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
@@ -311,18 +303,18 @@ def _process_qa_hybrid(job_data):
                 backend_url += f"&chapterId={chapter_id}"
         elif chapter_id:
             backend_url += f"?chapterId={chapter_id}"
-        res = requests.get(backend_url, headers=BACKEND_HEADERS)
+        res = requests.get(backend_url, headers=backend_headers())
         if res.status_code != 200:
-            print(f"[QA] Failed to get page/image info: {res.status_code}", flush=True)
+            logger.error(f"[QA] Failed to get page/image info: {res.status_code}")
             return
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
         if not ocr_regions:
-            print("[QA] No OCR regions found. Skipping Hybrid QA.", flush=True)
+            logger.warning("[QA] No OCR regions found. Skipping Hybrid QA.")
             _auto_pass_all(job_data)
             return
     except Exception as e:
-        print(f"[QA] Error fetching image details: {e}", flush=True)
+        logger.error(f"[QA] Error fetching image details: {e}")
         raise
 
     # Build region metadata list to seed the LLM
@@ -339,9 +331,7 @@ def _process_qa_hybrid(job_data):
             }
         )
 
-    logger.debug(
-        f"[QA] LLM QA input metadata (regions_metadata) for Hybrid pass:\n{json.dumps(regions_metadata, ensure_ascii=False, indent=2)}"
-    )
+    logger.debug(f"[QA] LLM QA input metadata (regions_metadata) for Hybrid pass:\n{log_payload(regions_metadata)}")
 
     prompt = f"""You are an expert bilingual Japanese-to-English manga translator and QA reviewer.
 Your job is to evaluate translation quality and conversation flow based on text-only metadata.
@@ -403,16 +393,10 @@ You MUST return a JSON object containing a "results" key with an array of object
                 global_model = QA_CONFIG.llm_model
                 global_provider = QA_CONFIG.provider
                 if global_provider == provider and global_model and global_model != user_model:
-                    print(
-                        f"[QA] Falling back to global default model '{global_model}'...",
-                        flush=True,
-                    )
+                    logger.warning(f"[QA] Falling back to global default model '{global_model}'...")
                     qa_response = attempt_llm(provider, global_model)
                 else:
-                    print(
-                        "[QA] No fallback applied (global provider different or model identical).",
-                        flush=True,
-                    )
+                    logger.warning("[QA] No fallback applied (global provider different or model identical).")
 
     local_llm_model = os.environ.get("LOCAL_LLM_MODEL", "").strip()
     disable_local = os.environ.get("DISABLE_LOCAL_LLM", "").strip().lower() in (
@@ -426,7 +410,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         try:
             qa_response = try_local_ai(prompt, json.dumps(regions_metadata), QA_JSON_SCHEMA)
         except Exception as e:
-            print(f"[QA] LLM QA via Local LLM failed: {e}", flush=True)
+            logger.error(f"[QA] LLM QA via Local LLM failed: {e}")
 
     results = []
     if qa_response:
@@ -442,10 +426,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             parsed = json.loads(cleaned)
             results = parsed.get("results") or []
         except Exception as e:
-            print(
-                f"[QA] Failed to parse LLM response: {e}. Raw response: {qa_response}",
-                flush=True,
-            )
+            logger.error(f"[QA] Failed to parse LLM response: {e}. Raw response: {log_payload(qa_response)}")
 
     # Call backend prepare endpoint to apply fixes and set visibility
     prepare_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}/qa-hybrid-prepare")
@@ -453,14 +434,11 @@ You MUST return a JSON object containing a "results" key with an array of object
         prep_res = requests.post(
             prepare_url,
             json={"pageId": job_data.get("pageId"), "qaResults": results},
-            headers=BACKEND_HEADERS,
+            headers=backend_headers(),
         )
-        print(
-            f"[QA] Hybrid QA preparation status code: {prep_res.status_code}",
-            flush=True,
-        )
+        logger.info(f"[QA] Hybrid QA preparation status code: {prep_res.status_code}")
     except Exception as e:
-        print(f"[QA] Failed to post Hybrid QA preparation: {e}", flush=True)
+        logger.error(f"[QA] Failed to post Hybrid QA preparation: {e}")
         raise
 
     # Trigger render inline
@@ -468,30 +446,30 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     render_ok = render_image_core(image_id)
     if not render_ok:
-        print("[QA] Rendering failed during Hybrid QA. Aborting.", flush=True)
+        logger.error("[QA] Rendering failed during Hybrid QA. Aborting.")
         return
 
     # Now run VLM check on updated render
     try:
-        res = requests.get(backend_url, headers=BACKEND_HEADERS)
+        res = requests.get(backend_url, headers=backend_headers())
         if res.status_code != 200:
-            print(f"[QA] Failed to get updated image info: {res.status_code}", flush=True)
+            logger.error(f"[QA] Failed to get updated image info: {res.status_code}")
             return
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
         if not ocr_regions:
-            print("[QA] No OCR regions found. Skipping VLM QA.", flush=True)
+            logger.warning("[QA] No OCR regions found. Skipping VLM QA.")
             _auto_pass_all(job_data)
             return
     except Exception as e:
-        print(f"[QA] Error fetching image details: {e}", flush=True)
+        logger.error(f"[QA] Error fetching image details: {e}")
         raise
 
     # Download original image
     try:
         original_bytes = download_image(image_info)
     except Exception as e:
-        print(f"[QA] Error downloading original image: {e}", flush=True)
+        logger.error(f"[QA] Error downloading original image: {e}")
         raise
 
     # Download rendered typeset image from MinIO
@@ -499,7 +477,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         response = minio_client.get_object("manga-library", f"rendered/{image_id}.png")
         rendered_bytes = response.read()
     except Exception as e:
-        print(f"[QA] Error downloading rendered image: {e}", flush=True)
+        logger.error(f"[QA] Error downloading rendered image: {e}")
         raise
 
     try:
@@ -529,9 +507,9 @@ You MUST return a JSON object containing a "results" key with an array of object
                 audit_path = os.path.join(QA_AUDIT_CACHE_DIR, f"{image_id}_{int(time.time())}.jpg")
                 combined_img.save(audit_path, format="JPEG", quality=85)
             except Exception as e:
-                print(f"[QA] Failed to write QA audit cache image: {e}", flush=True)
+                logger.error(f"[QA] Failed to write QA audit cache image: {e}")
     except Exception as e:
-        print(f"[QA] Error combining images: {e}", flush=True)
+        logger.error(f"[QA] Error combining images: {e}")
         raise
 
     # Build region metadata list to seed the VLM
@@ -609,16 +587,10 @@ You MUST return a JSON object containing a "results" key with an array of object
                 global_model = QA_CONFIG.vlm_model
                 global_provider = QA_CONFIG.provider
                 if global_provider == provider and global_model and global_model != user_model:
-                    print(
-                        f"[QA] Falling back to global default VLM model '{global_model}'...",
-                        flush=True,
-                    )
+                    logger.warning(f"[QA] Falling back to global default VLM model '{global_model}'...")
                     qa_response_vlm = attempt_vlm(provider, global_model)
                 else:
-                    print(
-                        "[QA] No fallback applied (global provider different or model identical).",
-                        flush=True,
-                    )
+                    logger.warning("[QA] No fallback applied (global provider different or model identical).")
 
     local_vlm_model = os.environ.get("LOCAL_VLM_MODEL", "").strip()
 
@@ -626,7 +598,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         try:
             qa_response_vlm = try_local_vlm_vision(local_vlm_model, prompt_vlm, combined_base64, QA_JSON_SCHEMA)
         except Exception as e:
-            print(f"[QA] VLM QA via Local VLM failed: {e}", flush=True)
+            logger.error(f"[QA] VLM QA via Local VLM failed: {e}")
 
     results_vlm = []
     if qa_response_vlm:
@@ -642,10 +614,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             parsed = json.loads(cleaned)
             results_vlm = parsed.get("results") or []
         except Exception as e:
-            print(
-                f"[QA] Failed to parse VLM response: {e}. Raw response: {qa_response_vlm}",
-                flush=True,
-            )
+            logger.error(f"[QA] Failed to parse VLM response: {e}. Raw response: {log_payload(qa_response_vlm)}")
 
     results_vlm = _sanitize_qa_results(results_vlm, ocr_regions, label="VLM")
 
@@ -653,7 +622,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         # Deliberately not auto-passing. Fabricating a pass for every region is what made a failed
         # QA call indistinguishable from a clean page; an empty list tells the backend QA did not
         # run, and it records that instead of a verdict.
-        print("[QA] No usable VLM results — reporting no verdict rather than auto-passing.", flush=True)
+        logger.warning("[QA] No usable VLM results — reporting no verdict rather than auto-passing.")
 
     # Call backend
     callback_payload = {
@@ -688,15 +657,15 @@ You MUST return a JSON object containing a "results" key with an array of object
             f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
         )
     try:
-        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=BACKEND_HEADERS)
-        print(f"[QA] Callback status code: {res.status_code}", flush=True)
+        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=backend_headers())
+        logger.debug(f"[QA] Callback status code: {res.status_code}")
     except Exception as e:
-        print(f"[QA] Failed to post QA callback to backend: {e}", flush=True)
+        logger.error(f"[QA] Failed to post QA callback to backend: {e}")
 
 
 def _auto_pass_all(job_data):
     image_id = job_data["imageId"]
-    print(f"[QA] Skipping QA (QA_MODE=none) for image: {image_id}", flush=True)
+    logger.warning(f"[QA] Skipping QA (QA_MODE=none) for image: {image_id}")
 
     try:
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
@@ -708,14 +677,14 @@ def _auto_pass_all(job_data):
                 backend_url += f"&chapterId={chapter_id}"
         elif chapter_id:
             backend_url += f"?chapterId={chapter_id}"
-        res = requests.get(backend_url, headers=BACKEND_HEADERS)
+        res = requests.get(backend_url, headers=backend_headers())
         if res.status_code != 200:
-            print(f"[QA] Failed to get image info: {res.status_code}", flush=True)
+            logger.error(f"[QA] Failed to get image info: {res.status_code}")
             return
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
     except Exception as e:
-        print(f"[QA] Error fetching image details: {e}", flush=True)
+        logger.error(f"[QA] Error fetching image details: {e}")
         raise
 
     results = []
@@ -762,15 +731,15 @@ def _auto_pass_all(job_data):
             f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
         )
     try:
-        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=BACKEND_HEADERS)
-        print(f"[QA] Callback status code: {res.status_code}", flush=True)
+        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=backend_headers())
+        logger.debug(f"[QA] Callback status code: {res.status_code}")
     except Exception as e:
-        print(f"[QA] Failed to post QA callback to backend: {e}", flush=True)
+        logger.error(f"[QA] Failed to post QA callback to backend: {e}")
 
 
 def _process_qa_llm(job_data):
     image_id = job_data["imageId"]
-    print(f"[QA] Processing text-only LLM QA check for image: {image_id}", flush=True)
+    logger.info(f"[QA] Processing text-only LLM QA check for image: {image_id}")
 
     try:
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
@@ -782,18 +751,18 @@ def _process_qa_llm(job_data):
                 backend_url += f"&chapterId={chapter_id}"
         elif chapter_id:
             backend_url += f"?chapterId={chapter_id}"
-        res = requests.get(backend_url, headers=BACKEND_HEADERS)
+        res = requests.get(backend_url, headers=backend_headers())
         if res.status_code != 200:
-            print(f"[QA] Failed to get image info: {res.status_code}", flush=True)
+            logger.error(f"[QA] Failed to get image info: {res.status_code}")
             return
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
         if not ocr_regions:
-            print("[QA] No OCR regions found. Skipping LLM QA.", flush=True)
+            logger.warning("[QA] No OCR regions found. Skipping LLM QA.")
             _auto_pass_all(job_data)
             return
     except Exception as e:
-        print(f"[QA] Error fetching image details: {e}", flush=True)
+        logger.error(f"[QA] Error fetching image details: {e}")
         raise
 
     # Build region metadata list to seed the LLM
@@ -810,9 +779,7 @@ def _process_qa_llm(job_data):
             }
         )
 
-    logger.debug(
-        f"[QA] LLM QA input metadata (regions_metadata):\n{json.dumps(regions_metadata, ensure_ascii=False, indent=2)}"
-    )
+    logger.debug(f"[QA] LLM QA input metadata (regions_metadata):\n{log_payload(regions_metadata)}")
 
     prompt = f"""You are an expert bilingual Japanese-to-English manga translator and QA reviewer.
 Your job is to evaluate translation quality and conversation flow based on text-only metadata.
@@ -867,7 +834,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             try:
                 qa_response = try_local_ai(prompt, json.dumps(regions_metadata), QA_JSON_SCHEMA)
             except Exception as e:
-                print(f"[QA] LLM QA via Local LLM failed: {e}", flush=True)
+                logger.error(f"[QA] LLM QA via Local LLM failed: {e}")
     else:
         # Try the preferred provider first
         if provider:
@@ -880,16 +847,10 @@ You MUST return a JSON object containing a "results" key with an array of object
                     global_model = QA_CONFIG.llm_model
                     global_provider = QA_CONFIG.provider
                     if global_provider == provider and global_model and global_model != user_model:
-                        print(
-                            f"[QA] Falling back to global default LLM model '{global_model}'...",
-                            flush=True,
-                        )
+                        logger.warning(f"[QA] Falling back to global default LLM model '{global_model}'...")
                         qa_response = attempt_llm(provider, global_model)
                     else:
-                        print(
-                            "[QA] No fallback applied (global provider different or model identical).",
-                            flush=True,
-                        )
+                        logger.warning("[QA] No fallback applied (global provider different or model identical).")
 
     results = []
     if logger.isEnabledFor(logging.DEBUG) and qa_response:
@@ -908,10 +869,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             parsed = json.loads(cleaned)
             results = parsed.get("results") or []
         except Exception as e:
-            print(
-                f"[QA] Failed to parse LLM response: {e}. Raw response: {qa_response}",
-                flush=True,
-            )
+            logger.error(f"[QA] Failed to parse LLM response: {e}. Raw response: {log_payload(qa_response)}")
 
     results = _sanitize_qa_results(results, ocr_regions, label="LLM")
 
@@ -919,9 +877,9 @@ You MUST return a JSON object containing a "results" key with an array of object
         # Deliberately not auto-passing. Fabricating a pass for every region is what made a failed
         # QA call indistinguishable from a clean page; an empty list tells the backend QA did not
         # run, and it records that instead of a verdict.
-        print("[QA] No usable LLM results — reporting no verdict rather than auto-passing.", flush=True)
+        logger.warning("[QA] No usable LLM results — reporting no verdict rather than auto-passing.")
 
-    logger.debug(f"[QA] LLM QA results output:\n{json.dumps(results, ensure_ascii=False, indent=2)}")
+    logger.debug(f"[QA] LLM QA results output:\n{log_payload(results)}")
 
     # Call backend
     callback_payload = {
@@ -956,15 +914,15 @@ You MUST return a JSON object containing a "results" key with an array of object
             f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
         )
     try:
-        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=BACKEND_HEADERS)
-        print(f"[QA] Callback status code: {res.status_code}", flush=True)
+        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=backend_headers())
+        logger.debug(f"[QA] Callback status code: {res.status_code}")
     except Exception as e:
-        print(f"[QA] Failed to post QA callback to backend: {e}", flush=True)
+        logger.error(f"[QA] Failed to post QA callback to backend: {e}")
 
 
 def _process_qa_vlm(job_data):
     image_id = job_data["imageId"]
-    print(f"[QA] Processing VLM vision QA check for image: {image_id}", flush=True)
+    logger.info(f"[QA] Processing VLM vision QA check for image: {image_id}")
 
     try:
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
@@ -976,25 +934,25 @@ def _process_qa_vlm(job_data):
                 backend_url += f"&chapterId={chapter_id}"
         elif chapter_id:
             backend_url += f"?chapterId={chapter_id}"
-        res = requests.get(backend_url, headers=BACKEND_HEADERS)
+        res = requests.get(backend_url, headers=backend_headers())
         if res.status_code != 200:
-            print(f"[QA] Failed to get image info: {res.status_code}", flush=True)
+            logger.error(f"[QA] Failed to get image info: {res.status_code}")
             return
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
         if not ocr_regions:
-            print("[QA] No OCR regions found. Skipping VLM QA.", flush=True)
+            logger.warning("[QA] No OCR regions found. Skipping VLM QA.")
             _auto_pass_all(job_data)
             return
     except Exception as e:
-        print(f"[QA] Error fetching image details: {e}", flush=True)
+        logger.error(f"[QA] Error fetching image details: {e}")
         raise
 
     # Download original image
     try:
         original_bytes = download_image(image_info)
     except Exception as e:
-        print(f"[QA] Error downloading original image: {e}", flush=True)
+        logger.error(f"[QA] Error downloading original image: {e}")
         raise
 
     # Download rendered typeset image from MinIO
@@ -1002,7 +960,7 @@ def _process_qa_vlm(job_data):
         response = minio_client.get_object("manga-library", f"rendered/{image_id}.png")
         rendered_bytes = response.read()
     except Exception as e:
-        print(f"[QA] Error downloading rendered image: {e}", flush=True)
+        logger.error(f"[QA] Error downloading rendered image: {e}")
         raise
 
     try:
@@ -1034,9 +992,9 @@ def _process_qa_vlm(job_data):
                 audit_path = os.path.join(QA_AUDIT_CACHE_DIR, f"{image_id}_{int(time.time())}.jpg")
                 combined_img.save(audit_path, format="JPEG", quality=85)
             except Exception as e:
-                print(f"[QA] Failed to write QA audit cache image: {e}", flush=True)
+                logger.error(f"[QA] Failed to write QA audit cache image: {e}")
     except Exception as e:
-        print(f"[QA] Error combining images: {e}", flush=True)
+        logger.error(f"[QA] Error combining images: {e}")
         raise
 
     # Build region metadata list to seed the VLM
@@ -1057,9 +1015,7 @@ def _process_qa_vlm(job_data):
             }
         )
 
-    logger.debug(
-        f"[QA] VLM QA input metadata (regions_metadata):\n{json.dumps(regions_metadata, ensure_ascii=False, indent=2)}"
-    )
+    logger.debug(f"[QA] VLM QA input metadata (regions_metadata):\n{log_payload(regions_metadata)}")
 
     prompt = f"""You are an expert Japanese-to-English manga translator and typesetting reviewer. Given the original Japanese manga page (left) and the English typeset page (right), verify: (1) OCR accuracy by comparing visible Japanese text against transcription, (2) Translation quality and natural English, (3) Typesetting quality — text fitting, overflow, readability.
 
@@ -1116,7 +1072,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             try:
                 qa_response = try_local_vlm_vision(local_vlm_model, prompt, combined_base64, QA_JSON_SCHEMA)
             except Exception as e:
-                print(f"[QA] VLM QA via Local VLM failed: {e}", flush=True)
+                logger.error(f"[QA] VLM QA via Local VLM failed: {e}")
     else:
         # Try the preferred provider first
         if provider:
@@ -1129,16 +1085,10 @@ You MUST return a JSON object containing a "results" key with an array of object
                     global_model = QA_CONFIG.vlm_model
                     global_provider = QA_CONFIG.provider
                     if global_provider == provider and global_model and global_model != user_model:
-                        print(
-                            f"[QA] Falling back to global default VLM model '{global_model}'...",
-                            flush=True,
-                        )
+                        logger.warning(f"[QA] Falling back to global default VLM model '{global_model}'...")
                         qa_response = attempt_vlm(provider, global_model)
                     else:
-                        print(
-                            "[QA] No fallback applied (global provider different or model identical).",
-                            flush=True,
-                        )
+                        logger.warning("[QA] No fallback applied (global provider different or model identical).")
 
     # VLM Evaluation Fail-Safe Fallback:
     # If all configured/active VLM options fail to return a parseable response,
@@ -1161,10 +1111,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             parsed = json.loads(cleaned)
             results = parsed.get("results") or []
         except Exception as e:
-            print(
-                f"[QA] Failed to parse VLM response: {e}. Raw response: {qa_response}",
-                flush=True,
-            )
+            logger.error(f"[QA] Failed to parse VLM response: {e}. Raw response: {log_payload(qa_response)}")
 
     results = _sanitize_qa_results(results, ocr_regions, label="VLM")
 
@@ -1172,9 +1119,9 @@ You MUST return a JSON object containing a "results" key with an array of object
         # Deliberately not auto-passing. Fabricating a pass for every region is what made a failed
         # QA call indistinguishable from a clean page; an empty list tells the backend QA did not
         # run, and it records that instead of a verdict.
-        print("[QA] No usable VLM results — reporting no verdict rather than auto-passing.", flush=True)
+        logger.warning("[QA] No usable VLM results — reporting no verdict rather than auto-passing.")
 
-    logger.debug(f"[QA] VLM QA results output:\n{json.dumps(results, ensure_ascii=False, indent=2)}")
+    logger.debug(f"[QA] VLM QA results output:\n{log_payload(results)}")
 
     # Call backend
     callback_payload = {
@@ -1209,7 +1156,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
         )
     try:
-        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=BACKEND_HEADERS)
-        print(f"[QA] Callback status code: {res.status_code}", flush=True)
+        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=backend_headers())
+        logger.debug(f"[QA] Callback status code: {res.status_code}")
     except Exception as e:
-        print(f"[QA] Failed to post QA callback to backend: {e}", flush=True)
+        logger.error(f"[QA] Failed to post QA callback to backend: {e}")

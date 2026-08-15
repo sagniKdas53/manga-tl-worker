@@ -12,7 +12,6 @@ import numpy as np
 import requests
 
 from worker.config import (
-    BACKEND_HEADERS,
     BACKGROUND_FILL_MAX_SPREAD,
     BUBBLE_CONTOUR_FALLBACK,
     BUBBLE_CONTOUR_MAX_GROWTH,
@@ -30,7 +29,7 @@ from worker.config import (
     OCR_WAIST_GATE,
     OCR_WAIST_MAX_SOLIDITY,
     YOLO_MASK_EROSION,
-    logger,
+    backend_headers,
     redis_client,
 )
 from worker.model_manager import model_manager
@@ -48,6 +47,8 @@ from worker.services.translation import (
 from worker.utils.image import calculate_overlap_area, download_image, downscale_for_ocr
 from worker.utils.lock import acquire_lock
 from worker.utils.text import detect_language
+
+logger = logging.getLogger(__name__)
 
 
 def grouping_config(reading_direction):
@@ -207,7 +208,7 @@ def detect_background_color_poly(img, mask_polygon):
         r, g, b = int(median_bgr[2]), int(median_bgr[1]), int(median_bgr[0])
         return f"#{r:02x}{g:02x}{b:02x}"
     except Exception as e:
-        print(f"[OCR] Error detecting color from poly: {e}", flush=True)
+        logger.error(f"[OCR] Error detecting color from poly: {e}")
         return None
 
 
@@ -401,7 +402,7 @@ def get_split_polygon(mask, bbox, img_w, img_h, margin=20):
         simplified = cv2.approxPolyDP(contour, epsilon, True)
         return [[int(pt[0][0]), int(pt[0][1])] for pt in simplified]
     except Exception as e:
-        print(f"[OCR] Error splitting polygon: {e}", flush=True)
+        logger.error(f"[OCR] Error splitting polygon: {e}")
         raise e
 
 
@@ -580,9 +581,8 @@ def process_ocr(job_data):
             progress_str += f" of Chapter {chapter_num}"
         progress_str += f" (Queue: {queue_len} remaining)"
 
-    print(
-        f"[OCR] Processing image: {image_id} (lang={source_language}, direction={reading_direction}){progress_str}",
-        flush=True,
+    logger.info(
+        f"[OCR] Processing image: {image_id} (lang={source_language}, direction={reading_direction}){progress_str}"
     )
 
     try:
@@ -595,20 +595,20 @@ def process_ocr(job_data):
                 backend_url += f"&chapterId={chapter_id}"
         elif chapter_id:
             backend_url += f"?chapterId={chapter_id}"
-        res = requests.get(backend_url, headers=BACKEND_HEADERS)
+        res = requests.get(backend_url, headers=backend_headers())
         if res.status_code != 200:
-            print(f"[OCR] Failed to get image info: {res.status_code}", flush=True)
+            logger.error(f"[OCR] Failed to get image info: {res.status_code}")
             return
         image_info = res.json()
         panels = image_info.get("panels", [])
     except Exception as e:
-        print(f"[OCR] Error fetching image details: {e}", flush=True)
+        logger.error(f"[OCR] Error fetching image details: {e}")
         raise
 
     try:
         img_bytes = download_image(image_info)
     except Exception as e:
-        print(f"[OCR] Error downloading image: {e}", flush=True)
+        logger.error(f"[OCR] Error downloading image: {e}")
         raise
 
     try:
@@ -656,16 +656,13 @@ def process_ocr(job_data):
                 try:
                     det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det").strip()
                     rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
-                    print(
-                        f"[OCR] Running PaddleOCR ({det_model}/{rec_model}, lang={source_language}).",
-                        flush=True,
-                    )
+                    logger.info(f"[OCR] Running PaddleOCR ({det_model}/{rec_model}, lang={source_language}).")
 
                     try:
                         import psutil
 
                         rss = psutil.Process().memory_info().rss / 1024 / 1024
-                        print(f"[OCR] Memory before OCR: {rss:.1f} MB", flush=True)
+                        logger.info(f"[OCR] Memory before OCR: {rss:.1f} MB")
                     except Exception:
                         pass
 
@@ -675,38 +672,26 @@ def process_ocr(job_data):
                     img_decoded, ocr_upscale = downscale_for_ocr(img_original, max_dim=1024)
 
                     if ocr_upscale != 1.0:
-                        print(
-                            f"[OCR] Downscaled image for OCR (upscale factor: {ocr_upscale:.2f}x)",
-                            flush=True,
-                        )
+                        logger.info(f"[OCR] Downscaled image for OCR (upscale factor: {ocr_upscale:.2f}x)")
 
                     del nparr  # free compressed buffer immediately
                     if img_decoded is not None:
-                        print("[OCR] Calling PaddleOCR...", flush=True)
+                        logger.info("[OCR] Calling PaddleOCR...")
                         raw_results = paddle_ocr_reader.predict(img_decoded)
-                        print("[OCR] PaddleOCR returned.", flush=True)
+                        logger.info("[OCR] PaddleOCR returned.")
                         results = parse_paddle_ocr_results(raw_results)
                         del raw_results
                         gc.collect()
                     else:
-                        print(
-                            "[OCR] OpenCV failed to decode image for PaddleOCR",
-                            flush=True,
-                        )
+                        logger.error("[OCR] OpenCV failed to decode image for PaddleOCR")
                 except Exception as ocr_err:
-                    print(
-                        f"[OCR] PaddleOCR failed with exception: {ocr_err}.",
-                        flush=True,
-                    )
+                    logger.error(f"[OCR] PaddleOCR failed with exception: {ocr_err}.")
                     raise ocr_err
 
             if paddle_ocr_detector is not None:
                 try:
                     det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det").strip()
-                    print(
-                        f"[OCR] Running PaddleOCR Detector ({det_model}, lang={source_language}).",
-                        flush=True,
-                    )
+                    logger.info(f"[OCR] Running PaddleOCR Detector ({det_model}, lang={source_language}).")
                     nparr = np.frombuffer(img_bytes, np.uint8)
                     img_original = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                     img_decoded, ocr_upscale = downscale_for_ocr(img_original, max_dim=1024)
@@ -717,19 +702,13 @@ def process_ocr(job_data):
                         del raw_results
                         gc.collect()
                     else:
-                        print(
-                            "[OCR] OpenCV failed to decode image for PaddleOCR Detector",
-                            flush=True,
-                        )
+                        logger.error("[OCR] OpenCV failed to decode image for PaddleOCR Detector")
                 except Exception as ocr_err:
-                    print(
-                        f"[OCR] PaddleOCR Detector failed with exception: {ocr_err}.",
-                        flush=True,
-                    )
+                    logger.error(f"[OCR] PaddleOCR Detector failed with exception: {ocr_err}.")
                     raise ocr_err
 
             if not results:
-                print("[OCR] No text regions detected", flush=True)
+                logger.info("[OCR] No text regions detected")
 
             # Force GC to reclaim any large temporary tensors created during inference
             gc.collect()
@@ -743,7 +722,7 @@ def process_ocr(job_data):
                     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                     del nparr
                 except Exception as e:
-                    print(f"[OCR] Error decoding image: {e}", flush=True)
+                    logger.error(f"[OCR] Error decoding image: {e}")
 
             img_h, img_w = img.shape[:2] if img is not None else (0, 0)
             detected_bubbles = None
@@ -969,10 +948,7 @@ def process_ocr(job_data):
             if not use_paddle_ocr:
                 # CLOUD OCR MODE (VLM Batching)
                 if candidate_regions:
-                    print(
-                        f"[OCR] VLM OCR Mode active (batched) for {len(candidate_regions)} regions.",
-                        flush=True,
-                    )
+                    logger.info(f"[OCR] VLM OCR Mode active (batched) for {len(candidate_regions)} regions.")
                     provider = job_data.get("ocrProvider") or OCR_CONFIG.provider
                     api_key = OCR_CONFIG.resolve_key(provider)
                     routing_strategy = job_data.get("routingStrategy") or "lowest-cost"
@@ -1041,9 +1017,8 @@ def process_ocr(job_data):
 
                         def process_crop_chunk(chunk_idx, chunk):
                             nonlocal vlm_model_used
-                            print(
-                                f"[OCR] Processing cloud OCR batch chunk {chunk_idx + 1}/{len(crop_chunks)} ({len(chunk)} crops)...",
-                                flush=True,
+                            logger.info(
+                                f"[OCR] Processing cloud OCR batch chunk {chunk_idx + 1}/{len(crop_chunks)} ({len(chunk)} crops)..."
                             )
                             results_list = []
                             if (
@@ -1076,9 +1051,8 @@ def process_ocr(job_data):
                                         )
                                         results_list = parsed.get("results", [])
                                         if results_list:
-                                            print(
-                                                f"[OCR] Successfully processed chunk {chunk_idx + 1} using model '{user_model}'",
-                                                flush=True,
+                                            logger.info(
+                                                f"[OCR] Successfully processed chunk {chunk_idx + 1} using model '{user_model}'"
                                             )
                                             vlm_model_used = user_model
 
@@ -1092,9 +1066,8 @@ def process_ocr(job_data):
                                             and global_model
                                             and global_model != user_model
                                         ):
-                                            print(
-                                                f"[OCR] Falling back to global default VLM model '{global_model}'...",
-                                                flush=True,
+                                            logger.warning(
+                                                f"[OCR] Falling back to global default VLM model '{global_model}'..."
                                             )
                                             chunk_res = try_cloud_ai_vision_batch(
                                                 provider,
@@ -1114,22 +1087,17 @@ def process_ocr(job_data):
                                                 )
                                                 results_list = parsed.get("results", [])
                                                 if results_list:
-                                                    print(
-                                                        f"[OCR] Successfully processed chunk {chunk_idx + 1} using global fallback model '{global_model}'",
-                                                        flush=True,
+                                                    logger.warning(
+                                                        f"[OCR] Successfully processed chunk {chunk_idx + 1} using global fallback model '{global_model}'"
                                                     )
                                                     vlm_model_used = global_model
                                         else:
-                                            print(
-                                                "[OCR] No fallback applied (global provider different or model identical).",
-                                                flush=True,
+                                            logger.warning(
+                                                "[OCR] No fallback applied (global provider different or model identical)."
                                             )
 
                                 except Exception as parse_err:
-                                    print(
-                                        f"[OCR] Failed for model on chunk {chunk_idx + 1}: {parse_err}",
-                                        flush=True,
-                                    )
+                                    logger.error(f"[OCR] Failed for model on chunk {chunk_idx + 1}: {parse_err}")
                             else:
                                 local_model = job_data.get("ocrModel") or os.environ.get("LOCAL_VLM_MODEL", "").strip()
                                 if local_model:
@@ -1183,9 +1151,8 @@ def process_ocr(job_data):
                                                         }
                                                     )
                                         except Exception as local_vlm_err:
-                                            print(
-                                                f"[OCR] Local VLM failed for crop {crop_info['id']}: {local_vlm_err}",
-                                                flush=True,
+                                            logger.error(
+                                                f"[OCR] Local VLM failed for crop {crop_info['id']}: {local_vlm_err}"
                                             )
                             return results_list
 
@@ -1214,9 +1181,8 @@ def process_ocr(job_data):
                             from worker.services.ocr import is_valid_ocr_text
 
                             if not is_valid_ocr_text(final_text):
-                                print(
-                                    f"[OCR] VLM result for region_{cr_idx} rejected by validation: '{final_text}'",
-                                    flush=True,
+                                logger.warning(
+                                    f"[OCR] VLM result for region_{cr_idx} rejected by validation: '{final_text}'"
                                 )
                                 continue
                             bg_color, r["poly_pts"] = cover_fill_for_region(
@@ -1443,9 +1409,8 @@ def process_ocr(job_data):
             r["bubbleReadingOrder"] = b_order
             ordered_regions.append(r)
 
-        print(
-            f"[OCR] Completed OCR. Found {len(ordered_regions)} text regions (lang={source_language}, direction={reading_direction})",
-            flush=True,
+        logger.info(
+            f"[OCR] Completed OCR. Found {len(ordered_regions)} text regions (lang={source_language}, direction={reading_direction})"
         )
 
         avg_conf = sum(r["confidence"] for r in ordered_regions) / len(ordered_regions) if ordered_regions else 1.0
@@ -1482,7 +1447,7 @@ def process_ocr(job_data):
                 }
                 callback_payload["cost"] = cost_payload
         except Exception as e:
-            print(f"[OCR] Error fetching job costs: {e}", flush=True)
+            logger.error(f"[OCR] Error fetching job costs: {e}")
 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"[OCR] Outputs: callback_payload={callback_payload}")
@@ -1490,12 +1455,12 @@ def process_ocr(job_data):
             res = requests.post(
                 f"{CALLBACK_URL}/ocr",
                 json=callback_payload,
-                headers=BACKEND_HEADERS,
+                headers=backend_headers(),
             )
-            print(f"[OCR] Callback status code: {res.status_code}", flush=True)
+            logger.debug(f"[OCR] Callback status code: {res.status_code}")
         except Exception as e:
-            print(f"[OCR] Failed to post callback to backend: {e}", flush=True)
+            logger.error(f"[OCR] Failed to post callback to backend: {e}")
             raise e
     except Exception as e:
-        print(f"[OCR] Error during OCR process: {e}", flush=True)
+        logger.error(f"[OCR] Error during OCR process: {e}")
         raise e

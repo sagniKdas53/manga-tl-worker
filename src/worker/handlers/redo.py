@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import requests
 
-from worker.config import BACKEND_HEADERS, CALLBACK_URL, logger
+from worker.config import CALLBACK_URL, backend_headers, logger
 from worker.services.ocr import perform_redo_ocr
 from worker.services.translation import translate_text
 from worker.utils.image import download_image
@@ -26,10 +26,7 @@ def process_region_redo(job_data):
     if redo_type == "translation":
         logger.info(f"{req_prefix}Processing region redo: {region_id} on image {image_id} with type {redo_type}")
     else:
-        print(
-            f"[Region Redo] Processing region: {region_id} on image {image_id} with type {redo_type}",
-            flush=True,
-        )
+        logger.info(f"[Region Redo] Processing region: {region_id} on image {image_id} with type {redo_type}")
 
     try:
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
@@ -41,15 +38,12 @@ def process_region_redo(job_data):
                 backend_url += f"&chapterId={chapter_id}"
         elif chapter_id:
             backend_url += f"?chapterId={chapter_id}"
-        res = requests.get(backend_url, headers=BACKEND_HEADERS)
+        res = requests.get(backend_url, headers=backend_headers())
         if res.status_code != 200:
             if redo_type == "translation":
                 logger.error(f"{req_prefix}Failed to get image info: {res.status_code}")
             else:
-                print(
-                    f"[Region Redo] Failed to get image info: {res.status_code}",
-                    flush=True,
-                )
+                logger.error(f"[Region Redo] Failed to get image info: {res.status_code}")
             return
         image_info = res.json()
         image_info["storagePath"]
@@ -58,7 +52,7 @@ def process_region_redo(job_data):
         if redo_type == "translation":
             logger.error(f"{req_prefix}Error fetching image details: {e}")
         else:
-            print(f"[Region Redo] Error fetching image details: {e}", flush=True)
+            logger.error(f"[Region Redo] Error fetching image details: {e}")
         return
 
     region = None
@@ -71,10 +65,7 @@ def process_region_redo(job_data):
         if redo_type == "translation":
             logger.error(f"{req_prefix}Region {region_id} not found in image details")
         else:
-            print(
-                f"[Region Redo] Region {region_id} not found in image details",
-                flush=True,
-            )
+            logger.warning(f"[Region Redo] Region {region_id} not found in image details")
         return
 
     try:
@@ -83,7 +74,7 @@ def process_region_redo(job_data):
         if redo_type == "translation":
             logger.error(f"{req_prefix}Error downloading image: {e}")
         else:
-            print(f"[Region Redo] Error downloading image: {e}", flush=True)
+            logger.error(f"[Region Redo] Error downloading image: {e}")
         return
 
     callback_payload = {}
@@ -113,12 +104,9 @@ def process_region_redo(job_data):
                 callback_payload["text"] = text
                 callback_payload["confidence"] = confidence
                 callback_payload["detectedLanguage"] = detected_lang
-                print(
-                    f"[Region Redo] Redo OCR success: '{text}' (conf={confidence}, lang={detected_lang})",
-                    flush=True,
-                )
+                logger.info(f"[Region Redo] Redo OCR success: '{text}' (conf={confidence}, lang={detected_lang})")
         except Exception as e:
-            print(f"[Region Redo] Redo OCR failed: {e}", flush=True)
+            logger.error(f"[Region Redo] Redo OCR failed: {e}")
             raise
 
     elif redo_type == "translation":
@@ -161,13 +149,13 @@ def process_region_redo(job_data):
 
     try:
         callback_url = CALLBACK_URL.replace("/jobs/callback", f"/ocr-regions/{region_id}/callback")
-        res = requests.post(callback_url, json=callback_payload, headers=BACKEND_HEADERS)
+        res = requests.post(callback_url, json=callback_payload, headers=backend_headers())
         if redo_type == "translation":
             logger.info(f"{req_prefix}Callback status code: {res.status_code}")
         else:
-            print(f"[Region Redo] Callback status code: {res.status_code}", flush=True)
+            logger.debug(f"[Region Redo] Callback status code: {res.status_code}")
     except Exception as e:
         if redo_type == "translation":
             logger.error(f"{req_prefix}Failed to post callback: {e}")
         else:
-            print(f"[Region Redo] Failed to post callback: {e}", flush=True)
+            logger.error(f"[Region Redo] Failed to post callback: {e}")

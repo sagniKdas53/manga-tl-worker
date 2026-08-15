@@ -35,7 +35,7 @@ def enforce_rate_limit(provider: str | None = None, provider_rpm: float | None =
                 # AUDIT-Q3: [RateLimit], not [Translation] — enforce_rate_limit is shared by the
                 # translation, OCR and QA paths, so the old prefix sent anyone grepping the worker
                 # log for an OCR or QA stall looking at the wrong stage.
-                print(f"[RateLimit] Error parsing RATE_LIMIT env: {e}", flush=True)
+                logger.error(f"[RateLimit] Error parsing RATE_LIMIT env: {e}")
 
     if rpm and rpm > 0:
         min_delay = 60.0 / rpm
@@ -53,9 +53,8 @@ def enforce_rate_limit(provider: str | None = None, provider_rpm: float | None =
                 PROVIDER_LAST_REQUEST_TIME[lock_key] = now
 
         if sleep_time > 0:
-            print(
-                f"[RateLimit] Sleeping for {sleep_time:.2f} seconds to respect {rpm} RPM limit for {lock_key}...",
-                flush=True,
+            logger.debug(
+                f"[RateLimit] Sleeping for {sleep_time:.2f} seconds to respect {rpm} RPM limit for {lock_key}..."
             )
             time.sleep(sleep_time)
 

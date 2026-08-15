@@ -1,7 +1,10 @@
 """Configuration parameters and initialization for the unified workers."""
 
+import contextvars
+import json
 import logging
 import os
+import re
 
 import redis
 from minio import Minio
@@ -20,13 +23,137 @@ def trace(self, message, *args, **kws):
 
 logging.Logger.trace = trace  # type: ignore
 
+# The pipeline's trace id for whatever job this thread is currently running, or "" between jobs.
+#
+# The backend has minted one id per pipeline for some time (JobCoordinatorService, keyed in Redis
+# under pipeline:trace:<imageId>) and ships it in every job payload as "traceId" — the worker simply
+# never read it. Setting it here, from the one place every job enters (process_job_rq), is what lets
+# a single page's six stages be grepped out of both containers' logs with one string.
+#
+# A ContextVar rather than a global because jobs run concurrently (CONCURRENT_JOBS defaults to 5);
+# each worker thread gets its own value with no locking.
+_trace_id: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id", default="")
+
+
+def set_trace_id(trace_id):
+    """Bind a pipeline trace id to the current job context. Returns the reset token."""
+    return _trace_id.set(str(trace_id) if trace_id else "")
+
+
+def reset_trace_id(token):
+    """Unbind, restoring whatever was bound before. Pair with the token from set_trace_id."""
+    try:
+        _trace_id.reset(token)
+    except ValueError:
+        # The token belongs to another context (the job ran on a different thread than it started
+        # on). Clearing outright is the safe fallback: an unset id is correct-but-empty, a stale one
+        # mislabels the next job.
+        _trace_id.set("")
+
+
+def get_trace_id() -> str:
+    return _trace_id.get()
+
+
+class _TraceIdFilter(logging.Filter):
+    """Injects ``trace`` into every record so the formatter can print it unconditionally.
+
+    Shortened to 8 characters to match the backend's log pattern: a full UUID on every line wraps in
+    Dozzle and buys nothing at this cardinality. Records emitted outside a job (startup, the health
+    endpoint, model loading) get dashes, which keeps the columns aligned.
+    """
+
+    def filter(self, record):
+        tid = _trace_id.get()
+        record.trace = tid[:8] if tid else "--------"
+        return True
+
+
+class _HealthProbeFilter(logging.Filter):
+    """Drops uvicorn's access line for the container healthcheck.
+
+    That probe runs every 5 seconds and produced 733 lines in a 65-minute window — more lines than
+    the worker logged at WARNING and ERROR combined, all of them saying 200. A *failing* probe is
+    still visible: it shows up as the container going unhealthy in `docker ps`.
+    """
+
+    def filter(self, record):
+        return "/health" not in record.getMessage()
+
+
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 level = TRACE_LEVEL_NUM if LOG_LEVEL == "TRACE" else getattr(logging, LOG_LEVEL, logging.INFO)
-logging.basicConfig(level=level, format="%(asctime)s [%(levelname)s] %(message)s")
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] [%(trace)s] %(message)s"))
+_handler.addFilter(_TraceIdFilter())
+logging.basicConfig(level=level, handlers=[_handler], force=True)
+
 # Suppress noisy third-party loggers that flood output at DEBUG level
 for _noisy_logger in ("PIL", "PIL.PngImagePlugin"):
     logging.getLogger(_noisy_logger).setLevel(logging.WARNING)
+# urllib3 logs a line per connection and a line per request at DEBUG. With six stages per page each
+# making several backend calls, that was a large share of the worker's DEBUG output and none of it
+# says anything the handlers' own logging does not.
+logging.getLogger("urllib3.connectionpool").setLevel(logging.INFO)
+logging.getLogger("uvicorn.access").addFilter(_HealthProbeFilter())
+# Routes warnings.warn() through logging instead of straight to stderr, so Paddle's and PIL's
+# UserWarnings arrive levelled and carrying a trace id like everything else. What remains unlevelled
+# after this is native output from Paddle's C++ layer, which Python cannot intercept.
+logging.captureWarnings(True)
+
 logger = logging.getLogger("translation")
+
+# Cap on a single logged payload, in characters. 0 disables truncation.
+#
+# The QA handler dumps its full region metadata and the model's full response at DEBUG, which is
+# genuinely what you want when the thing under investigation is a prompt — but at 19 KB on one line
+# it makes every *other* DEBUG line unreadable, and running the worker at DEBUG is the normal
+# configuration here. Truncating by default keeps DEBUG usable; set LOG_PAYLOAD_MAX_CHARS=0 for the
+# sessions where the whole blob is the point.
+LOG_PAYLOAD_MAX_CHARS = int(os.environ.get("LOG_PAYLOAD_MAX_CHARS", "2000"))
+
+
+_URL_SECRET_RE = re.compile(r"([?&](?:key|api_key|apikey|access_token|token)=)([^&\s\"']+)", re.I)
+_BEARER_RE = re.compile(r"(Bearer\s+)([A-Za-z0-9._\-]{8,})", re.I)
+
+
+def redact(text):
+    """Strip credentials out of a string before it is logged.
+
+    Aimed at exception text. ``requests`` puts the request URL into the string form of its
+    exceptions — ``400 Client Error: Bad Request for url: https://...?key=<secret>`` — so any
+    ``logger.error(f"... failed: {e}")` on a provider call writes the key to the log verbatim, in
+    full, at a level nothing suppresses. Verified: the key survives str(e) intact.
+
+    One provider path builds such a URL today (the direct Gemini endpoint in services/ocr.py takes
+    its key as `?key=`; every other provider sends an Authorization header). That path is not
+    reachable in this deployment — the configured `google/gemini-*` models are served through
+    OpenRouter — but it is live in the code and would start leaking the moment a direct Gemini key
+    is configured. Moving that key to the `x-goog-api-key` header is the root-cause fix and is
+    tracked in TODO.md; this is the belt to its braces, and it covers any future caller that logs an
+    exception carrying a URL secret without having to remember this rule.
+    """
+    if not text:
+        return text
+    text = _URL_SECRET_RE.sub(r"\1<redacted>", str(text))
+    return _BEARER_RE.sub(r"\1<redacted>", text)
+
+
+def log_payload(value, indent=2):
+    """Render ``value`` for a log line, JSON-encoding it and truncating to a readable length."""
+    if not isinstance(value, str):
+        try:
+            value = json.dumps(value, ensure_ascii=False, indent=indent)
+        except (TypeError, ValueError):
+            value = repr(value)
+    if LOG_PAYLOAD_MAX_CHARS and len(value) > LOG_PAYLOAD_MAX_CHARS:
+        omitted = len(value) - LOG_PAYLOAD_MAX_CHARS
+        return (
+            f"{value[:LOG_PAYLOAD_MAX_CHARS]}\n"
+            f"… [{omitted} more chars; set LOG_PAYLOAD_MAX_CHARS=0 for the full payload]"
+        )
+    return value
 
 
 def _is_sensitive(path: str) -> bool:
@@ -98,6 +225,22 @@ QA_AUDIT_CACHE_DIR = os.environ.get("QA_AUDIT_CACHE_DIR", "/app/data/qa_audit")
 CALLBACK_URL = os.environ.get("BACKEND_CALLBACK_URL", "http://localhost:8080/api/internal/jobs/callback")
 INTERNAL_API_TOKEN = os.environ.get("INTERNAL_API_TOKEN", "")
 BACKEND_HEADERS = {"X-Internal-Token": INTERNAL_API_TOKEN} if INTERNAL_API_TOKEN else {}
+
+
+def backend_headers():
+    """Auth headers for a backend call, plus the current pipeline trace id.
+
+    The backend's TraceIdFilter reads ``X-Trace-Id`` and binds it for the life of the request, so
+    the six callbacks and status PATCHes a page generates land in the backend's log under the same
+    id the worker is logging — which is the whole point of carrying it. Falls back to the bare auth
+    headers outside a job context, where there is no trace to send.
+
+    Prefer this over the ``BACKEND_HEADERS`` dict for any request made while handling a job.
+    """
+    if not _trace_id.get():
+        return BACKEND_HEADERS
+    return {**BACKEND_HEADERS, "X-Trace-Id": _trace_id.get()}
+
 
 # Service Settings
 RATE_LIMIT = os.environ.get("RATE_LIMIT", "").strip()

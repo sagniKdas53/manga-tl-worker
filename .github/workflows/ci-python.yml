@@ -1,14 +1,23 @@
 name: CI - Python
 
 on:
+  # `src/**` is where this repo's source actually lives (`app.py` is the only module at the
+  # root). The filter used to say `worker/**`, which is the path this repo is mounted at as a
+  # submodule of manga-tl — inside this repo it matches nothing, so a change confined to the
+  # source tree skipped the whole job. `ci-docker.yml` had it right all along.
+  #
+  # `pyproject.toml` and `pyrightconfig.json` are here because the gates below read them: ruff's
+  # rule selection and pyright's extraPaths can turn CI red without any source file changing.
   push:
     branches: ["main"]
     paths:
       - "Dockerfile"
       - "app.py"
       - "requirements.txt"
+      - "pyproject.toml"
+      - "pyrightconfig.json"
+      - "src/**"
       - "tests/**"
-      - "worker/**"
       - ".github/workflows/ci-python.yml"
   pull_request:
     branches: ["main"]
@@ -16,8 +25,10 @@ on:
       - "Dockerfile"
       - "app.py"
       - "requirements.txt"
+      - "pyproject.toml"
+      - "pyrightconfig.json"
+      - "src/**"
       - "tests/**"
-      - "worker/**"
       - ".github/workflows/ci-python.yml"
 
 permissions:

@@ -1,8 +1,12 @@
+import logging
+
 import requests
 
-from worker.config import BACKEND_HEADERS, CALLBACK_URL, redis_client
+from worker.config import CALLBACK_URL, backend_headers, redis_client
 from worker.services.panel_detection import detect_panels
 from worker.utils.image import download_image
+
+logger = logging.getLogger(__name__)
 
 
 def process_panel_detection(job_data):
@@ -20,10 +24,7 @@ def process_panel_detection(job_data):
             progress_str += f" of Chapter {chapter_num}"
         progress_str += f" (Queue: {queue_len} remaining)"
 
-    print(
-        f"[Panel Detection] Processing image: {image_id} (direction={reading_direction}){progress_str}",
-        flush=True,
-    )
+    logger.info(f"[Panel Detection] Processing image: {image_id} (direction={reading_direction}){progress_str}")
 
     try:
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
@@ -35,25 +36,22 @@ def process_panel_detection(job_data):
                 backend_url += f"&chapterId={chapter_id}"
         elif chapter_id:
             backend_url += f"?chapterId={chapter_id}"
-        res = requests.get(backend_url, headers=BACKEND_HEADERS)
+        res = requests.get(backend_url, headers=backend_headers())
         if res.status_code != 200:
             raise Exception(f"Failed to get image info: {res.status_code}")
         image_info = res.json()
     except Exception as e:
-        print(f"[Panel Detection] Error fetching image details: {e}", flush=True)
+        logger.error(f"[Panel Detection] Error fetching image details: {e}")
         raise
 
     try:
         img_bytes = download_image(image_info)
     except Exception as e:
-        print(f"[Panel Detection] Error downloading image: {e}", flush=True)
+        logger.error(f"[Panel Detection] Error downloading image: {e}")
         raise
 
     panels = detect_panels(img_bytes, reading_direction=reading_direction)
-    print(
-        f"[Panel Detection] Detected {len(panels)} panels for image {image_id}",
-        flush=True,
-    )
+    logger.info(f"[Panel Detection] Detected {len(panels)} panels for image {image_id}")
 
     callback_payload = {
         "jobId": job_data.get("jobId"),
@@ -62,7 +60,7 @@ def process_panel_detection(job_data):
         "panels": panels,
     }
     try:
-        res = requests.post(f"{CALLBACK_URL}/panel", json=callback_payload, headers=BACKEND_HEADERS)
-        print(f"[Panel Detection] Callback status code: {res.status_code}", flush=True)
+        res = requests.post(f"{CALLBACK_URL}/panel", json=callback_payload, headers=backend_headers())
+        logger.debug(f"[Panel Detection] Callback status code: {res.status_code}")
     except Exception as e:
-        print(f"[Panel Detection] Failed to post callback to backend: {e}", flush=True)
+        logger.error(f"[Panel Detection] Failed to post callback to backend: {e}")

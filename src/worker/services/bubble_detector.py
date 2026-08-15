@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import os
 
 import cv2
@@ -10,8 +11,9 @@ from worker.config import (
     YOLO_MASK_EROSION,
     YOLO_MODEL_PATH,
     YOLO_PINNED_CHECKSUM,
-    logger,
 )
+
+logger = logging.getLogger(__name__)
 
 _ort_session = None
 
