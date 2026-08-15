@@ -277,7 +277,10 @@ def perform_redo_ocr(img_crop_bytes, lang, qa_feedback=None):
             except Exception as e:
                 logger.error(f"[OCR Redo] Cloud AI OCR with model '{current_model}' failed: {redact(e)}")
 
-    # Try local PaddleOCR first — use the lazy-init reader for the region's language
+    # Try local PaddleOCR first — the lazy-init reader resolves a det/rec pair for the region's
+    # language, so a Korean region redone here gets PP-OCRv5 rather than the PP-OCRv6 pair that has
+    # no Hangul charset. No model id is threaded through: redo has no per-job model choice, and the
+    # catalog default already picks something that can read the script.
     _redo_paddle_reader = None
     if not api_key or provider == "paddleocr":
         _redo_paddle_reader = model_manager.get_paddle_ocr_reader(lang)

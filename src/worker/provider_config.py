@@ -8,6 +8,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from worker.config import logger
+from worker.ocr_models import LocalOcrCatalog
+
+#: providers.json key for the on-host PaddleOCR provider. Unlike the cloud providers it has no
+#: baseUrl or API key; its "models" are det+rec pairs this container can load.
+LOCAL_PROVIDER_NAME = "local"
 
 
 @dataclass
@@ -211,6 +216,15 @@ class ProviderConfigLoader:
     def get_active_providers(self) -> dict[str, ProviderConfig]:
         return {k: v for k, v in self.providers.items() if v.active}
 
+    def get_local_ocr_catalog(self) -> LocalOcrCatalog:
+        """Local OCR choices declared in providers.json, or the built-in pairs when absent.
+
+        Read from ``raw_data`` rather than the parsed ``providers`` map because ModelEntry keeps only
+        id/name/free — the det and rec names this needs are dropped there.
+        """
+        entries = self.raw_data.get("providers", {}).get(LOCAL_PROVIDER_NAME, {}).get("models", {}).get("ocr")
+        return LocalOcrCatalog.from_entries(entries)
+
     def get_provider_registry(self) -> dict[str, dict]:
         """Convert loaded ProviderConfigs into format expected by LLMClient / PROVIDER_REGISTRY."""
         registry = {}
@@ -227,6 +241,27 @@ class ProviderConfigLoader:
             }
         return registry
 
+    def _export_local_ocr_models(self) -> list[dict]:
+        """Local OCR choices that this host can actually load, shaped like any other model list.
+
+        Entries whose detection or recognition half is missing from PaddleX are dropped here rather
+        than in the UI, so a choice is never offered that would fail (or worse, silently mis-read)
+        at job time. The exported name carries both halves — a det model name alone tells a user
+        nothing about which scripts the choice can read.
+        """
+        catalog = self.get_local_ocr_catalog()
+        return [
+            {
+                "id": model.id,
+                "name": model.display_name,
+                "free": model.free,
+                "det": model.det,
+                "rec": model.rec,
+                "langs": model.languages,
+            }
+            for model in catalog.available()
+        ]
+
     def publish_config_to_redis(self, redis_client):
         """Publish resolved provider/model map to Redis for backend consumption."""
         if not redis_client:
@@ -241,6 +276,8 @@ class ProviderConfigLoader:
                 "providers": {},
             }
 
+            local_ocr_export = self._export_local_ocr_models()
+
             for name, prov in active_provs.items():
                 models_export = {}
                 capabilities = []
@@ -248,6 +285,18 @@ class ProviderConfigLoader:
                     if model_list is not None:
                         capabilities.append(task)
                         models_export[task] = [{"id": m.id, "name": m.name, "free": m.free} for m in model_list]
+
+                # The local provider's OCR list is replaced wholesale by the validated catalog: the
+                # generic parse above keeps only id/name/free, which would advertise pairs whose det
+                # or rec model this host cannot actually load.
+                if name == LOCAL_PROVIDER_NAME:
+                    if local_ocr_export:
+                        models_export["ocr"] = local_ocr_export
+                        if "ocr" not in capabilities:
+                            capabilities.append("ocr")
+                    else:
+                        models_export.pop("ocr", None)
+                        capabilities = [c for c in capabilities if c != "ocr"]
 
                 config_map["providers"][name] = {
                     "displayName": prov.display_name,
@@ -258,6 +307,21 @@ class ProviderConfigLoader:
                     "models": models_export,
                     "defaults": prov.defaults,
                     "capabilities": capabilities,
+                }
+
+            # A deployment that predates the `local` provider block still runs PaddleOCR, so publish
+            # the built-in catalog under the same name the backend already uses for on-host OCR.
+            # Without this the UI would keep showing a single hardcoded model string.
+            if LOCAL_PROVIDER_NAME not in config_map["providers"] and local_ocr_export:
+                config_map["providers"][LOCAL_PROVIDER_NAME] = {
+                    "displayName": "Local (PaddleOCR)",
+                    "type": "local-ocr",
+                    "freeTier": True,
+                    "priority": 0,
+                    "rateLimits": None,
+                    "models": {"ocr": local_ocr_export},
+                    "defaults": {"ocr": local_ocr_export[0]["id"]},
+                    "capabilities": ["ocr"],
                 }
 
             json_blob = json.dumps(config_map)

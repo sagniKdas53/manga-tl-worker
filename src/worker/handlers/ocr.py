@@ -32,7 +32,7 @@ from worker.config import (
     backend_headers,
     redis_client,
 )
-from worker.model_manager import model_manager
+from worker.model_manager import model_manager, resolve_local_ocr_model
 from worker.services.bubble_detector import detect_bubbles_yolo
 from worker.services.bubble_geometry import bubble_grouping_context
 from worker.services.fragment_grouping import GroupingConfig
@@ -628,6 +628,17 @@ def process_ocr(job_data):
         provider = (job_data.get("ocrProvider") or OCR_CONFIG.provider or "local").lower().strip()
         use_paddle_ocr = (provider == "local") and not disable_local_ocr
 
+        # Which local det+rec pair to run. Only meaningful for provider=local; the catalog ignores a
+        # choice that cannot read this page's script and routes to one that can.
+        local_ocr_model = (job_data.get("ocrModel") or "").strip() if use_paddle_ocr else ""
+        resolved_local_model = resolve_local_ocr_model(source_language, local_ocr_model)
+        if resolved_local_model is not None and resolved_local_model.auto_routed:
+            logger.info(
+                f"[OCR] Local OCR auto-routed from '{resolved_local_model.requested_model_id}' to "
+                f"'{resolved_local_model.model_id}' — it has no recognition model for "
+                f"'{source_language}'."
+            )
+
         # WARNING: Even when using Cloud VLM OCR (where transcription is offloaded), local models
         # (PP-OCR-Det for text detection and YOLO for bubble detection) still execute locally on
         # this host. We must serialize these local predictions using the "ocr" lock to avoid CPU/GPU
@@ -638,8 +649,10 @@ def process_ocr(job_data):
         # worker. AUDIT-W4 changed the default the other way for locks like local-llm, which do
         # guard a shared endpoint.
         with acquire_lock("ocr", node_scoped=True):
-            # Try PaddleOCR (PP-OCRv5) first — reader is lazily created per language
-            paddle_ocr_reader = model_manager.get_paddle_ocr_reader(source_language) if use_paddle_ocr else None
+            # Reader is lazily created per resolved det/rec pair, which depends on the language.
+            paddle_ocr_reader = (
+                model_manager.get_paddle_ocr_reader(source_language, local_ocr_model) if use_paddle_ocr else None
+            )
             paddle_ocr_detector = model_manager.get_paddle_ocr_detector(source_language) if not use_paddle_ocr else None
 
             if use_paddle_ocr and paddle_ocr_reader is None:
@@ -654,9 +667,14 @@ def process_ocr(job_data):
 
             if paddle_ocr_reader is not None:
                 try:
-                    det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det").strip()
-                    rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
-                    logger.info(f"[OCR] Running PaddleOCR ({det_model}/{rec_model}, lang={source_language}).")
+                    # Report the pair that was actually resolved, not the environment defaults — the
+                    # two differ exactly when auto-routing saved the job (e.g. Korean off PP-OCRv6).
+                    logger.info(
+                        f"[OCR] Running PaddleOCR ({resolved_local_model.det}/{resolved_local_model.rec}, "
+                        f"lang={source_language}, model={resolved_local_model.model_id})."
+                        if resolved_local_model
+                        else f"[OCR] Running PaddleOCR (lang={source_language})."
+                    )
 
                     try:
                         import psutil
@@ -690,8 +708,11 @@ def process_ocr(job_data):
 
             if paddle_ocr_detector is not None:
                 try:
-                    det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det").strip()
-                    logger.info(f"[OCR] Running PaddleOCR Detector ({det_model}, lang={source_language}).")
+                    logger.info(
+                        f"[OCR] Running PaddleOCR Detector "
+                        f"({resolved_local_model.det if resolved_local_model else 'default'}, "
+                        f"lang={source_language})."
+                    )
                     nparr = np.frombuffer(img_bytes, np.uint8)
                     img_original = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                     img_decoded, ocr_upscale = downscale_for_ocr(img_original, max_dim=1024)
@@ -1415,7 +1436,10 @@ def process_ocr(job_data):
 
         avg_conf = sum(r["confidence"] for r in ordered_regions) / len(ordered_regions) if ordered_regions else 1.0
 
-        rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
+        # Record the recognition model that actually read the page. Reading the env var here logged
+        # PP-OCRv6 onto regions that PP-OCRv5 had transcribed, making a wrong-model bug invisible in
+        # the stored provenance.
+        rec_model = resolved_local_model.rec if resolved_local_model else "unknown"
         model_identifier = f"PaddleOCR({rec_model})"
         if vlm_model_used:
             model_identifier += f" + {vlm_model_used}"
