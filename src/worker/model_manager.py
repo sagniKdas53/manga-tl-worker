@@ -1,9 +1,12 @@
 """Model caching and manager logic for OCR libraries."""
 
 import gc
+import logging
 import os
 import threading
 import time
+
+logger = logging.getLogger(__name__)
 
 # Configure PaddleOCR environment variables
 try:
@@ -13,7 +16,7 @@ try:
     os.environ.setdefault("FLAGS_use_mkldnn", "0")
     os.environ.setdefault("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", "0")
 except Exception as err_env:  # pylint: disable=broad-except
-    print(f"[Unified Worker] Failed to set PaddleOCR environment: {err_env}", flush=True)
+    logger.error(f"[Unified Worker] Failed to set PaddleOCR environment: {err_env}")
 
 
 LANG_TO_PADDLE: dict = {
@@ -63,10 +66,9 @@ class ModelManager:
                     rec_model = os.environ.get("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec").strip()
                     ocr_device = os.environ.get("PADDLEOCR_DEVICE", "cpu").strip().lower()
 
-                    print(
+                    logger.info(
                         f"[Unified Worker] Initializing PaddleOCR "
-                        f"(Det: {det_model}, Rec: {rec_model}, Device: {ocr_device}, lang='{paddle_lang}')...",
-                        flush=True,
+                        f"(Det: {det_model}, Rec: {rec_model}, Device: {ocr_device}, lang='{paddle_lang}')..."
                     )
                     from paddleocr import (  # type: ignore
                         PaddleOCR as _PaddleOCR,
@@ -82,14 +84,10 @@ class ModelManager:
                         use_doc_orientation_classify=False,
                         enable_mkldnn=False,
                     )
-                    print(
-                        f"[Unified Worker] PaddleOCR reader ready for lang='{paddle_lang}'.",
-                        flush=True,
-                    )
+                    logger.info(f"[Unified Worker] PaddleOCR reader ready for lang='{paddle_lang}'.")
                 except Exception as err_init_paddle:  # pylint: disable=broad-except
-                    print(
-                        f"[Unified Worker] Failed to initialize PaddleOCR for lang='{paddle_lang}': {err_init_paddle}",
-                        flush=True,
+                    logger.error(
+                        f"[Unified Worker] Failed to initialize PaddleOCR for lang='{paddle_lang}': {err_init_paddle}"
                     )
                     self.paddle_readers[paddle_lang] = None
                     ModelManager.paddle_ocr_available = False
@@ -113,10 +111,9 @@ class ModelManager:
                     det_model = os.environ.get("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det").strip()
                     ocr_device = os.environ.get("PADDLEOCR_DEVICE", "cpu").strip().lower()
 
-                    print(
+                    logger.info(
                         f"[Unified Worker] Initializing PaddleOCR Detector "
-                        f"(Det: {det_model}, Device: {ocr_device}, lang='{paddle_lang}')...",
-                        flush=True,
+                        f"(Det: {det_model}, Device: {ocr_device}, lang='{paddle_lang}')..."
                     )
                     from paddleocr import (  # type: ignore
                         PaddleOCR as _PaddleOCR,
@@ -131,15 +128,11 @@ class ModelManager:
                         use_doc_orientation_classify=False,
                         enable_mkldnn=False,
                     )
-                    print(
-                        f"[Unified Worker] PaddleOCR detector ready for lang='{paddle_lang}'.",
-                        flush=True,
-                    )
+                    logger.info(f"[Unified Worker] PaddleOCR detector ready for lang='{paddle_lang}'.")
                 except Exception as err_init_paddle:  # pylint: disable=broad-except
-                    print(
+                    logger.error(
                         f"[Unified Worker] Failed to initialize PaddleOCR Detector "
-                        f"for lang='{paddle_lang}': {err_init_paddle}",
-                        flush=True,
+                        f"for lang='{paddle_lang}': {err_init_paddle}"
                     )
                     self.paddle_readers[cache_key] = None
 
@@ -159,10 +152,9 @@ class ModelManager:
                 if reader is not None:
                     last_used = self.paddle_last_used.get(paddle_lang, 0.0)
                     if now - last_used > ttl_seconds:
-                        print(
+                        logger.info(
                             f"[Model Manager] Unloading PaddleOCR ({paddle_lang}) "
-                            f"due to inactivity (idle for {now - last_used:.1f}s).",
-                            flush=True,
+                            f"due to inactivity (idle for {now - last_used:.1f}s)."
                         )
                         self.paddle_readers[paddle_lang] = None
                         gc.collect()

@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from unittest.mock import MagicMock, patch
 
@@ -61,11 +62,14 @@ def test_unset_rate_limit_is_unlimited(mock_time, monkeypatch):
 
 
 @patch("worker.utils.rate_limit.time")
-def test_enforce_rate_limit_does_not_log_as_translation(mock_time, capsys):
+def test_enforce_rate_limit_does_not_log_as_translation(mock_time, caplog):
     """AUDIT-Q3: the limiter is shared by translation, OCR and QA — it must not claim to be one.
 
-    Both prints in enforce_rate_limit were prefixed `[Translation]`, so an OCR or QA stall showed
+    Both messages in enforce_rate_limit were prefixed `[Translation]`, so an OCR or QA stall showed
     up in the worker log under the wrong stage.
+
+    Reads caplog rather than capsys because these go through the logger now; the stall is a
+    per-attempt event and lands at DEBUG, hence the explicit level.
     """
     mock_time.time.return_value = 100
     os.environ["RATE_LIMIT"] = "60/min"
@@ -73,10 +77,11 @@ def test_enforce_rate_limit_does_not_log_as_translation(mock_time, capsys):
     import worker.utils.rate_limit as rlimit
 
     rlimit.PROVIDER_LAST_REQUEST_TIME = {"ocr-provider": 99.5}
-    enforce_rate_limit(provider="ocr-provider")
+    with caplog.at_level(logging.DEBUG):
+        enforce_rate_limit(provider="ocr-provider")
     mock_time.sleep.assert_called_with(0.5)
 
-    out = capsys.readouterr().out
+    out = caplog.text
     assert "Sleeping for 0.50 seconds" in out
     assert "[RateLimit]" in out
     assert "[Translation]" not in out

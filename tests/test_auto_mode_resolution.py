@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import patch
 
 import pytest
@@ -104,18 +105,18 @@ def test_auto_routes_to_none_without_provider():
     assert not mock_hybrid.called
 
 
-def test_auto_prints_resolution(capsys):
-    _run_process_qa(
-        {
-            "imageId": "img1",
-            "qaMode": "auto",
-            "qaProvider": "openrouter",
-            "qaVlmModel": "N/A",
-            "qaLlmModel": "openai/gpt-4o-mini",
-        }
-    )
-    out = capsys.readouterr().out
-    assert "[QA] AUTO mode resolved to 'llm'" in out
+def test_auto_logs_resolution(caplog):
+    with caplog.at_level(logging.INFO):
+        _run_process_qa(
+            {
+                "imageId": "img1",
+                "qaMode": "auto",
+                "qaProvider": "openrouter",
+                "qaVlmModel": "N/A",
+                "qaLlmModel": "openai/gpt-4o-mini",
+            }
+        )
+    assert "[QA] AUTO mode resolved to 'llm'" in caplog.text
 
 
 def test_explicit_mode_untouched_by_auto_branch(capsys):

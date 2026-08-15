@@ -1,18 +1,20 @@
 import io
+import logging
 import os
 
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
 from worker.config import (
-    BACKEND_HEADERS,
     CALLBACK_URL,
     CONTRAST_FLOOR,
-    logger,
+    backend_headers,
     minio_client,
     redis_client,
 )
 from worker.utils.image import download_image
+
+logger = logging.getLogger(__name__)
 
 # Font registry: map display names to filesystem paths
 FONT_REGISTRY = {
@@ -922,20 +924,20 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
                 backend_url += f"&chapterId={chapter_id}"
         elif chapter_id:
             backend_url += f"?chapterId={chapter_id}"
-        res = requests.get(backend_url, headers=BACKEND_HEADERS)
+        res = requests.get(backend_url, headers=backend_headers())
         if res.status_code != 200:
-            print(f"[Render] Failed to get image info: {res.status_code}", flush=True)
+            logger.error(f"[Render] Failed to get image info: {res.status_code}")
             return False
         image_info = res.json()
         layer_elements = image_info.get("layerElements", [])
     except Exception as e:
-        print(f"[Render] Error fetching image details: {e}", flush=True)
+        logger.error(f"[Render] Error fetching image details: {e}")
         raise e
 
     try:
         img_bytes = download_image(image_info)
     except Exception as e:
-        print(f"[Render] Error downloading image: {e}", flush=True)
+        logger.error(f"[Render] Error downloading image: {e}")
         raise e
 
     try:
@@ -961,10 +963,9 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
         ]
         skipped = len(layer_elements) - len(translation_elements)
         if skipped:
-            print(
+            logger.warning(
                 f"[Render] {len(translation_elements)} element(s) to draw, {skipped} skipped "
-                f"(not a visible translation/sfx layer)",
-                flush=True,
+                f"(not a visible translation/sfx layer)"
             )
 
         for el in translation_elements:
@@ -1012,7 +1013,7 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
                             poly_tuples = [(float(p[0]), float(p[1])) for p in pts]
                             draw.polygon(poly_tuples, fill=bg_color_hex)
                     except Exception as e:
-                        print(f"[Render] Failed to draw polygon mask: {e}", flush=True)
+                        logger.error(f"[Render] Failed to draw polygon mask: {e}")
                 elif box_shape == "elliptical":
                     draw.ellipse([ex, ey, ex + ew, ey + eh], fill=bg_color_hex)
                 else:
@@ -1097,7 +1098,7 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
             len(out_bytes),
             content_type="image/png",
         )
-        print(f"[Render] Flattened image uploaded to MinIO: {storage_path}", flush=True)
+        logger.info(f"[Render] Flattened image uploaded to MinIO: {storage_path}")
 
         # Save local copy in render cache
         from worker.config import RENDER_CACHE_DIR
@@ -1115,7 +1116,7 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
         return True
 
     except Exception as e:
-        print(f"[Render] Error rendering typeset: {e}", flush=True)
+        logger.error(f"[Render] Error rendering typeset: {e}")
         import traceback
 
         traceback.print_exc()
@@ -1137,7 +1138,7 @@ def process_render(job_data):
             progress_str += f" of Chapter {chapter_num}"
         progress_str += f" (Queue: {queue_len} remaining)"
 
-    print(f"[Render] Processing page: {page_id or image_id}{progress_str}", flush=True)
+    logger.info(f"[Render] Processing page: {page_id or image_id}{progress_str}")
 
     from worker.config import QA_MODE
 
@@ -1166,7 +1167,7 @@ def process_render(job_data):
         "pageId": page_id,
     }
     try:
-        res = requests.post(f"{CALLBACK_URL}/render", json=callback_payload, headers=BACKEND_HEADERS)
-        print(f"[Render] Callback status code: {res.status_code}", flush=True)
+        res = requests.post(f"{CALLBACK_URL}/render", json=callback_payload, headers=backend_headers())
+        logger.debug(f"[Render] Callback status code: {res.status_code}")
     except Exception as e:
-        print(f"[Render] Failed to post callback: {e}", flush=True)
+        logger.error(f"[Render] Failed to post callback: {e}")

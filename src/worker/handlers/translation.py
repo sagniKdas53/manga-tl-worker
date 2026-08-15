@@ -5,10 +5,9 @@ import uuid
 import requests
 
 from worker.config import (
-    BACKEND_HEADERS,
     CALLBACK_URL,
     TL_CONFIG,
-    logger,
+    backend_headers,
     redis_client,
 )
 from worker.services.layout import chunk_regions_by_conversation
@@ -22,6 +21,8 @@ from worker.services.translation import (
     translate_batch_llm,
     translate_text,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def process_translation(job_data):
@@ -64,7 +65,7 @@ def process_translation(job_data):
                 backend_url += f"&chapterId={chapter_id}"
         elif chapter_id:
             backend_url += f"?chapterId={chapter_id}"
-        res = requests.get(backend_url, headers=BACKEND_HEADERS)
+        res = requests.get(backend_url, headers=backend_headers())
         if res.status_code != 200:
             raise Exception(f"Failed to get page/image info: {res.status_code}")
         image_info = res.json()
@@ -372,7 +373,7 @@ def process_translation(job_data):
         res = requests.post(
             f"{CALLBACK_URL}/translation",
             json=callback_payload,
-            headers=BACKEND_HEADERS,
+            headers=backend_headers(),
         )
         logger.info(f"{req_prefix}Callback status code: {res.status_code}")
     except Exception as e:

@@ -1,7 +1,11 @@
+import logging
+
 import requests
 
-from worker.config import BACKEND_HEADERS, CALLBACK_URL, redis_client
+from worker.config import CALLBACK_URL, backend_headers, redis_client
 from worker.services.layout import classify_region_type, group_conversations
+
+logger = logging.getLogger(__name__)
 
 
 def process_layout(job_data):
@@ -20,7 +24,7 @@ def process_layout(job_data):
             progress_str += f" of Chapter {chapter_num}"
         progress_str += f" (Queue: {queue_len} remaining)"
 
-    print(f"[Layout] Processing page: {page_id or image_id}{progress_str}", flush=True)
+    logger.info(f"[Layout] Processing page: {page_id or image_id}{progress_str}")
 
     # 1. Fetch OCR regions + panels from backend
     try:
@@ -33,19 +37,19 @@ def process_layout(job_data):
                 backend_url += f"&chapterId={chapter_id}"
         elif chapter_id:
             backend_url += f"?chapterId={chapter_id}"
-        res = requests.get(backend_url, headers=BACKEND_HEADERS)
+        res = requests.get(backend_url, headers=backend_headers())
         if res.status_code != 200:
-            print(f"[Layout] Failed to get page/image info: {res.status_code}", flush=True)
+            logger.error(f"[Layout] Failed to get page/image info: {res.status_code}")
             return
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
         panels = image_info.get("panels", [])
     except Exception as e:
-        print(f"[Layout] Error fetching image details: {e}", flush=True)
+        logger.error(f"[Layout] Error fetching image details: {e}")
         raise
 
     if not ocr_regions:
-        print("[Layout] No OCR regions found, skipping layout analysis.", flush=True)
+        logger.warning("[Layout] No OCR regions found, skipping layout analysis.")
         # Still send callback so pipeline continues
         callback_payload = {
             "jobId": job_data.get("jobId"),
@@ -55,10 +59,10 @@ def process_layout(job_data):
             "conversations": [],
         }
         try:
-            res = requests.post(f"{CALLBACK_URL}/layout", json=callback_payload, headers=BACKEND_HEADERS)
-            print(f"[Layout] Callback status code: {res.status_code}", flush=True)
+            res = requests.post(f"{CALLBACK_URL}/layout", json=callback_payload, headers=backend_headers())
+            logger.debug(f"[Layout] Callback status code: {res.status_code}")
         except Exception as e:
-            print(f"[Layout] Failed to post callback: {e}", flush=True)
+            logger.error(f"[Layout] Failed to post callback: {e}")
         return
 
     # Get image dimensions from the first panel or estimate from regions
@@ -93,30 +97,25 @@ def process_layout(job_data):
                 "regionType": rtype,
             }
         )
-        print(
-            f"[Layout] Region {str(r.get('id', ''))[:8]}... type={rtype} text='{(r.get('text', '') or '')[:30]}'",
-            flush=True,
+        logger.info(
+            f"[Layout] Region {str(r.get('id', ''))[:8]}... type={rtype} text='{(r.get('text', '') or '')[:30]}'"
         )
 
-    print(
+    logger.info(
         "[Layout] Region types: "
         + ", ".join(
             f"{t}: {sum(1 for rt in region_types if rt['regionType'] == t)}"
             for t in set(rt["regionType"] for rt in region_types)
-        ),
-        flush=True,
+        )
     )
 
     # 3. Group conversations
     reading_direction = "rtl"  # Default; could be passed in job_data if needed
     conversations = group_conversations(ocr_regions, panels, reading_direction)
-    print(
-        f"[Layout] Grouped {len(ocr_regions)} regions into {len(conversations)} conversations",
-        flush=True,
-    )
+    logger.info(f"[Layout] Grouped {len(ocr_regions)} regions into {len(conversations)} conversations")
 
     # Detailed logging for the grouped conversations
-    print("[Layout] --- Conversation Grouping Details ---", flush=True)
+    logger.info("[Layout] --- Conversation Grouping Details ---")
     for idx, conv in enumerate(conversations):
         region_details = []
         for rid in conv["regionIds"]:
@@ -126,11 +125,10 @@ def process_layout(job_data):
                 rtype = reg.get("regionType") or reg.get("region_type") or "speech"
                 region_details.append(f"[{rtype}] '{text}'")
         panel_info = f"panels={conv['panelIds']}" if conv.get("panelIds") else "unmapped"
-        print(
-            f"[Layout] Conversation #{idx + 1} ({conv['sceneType']}, {panel_info}): " + " -> ".join(region_details),
-            flush=True,
+        logger.info(
+            f"[Layout] Conversation #{idx + 1} ({conv['sceneType']}, {panel_info}): " + " -> ".join(region_details)
         )
-    print("[Layout] -------------------------------------", flush=True)
+    logger.info("[Layout] -------------------------------------")
 
     # 4. Send enriched layout callback
     callback_payload = {
@@ -147,7 +145,7 @@ def process_layout(job_data):
         ],
     }
     try:
-        res = requests.post(f"{CALLBACK_URL}/layout", json=callback_payload, headers=BACKEND_HEADERS)
-        print(f"[Layout] Callback status code: {res.status_code}", flush=True)
+        res = requests.post(f"{CALLBACK_URL}/layout", json=callback_payload, headers=backend_headers())
+        logger.debug(f"[Layout] Callback status code: {res.status_code}")
     except Exception as e:
-        print(f"[Layout] Failed to post callback to backend: {e}", flush=True)
+        logger.error(f"[Layout] Failed to post callback to backend: {e}")

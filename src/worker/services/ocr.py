@@ -1,5 +1,6 @@
 import gc
 import json
+import logging
 
 import cv2
 import numpy as np
@@ -7,6 +8,8 @@ import requests
 
 from worker.model_manager import model_manager
 from worker.utils.image import downscale_for_ocr
+
+logger = logging.getLogger(__name__)
 
 OCR_REFUSAL_PATTERNS = [
     "i cannot",
@@ -29,10 +32,7 @@ def is_valid_ocr_text(text):
     text_lower = text.strip().lower()
     for pattern in OCR_REFUSAL_PATTERNS:
         if pattern in text_lower:
-            print(
-                f"[OCR] Rejected OCR response: matches refusal pattern '{pattern}'",
-                flush=True,
-            )
+            logger.warning(f"[OCR] Rejected OCR response: matches refusal pattern '{pattern}'")
             return False
     return True
 
@@ -74,7 +74,7 @@ def parse_paddle_ocr_results(raw_results):
                 results.append((bbox, rec_texts[i], float(rec_scores[i])))
 
     except Exception as e:
-        print(f"[OCR] Failed parsing PaddleOCR results: {e}", flush=True)
+        logger.error(f"[OCR] Failed parsing PaddleOCR results: {e}")
 
     return results
 
@@ -236,12 +236,9 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None, ro
             except (json.JSONDecodeError, ValueError, TypeError):
                 return raw.strip(), 1.0
         else:
-            print(
-                f"[OCR Redo] Cloud OCR error {res.status_code} from provider={provider}",
-                flush=True,
-            )
+            logger.error(f"[OCR Redo] Cloud OCR error {res.status_code} from provider={provider}")
     except Exception as e:
-        print(f"[OCR Redo] Cloud OCR HTTP post failed: {e}", flush=True)
+        logger.error(f"[OCR Redo] Cloud OCR HTTP post failed: {e}")
     return None
 
 
@@ -265,24 +262,19 @@ def perform_redo_ocr(img_crop_bytes, lang, qa_feedback=None):
 
         for current_model in models_to_try:
             try:
-                print(
-                    f"[OCR Redo] Trying Cloud AI OCR with provider '{provider}' and model '{current_model}'...",
-                    flush=True,
+                logger.debug(
+                    f"[OCR Redo] Trying Cloud AI OCR with provider '{provider}' and model '{current_model}'..."
                 )
                 result = try_cloud_ocr(img_crop_bytes, provider, api_key, current_model, qa_feedback)
                 if result:
                     text, confidence = result
                     if text and is_valid_ocr_text(text):
-                        print(
-                            f"[OCR Redo] Cloud AI OCR Success using '{current_model}': '{text}' (conf={confidence})",
-                            flush=True,
+                        logger.debug(
+                            f"[OCR Redo] Cloud AI OCR Success using '{current_model}': '{text}' (conf={confidence})"
                         )
                         return text, confidence
             except Exception as e:
-                print(
-                    f"[OCR Redo] Cloud AI OCR with model '{current_model}' failed: {e}",
-                    flush=True,
-                )
+                logger.error(f"[OCR Redo] Cloud AI OCR with model '{current_model}' failed: {e}")
 
     # Try local PaddleOCR first — use the lazy-init reader for the region's language
     _redo_paddle_reader = None
@@ -291,7 +283,7 @@ def perform_redo_ocr(img_crop_bytes, lang, qa_feedback=None):
 
     if _redo_paddle_reader is not None:
         try:
-            print("[OCR Redo] Trying local PaddleOCR...", flush=True)
+            logger.debug("[OCR Redo] Trying local PaddleOCR...")
             nparr = np.frombuffer(img_crop_bytes, np.uint8)
             img_crop = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             del nparr
@@ -304,18 +296,12 @@ def perform_redo_ocr(img_crop_bytes, lang, qa_feedback=None):
                 if parsed_crop_results:
                     text = " ".join(line[1] for line in parsed_crop_results if line[1].strip())
                     if not is_valid_ocr_text(text):
-                        print(
-                            f"[OCR Redo] PaddleOCR result rejected by validation: '{text}'",
-                            flush=True,
-                        )
+                        logger.warning(f"[OCR Redo] PaddleOCR result rejected by validation: '{text}'")
                         text = ""
                     confidence = float(np.mean([line[2] for line in parsed_crop_results]))
-                    print(
-                        f"[OCR Redo] PaddleOCR Success: '{text}' (conf={confidence})",
-                        flush=True,
-                    )
+                    logger.debug(f"[OCR Redo] PaddleOCR Success: '{text}' (conf={confidence})")
                     return text.strip(), confidence
         except Exception as e:
-            print(f"[OCR Redo] PaddleOCR failed: {e}", flush=True)
+            logger.error(f"[OCR Redo] PaddleOCR failed: {e}")
 
     return "", 0.0

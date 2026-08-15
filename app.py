@@ -1,22 +1,25 @@
 """Worker entrypoint — launches the FastAPI application via uvicorn."""
 
 import glob
+import logging
 import os
 import time
+
+logger = logging.getLogger(__name__)
 
 
 def seed_models():
     """Verify and seed the required ML models on startup."""
-    print("[Worker] Seeding models...", flush=True)
+    logger.info("[Worker] Seeding models...")
 
     from worker.services.bubble_detector import get_ort_session
 
     try:
-        print("[Worker] Verifying YOLO bubble detector model...", flush=True)
+        logger.info("[Worker] Verifying YOLO bubble detector model...")
         get_ort_session()
-        print("[Worker] YOLO bubble detector model verified successfully.", flush=True)
+        logger.info("[Worker] YOLO bubble detector model verified successfully.")
     except Exception as e:
-        print(f"[Worker] Critical Error: YOLO model verification failed: {e}", flush=True)
+        logger.error(f"[Worker] Critical Error: YOLO model verification failed: {e}")
         raise e
 
     disable_local_ocr = os.environ.get("DISABLE_LOCAL_OCR", "").strip().lower() in ("true", "1", "yes")
@@ -24,11 +27,11 @@ def seed_models():
         try:
             from worker.model_manager import model_manager
 
-            print("[Worker] Seeding PaddleOCR default Japanese models...", flush=True)
+            logger.info("[Worker] Seeding PaddleOCR default Japanese models...")
             model_manager.get_paddle_ocr_reader("ja")
-            print("[Worker] PaddleOCR default Japanese models seeded successfully.", flush=True)
+            logger.info("[Worker] PaddleOCR default Japanese models seeded successfully.")
         except Exception as e:
-            print(f"[Worker] Critical Error: PaddleOCR seeding failed: {e}", flush=True)
+            logger.error(f"[Worker] Critical Error: PaddleOCR seeding failed: {e}")
             raise e
 
 
@@ -36,7 +39,7 @@ def cleanup_audit_cache():
     from worker.config import ENABLE_QA_AUDIT_CACHE, QA_AUDIT_CACHE_DIR
 
     if ENABLE_QA_AUDIT_CACHE:
-        print("[Worker] Cleaning up old QA audit cache files...", flush=True)
+        logger.info("[Worker] Cleaning up old QA audit cache files...")
         try:
             now = time.time()
             max_age = 24 * 3600
@@ -54,10 +57,10 @@ def cleanup_audit_cache():
                             os.remove(f)
                             count += 1
                     except OSError as e:
-                        print(f"[Worker] Could not remove QA audit cache file {f}: {e}", flush=True)
-                print(f"[Worker] Cleaned up {count} old files in {QA_AUDIT_CACHE_DIR}.", flush=True)
+                        logger.error(f"[Worker] Could not remove QA audit cache file {f}: {e}")
+                logger.info(f"[Worker] Cleaned up {count} old files in {QA_AUDIT_CACHE_DIR}.")
         except Exception as e:
-            print(f"[Worker] Error cleaning up QA audit cache: {e}", flush=True)
+            logger.error(f"[Worker] Error cleaning up QA audit cache: {e}")
 
 
 if __name__ == "__main__":

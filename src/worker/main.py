@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import logging
 import secrets
 import threading
 from contextlib import asynccontextmanager
@@ -13,6 +14,8 @@ import worker.concurrency as conc
 from worker.config import HEALTH_PORT, MODEL_TTL
 from worker.model_manager import model_manager
 from worker.schemas import JobSubmitRequest
+
+logger = logging.getLogger(__name__)
 
 
 def _require_api_secret():
@@ -26,17 +29,15 @@ def _require_api_secret():
     import sys
 
     if conc.ALLOW_UNAUTHENTICATED_API:
-        print(
+        logger.info(
             "[Worker] ALLOW_UNAUTHENTICATED_WORKER_API=true — every endpoint, including "
-            "/api/v1/jobs/submit, is public. Development only.",
-            flush=True,
+            "/api/v1/jobs/submit, is public. Development only."
         )
         return
     if not conc.WORKER_API_SECRET:
-        print(
+        logger.info(
             "[Worker] FATAL: WORKER_API_SECRET is not set. Mount the secret (WORKER_API_SECRET_FILE) "
-            "or set ALLOW_UNAUTHENTICATED_WORKER_API=true if you really want an open worker.",
-            flush=True,
+            "or set ALLOW_UNAUTHENTICATED_WORKER_API=true if you really want an open worker."
         )
         sys.exit(1)
 
@@ -58,10 +59,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         import sys
 
-        print(f"[Worker] Seeding failed, exiting. Error: {e}", flush=True)
+        logger.error(f"[Worker] Seeding failed, exiting. Error: {e}")
         sys.exit(1)
 
-    print(f"[Worker] Running in HTTP-Push mode. Listening on port {HEALTH_PORT} for ML tasks.", flush=True)
+    logger.info(f"[Worker] Running in HTTP-Push mode. Listening on port {HEALTH_PORT} for ML tasks.")
 
     # Background maintenance task (model eviction + status logging)
     maintenance_task = asyncio.create_task(_periodic_maintenance())
@@ -92,14 +93,11 @@ async def _periodic_maintenance():
                 minutes, seconds = divmod(remainder, 60)
                 loaded = model_manager.get_loaded_models_status(MODEL_TTL)
                 loaded_str = ", ".join(loaded) if loaded else "None"
-                print(
-                    f"[Worker Status] Uptime: {hours}h {minutes}m {seconds}s | Loaded Models: {loaded_str}",
-                    flush=True,
-                )
+                logger.info(f"[Worker Status] Uptime: {hours}h {minutes}m {seconds}s | Loaded Models: {loaded_str}")
                 last_status_time = now
 
         except Exception as e:
-            print(f"[Worker] Error in maintenance loop: {e}", flush=True)
+            logger.error(f"[Worker] Error in maintenance loop: {e}")
 
         await asyncio.sleep(5)
 

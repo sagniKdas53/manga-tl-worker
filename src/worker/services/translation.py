@@ -7,7 +7,7 @@ import uuid
 
 import requests
 
-from worker.config import JUNK_REGION_MIN_CONFIDENCE, TYPESET_SFX, logger
+from worker.config import JUNK_REGION_MIN_CONFIDENCE, TYPESET_SFX, log_payload, logger
 from worker.services.llm_client import (  # noqa: F401
     PROVIDER_COOLDOWNS,
     LLMClient,
@@ -200,7 +200,7 @@ def should_typeset_region(region):
     """
     region_type = region.get("regionType") or region.get("region_type")
     if region_type == "sfx" and not TYPESET_SFX:
-        print(f"[Typeset Filter] Leaving sfx region as drawn: '{region.get('text', '')}'", flush=True)
+        logger.debug(f"[Typeset Filter] Leaving sfx region as drawn: '{region.get('text', '')}'")
         return False
 
     confidence = region.get("confidence")
@@ -209,10 +209,9 @@ def should_typeset_region(region):
     bubble_id = region.get("bubbleId") or region.get("bubble_id") or ""
     enclosed = bool(bubble_id) and not str(bubble_id).startswith("direct_text")
     if not enclosed and confidence < JUNK_REGION_MIN_CONFIDENCE:
-        print(
+        logger.debug(
             f"[Typeset Filter] Leaving unenclosed low-confidence region as drawn "
-            f"({confidence:.2f} < {JUNK_REGION_MIN_CONFIDENCE}): '{region.get('text', '')}'",
-            flush=True,
+            f"({confidence:.2f} < {JUNK_REGION_MIN_CONFIDENCE}): '{region.get('text', '')}'"
         )
         return False
 
@@ -235,10 +234,7 @@ def should_translate_region(region):
 
     # Reject regions smaller than 10x10
     if width < 10 or height < 10:
-        print(
-            f"[Quality Filter] Rejecting region: too small ({width}x{height}) - text: '{text}'",
-            flush=True,
-        )
+        logger.debug(f"[Quality Filter] Rejecting region: too small ({width}x{height}) - text: '{text}'")
         return False
 
     # Special handling for SFX and Japanese kana-only text
@@ -259,25 +255,18 @@ def should_translate_region(region):
 
     # Reject low confidence regions (< 0.30)
     if confidence < 0.30:
-        print(
-            f"[Quality Filter] Rejecting region: low confidence ({confidence:.2f}) - text: '{text}'",
-            flush=True,
-        )
+        logger.debug(f"[Quality Filter] Rejecting region: low confidence ({confidence:.2f}) - text: '{text}'")
         return False
 
     # Otherwise, reject obvious garbage / non-Japanese low quality texts
     if len(stripped) < 2:
-        print(
-            f"[Quality Filter] Rejecting region: too short (len={len(stripped)}) - text: '{text}'",
-            flush=True,
-        )
+        logger.debug(f"[Quality Filter] Rejecting region: too short (len={len(stripped)}) - text: '{text}'")
         return False
 
     # Reject alphanumeric-only when confidence is low
     if re.match(r"^[A-Za-z0-9._-]+$", stripped) and confidence < 0.50:
-        print(
-            f"[Quality Filter] Rejecting region: alphanumeric-only with low confidence ({confidence:.2f}) - text: '{text}'",
-            flush=True,
+        logger.debug(
+            f"[Quality Filter] Rejecting region: alphanumeric-only with low confidence ({confidence:.2f}) - text: '{text}'"
         )
         return False
 
@@ -351,9 +340,8 @@ def parse_and_validate_batch(response_text, unmatched_regions):
         if validated:
             return validated
     except Exception as e:
-        print(
-            f"[Translation] Failed to parse batch translation JSON response: {e}. Raw response: {response_text}",
-            flush=True,
+        logger.error(
+            f"[Translation] Failed to parse batch translation JSON response: {e}. Raw response: {log_payload(response_text)}"
         )
 
     return None

@@ -1,21 +1,25 @@
+import logging
+
 import cv2
 import numpy as np
 import requests
 
-from worker.config import BACKEND_HEADERS, CALLBACK_URL
+from worker.config import CALLBACK_URL, backend_headers
 from worker.services.ocr import perform_redo_ocr
 from worker.utils.image import download_image
 from worker.utils.text import detect_language
+
+logger = logging.getLogger(__name__)
 
 
 def process_qa_re_ocr(job_data):
     image_id = job_data.get("imageId")
     region_ids = job_data.get("regionsToReOcr", [])
 
-    print(f"[QA Re-OCR] Processing image {image_id} for regions: {region_ids}", flush=True)
+    logger.info(f"[QA Re-OCR] Processing image {image_id} for regions: {region_ids}")
 
     if not image_id or not region_ids:
-        print("[QA Re-OCR] Missing imageId or regionsToReOcr", flush=True)
+        logger.warning("[QA Re-OCR] Missing imageId or regionsToReOcr")
         return
 
     try:
@@ -28,26 +32,26 @@ def process_qa_re_ocr(job_data):
                 backend_url += f"&chapterId={chapter_id}"
         elif chapter_id:
             backend_url += f"?chapterId={chapter_id}"
-        res = requests.get(backend_url, headers=BACKEND_HEADERS)
+        res = requests.get(backend_url, headers=backend_headers())
         if res.status_code != 200:
-            print(f"[QA Re-OCR] Failed to get image info: {res.status_code}", flush=True)
+            logger.error(f"[QA Re-OCR] Failed to get image info: {res.status_code}")
             return
         image_info = res.json()
         ocr_regions = image_info.get("ocrRegions", [])
     except Exception as e:
-        print(f"[QA Re-OCR] Error fetching image details: {e}", flush=True)
+        logger.error(f"[QA Re-OCR] Error fetching image details: {e}")
         raise
 
     # Filter regions
     target_regions = [r for r in ocr_regions if r["id"] in region_ids]
     if not target_regions:
-        print("[QA Re-OCR] No matching regions found in image details", flush=True)
+        logger.info("[QA Re-OCR] No matching regions found in image details")
         return
 
     try:
         img_bytes = download_image(image_info)
     except Exception as e:
-        print(f"[QA Re-OCR] Error downloading image: {e}", flush=True)
+        logger.error(f"[QA Re-OCR] Error downloading image: {e}")
         raise
 
     results = []
@@ -85,15 +89,12 @@ def process_qa_re_ocr(job_data):
                             "detectedLanguage": detected_lang,
                         }
                     )
-                    print(
-                        f"[QA Re-OCR] Region {region['id']} success: '{text}' (conf={confidence})",
-                        flush=True,
-                    )
+                    logger.info(f"[QA Re-OCR] Region {region['id']} success: '{text}' (conf={confidence})")
             except Exception as e:
-                print(f"[QA Re-OCR] Failed to OCR region {region['id']}: {e}", flush=True)
+                logger.error(f"[QA Re-OCR] Failed to OCR region {region['id']}: {e}")
 
     except Exception as e:
-        print(f"[QA Re-OCR] Error during batch OCR process: {e}", flush=True)
+        logger.error(f"[QA Re-OCR] Error during batch OCR process: {e}")
         raise
 
     callback_payload = {
@@ -105,7 +106,7 @@ def process_qa_re_ocr(job_data):
 
     try:
         callback_url = f"{CALLBACK_URL}/qa-re-ocr"
-        res = requests.post(callback_url, json=callback_payload, headers=BACKEND_HEADERS)
-        print(f"[QA Re-OCR] Callback status code: {res.status_code}", flush=True)
+        res = requests.post(callback_url, json=callback_payload, headers=backend_headers())
+        logger.debug(f"[QA Re-OCR] Callback status code: {res.status_code}")
     except Exception as e:
-        print(f"[QA Re-OCR] Failed to post callback: {e}", flush=True)
+        logger.error(f"[QA Re-OCR] Failed to post callback: {e}")

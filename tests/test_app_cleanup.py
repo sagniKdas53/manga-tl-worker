@@ -8,6 +8,7 @@ enclosing `except Exception`, so every file after it was left on disk and the
 count was never printed.
 """
 
+import logging
 import os
 from unittest.mock import patch
 
@@ -21,7 +22,8 @@ def _touch(path, age_seconds):
     os.utime(path, (stamp, stamp))
 
 
-def test_cleanup_removes_only_files_older_than_a_day(tmp_path, capsys):
+def test_cleanup_removes_only_files_older_than_a_day(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
     old_a = tmp_path / "old_a.jpg"
     old_b = tmp_path / "old_b.jpg"
     fresh = tmp_path / "fresh.jpg"
@@ -38,10 +40,11 @@ def test_cleanup_removes_only_files_older_than_a_day(tmp_path, capsys):
     assert not old_a.exists()
     assert not old_b.exists()
     assert fresh.exists()
-    assert "Cleaned up 2 old files" in capsys.readouterr().out
+    assert "Cleaned up 2 old files" in caplog.text
 
 
-def test_cleanup_continues_past_a_file_that_cannot_be_removed(tmp_path, capsys):
+def test_cleanup_continues_past_a_file_that_cannot_be_removed(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
     """Red before the fix: the generator aborted on the first raising unlink."""
     first = tmp_path / "a_locked.jpg"
     second = tmp_path / "b_removable.jpg"
@@ -65,7 +68,7 @@ def test_cleanup_continues_past_a_file_that_cannot_be_removed(tmp_path, capsys):
     ):
         app.cleanup_audit_cache()
 
-    out = capsys.readouterr().out
+    out = caplog.text
     assert first.exists(), "the unremovable file should still be there"
     assert not second.exists(), "the sweep must not abort on the first failure"
     assert not third.exists(), "the sweep must not abort on the first failure"

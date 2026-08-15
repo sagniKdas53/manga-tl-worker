@@ -1,11 +1,14 @@
 """Concurrency state management and job slot allocation for the worker."""
 
+import logging
 import os
 import platform
 import threading
 import time
 
 from worker.rq_tasks import process_job_rq
+
+logger = logging.getLogger(__name__)
 
 START_TIME = time.time()
 SEEDING_COMPLETE = False
@@ -79,7 +82,7 @@ MAX_CONCURRENT_JOBS, MAX_HEAVY_SLOTS, MAX_LIGHT_SLOTS, _SLOT_WARNINGS = resolve_
     MAX_CONCURRENT_JOBS, MAX_HEAVY_SLOTS, MAX_LIGHT_SLOTS
 )
 for _warning in _SLOT_WARNINGS:
-    print(f"[Worker Concurrency] {_warning}", flush=True)
+    logger.info(f"[Worker Concurrency] {_warning}")
 
 REUSE_IDLE_SLOTS = os.environ.get("REUSE_IDLE_SLOTS", "true").strip().lower() == "true"
 WORKER_API_SECRET = os.environ.get("WORKER_API_SECRET", "").strip()
@@ -105,17 +108,16 @@ LIGHT_QUEUES = {
 
 if WORKER_API_SECRET_FILE:
     if not os.path.exists(WORKER_API_SECRET_FILE):
-        print(
+        logger.info(
             f"[Worker Concurrency] WORKER_API_SECRET_FILE points at {WORKER_API_SECRET_FILE}, which does not "
-            "exist. Check that the secret is mounted into the container.",
-            flush=True,
+            "exist. Check that the secret is mounted into the container."
         )
     else:
         try:
             with open(WORKER_API_SECRET_FILE) as f:
                 WORKER_API_SECRET = f.read().strip()
         except Exception as e:
-            print(f"[Worker Concurrency] Failed to read WORKER_API_SECRET_FILE: {e}", flush=True)
+            logger.error(f"[Worker Concurrency] Failed to read WORKER_API_SECRET_FILE: {e}")
 
 WORKER_ID = os.environ.get("WORKER_ID", platform.node())
 
@@ -130,7 +132,7 @@ def run_job_async(queue_name: str, job_data: dict):
     try:
         process_job_rq(queue_name, job_data)
     except Exception as e:
-        print(f"[Worker Concurrency] Async job execution failed: {e}", flush=True)
+        logger.error(f"[Worker Concurrency] Async job execution failed: {e}")
     finally:
         with ACTIVE_JOBS_LOCK:
             if queue_name in HEAVY_QUEUES:
