@@ -330,7 +330,13 @@ class ProviderConfigLoader:
                 "provider:config:updated",
                 json.dumps({"event": "config_reload", "timestamp": config_map["timestamp"]}),
             )
-            logger.info("Published resolved provider configuration to Redis key system:providers:config")
+            # Name the providers: this key is what the settings UI's dropdowns are built from, so
+            # when it comes out short the log should say so rather than leaving an empty dropdown as
+            # the only symptom.
+            logger.info(
+                "Published resolved provider configuration to Redis key system:providers:config "
+                f"({', '.join(sorted(config_map['providers'])) or 'no providers'})"
+            )
         except Exception as e:
             logger.error(f"Failed to publish provider config to Redis: {e}")
 

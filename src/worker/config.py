@@ -538,13 +538,23 @@ if QA_MODE == "auto":
     else:
         QA_MODE = "none"
 
-# Publish provider config map to Redis on startup
-try:
-    from worker.provider_config import get_config_loader
 
-    get_config_loader().publish_config_to_redis(redis_client)
-except Exception as _e:
-    logger.warning(f"Could not publish provider config to Redis at startup: {_e}")
+def publish_provider_config() -> None:
+    """Publish the resolved provider/model map to Redis for the backend to read.
+
+    Call this from the worker *service* startup only — never at import time. The published map is
+    the sole source of the backend's provider list, and it is filtered to providers this process
+    has API keys for. A host-run script (a probe, a benchmark) that imports any worker module pulls
+    in this one transitively; if that import published, it would overwrite the deployment's config
+    with whatever that shell's environment happened to hold. With no keys exported that is just the
+    keyless `local` provider, which empties every provider dropdown in the settings UI.
+    """
+    try:
+        from worker.provider_config import get_config_loader
+
+        get_config_loader().publish_config_to_redis(redis_client)
+    except Exception as _e:
+        logger.warning(f"Could not publish provider config to Redis at startup: {_e}")
 
 
 # Validate and fetch openrouter costs on startup

@@ -1,3 +1,5 @@
+import ast
+import pathlib
 from unittest.mock import MagicMock
 
 from worker.provider_config import ProviderConfigLoader, normalize_model_name
@@ -37,3 +39,40 @@ def test_publish_config_to_redis():
     assert mock_redis.publish.called
     args = mock_redis.set.call_args[0]
     assert args[0] == "system:providers:config"
+
+
+def test_importing_worker_config_does_not_publish():
+    """Importing worker.config must not touch the provider config key.
+
+    system:providers:config is the only thing the backend builds the settings UI's provider
+    dropdowns from, and it is filtered to the providers the *publishing* process holds keys for.
+    Every worker module imports worker.config, so publishing at import time let any host-run script
+    (a probe, a benchmark) overwrite the deployment's providers with its own key-less environment —
+    which emptied the Translation and QA provider dropdowns and left OCR with nothing but `local`.
+
+    Asserted over the AST rather than by reloading the module: re-executing worker.config would
+    re-run every other import side effect it has, one of which can call sys.exit.
+    """
+    import worker.config as worker_config
+
+    assert callable(getattr(worker_config, "publish_provider_config", None)), (
+        "worker.config must expose publish_provider_config() for the service to call explicitly"
+    )
+
+    config_path = worker_config.__file__
+    assert config_path, "worker.config has no __file__ to inspect"
+    source = pathlib.Path(config_path).read_text(encoding="utf-8")
+    # Statements that run on import: everything at module level except the bodies of defs, which
+    # only run when something calls them.
+    executed_on_import = [
+        stmt
+        for stmt in ast.parse(source).body
+        if not isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+    ]
+    for stmt in executed_on_import:
+        for node in ast.walk(stmt):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                assert node.func.attr != "publish_config_to_redis", (
+                    "worker/config.py publishes provider config at import time; move the call into "
+                    "the worker service's startup (see main.py's lifespan)."
+                )

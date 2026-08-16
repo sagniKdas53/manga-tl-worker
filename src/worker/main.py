@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 
 import worker.concurrency as conc
-from worker.config import HEALTH_PORT, MODEL_TTL
+from worker.config import HEALTH_PORT, MODEL_TTL, publish_provider_config
 from worker.model_manager import model_manager
 from worker.schemas import JobSubmitRequest
 
@@ -46,6 +46,12 @@ def _require_api_secret():
 async def lifespan(app: FastAPI):
     """Replaces app.py's manual while-True loop."""
     _require_api_secret()
+
+    # Tell the backend which providers and models this deployment can actually reach. Deliberately
+    # here and not at worker.config import time: this overwrites the key the settings UI reads, and
+    # every worker module imports worker.config, so an import-time publish let any host-run script
+    # clobber it with a key-less environment.
+    publish_provider_config()
 
     # Cleanup old audit cache
     from app import cleanup_audit_cache, seed_models
