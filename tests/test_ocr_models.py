@@ -158,6 +158,37 @@ class TestEnvironmentPin:
         assert resolved is not None
         assert resolved.rec == "PP-OCRv5_server_rec"
 
+    def test_an_explicit_choice_outranks_the_pin(self, catalog, monkeypatch):
+        """The pin is a default for jobs with no preference, not a veto over one that has.
+
+        The deployment pins the v6 pair so Japanese and friends stay on v6, but asking for
+        PP-OCRv5 on a specific page has to actually produce PP-OCRv5 — otherwise the per-job
+        model choice is decorative for every operator whose .env carries the pin.
+        """
+        monkeypatch.setenv("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det")
+        monkeypatch.setenv("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec")
+        resolved = catalog.resolve(V5, "ja")
+        assert resolved is not None
+        assert resolved.model_id == V5
+        assert resolved.rec == "PP-OCRv5_server_rec"
+
+    def test_the_pin_still_wins_when_no_choice_was_made(self, catalog, monkeypatch):
+        """The flip side: v6 stays the default for everything that does not ask for otherwise."""
+        monkeypatch.setenv("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det")
+        monkeypatch.setenv("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec")
+        for lang in ("ja", "zh", "en"):
+            resolved = catalog.resolve(None, lang)
+            assert resolved is not None
+            assert resolved.rec == "PP-OCRv6_medium_rec", f"{lang} must stay on the pinned v6 pair"
+
+    def test_an_explicit_choice_that_cannot_read_the_language_still_reroutes(self, catalog, monkeypatch):
+        """Explicit does not mean unconditional: v6 cannot read Hangul however firmly it is asked for."""
+        monkeypatch.setenv("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det")
+        monkeypatch.setenv("PADDLEOCR_REC_MODEL", "PP-OCRv6_medium_rec")
+        resolved = catalog.resolve(V6, "ko")
+        assert resolved is not None
+        assert resolved.rec == "korean_PP-OCRv5_mobile_rec"
+
     def test_pin_is_ignored_when_it_cannot_read_the_language(self, catalog, monkeypatch):
         """An existing .env pinning the v6 pair must not keep breaking Korean after this fix."""
         monkeypatch.setenv("PADDLEOCR_DET_MODEL", "PP-OCRv6_medium_det")

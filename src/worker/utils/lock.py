@@ -18,6 +18,49 @@ end
 """
 
 
+def release_stale_node_locks() -> int:
+    """Drop node-scoped locks left behind by a previous incarnation of this container.
+
+    ``acquire_lock`` releases in a ``finally`` block, which SIGKILL does not run. The key then
+    survives until its TTL fires — 600s during which every job needing that lock blocks on a
+    holder that no longer exists.
+
+    An OOM kill produces exactly that: the kernel kills the process, Docker restarts the
+    container under the *same* hostname, and the new process inherits its predecessor's lock.
+    Observed in production as a 9m38s stall on the page after a PP-OCRv5 detection OOM, which
+    also pushed that job past the backend's staleness reaper so its result was discarded.
+
+    Sweeping at startup is safe precisely because these keys are node-scoped: they are suffixed
+    with this container's hostname, and this process has just started, so nothing it spawned can
+    be mid-work. Any key still bearing this node's name is therefore an orphan by definition.
+    Locks belonging to other nodes — and every non-node-scoped lock, which may be legitimately
+    held by a *different* container — are left strictly alone.
+
+    Returns the number of locks cleared.
+    """
+    pattern = f"lock:*:{platform.node()}"
+    released: list[str] = []
+    try:
+        for raw in redis_client.scan_iter(match=pattern, count=100):
+            key = raw.decode() if isinstance(raw, bytes) else str(raw)
+            if redis_client.delete(key):
+                released.append(key)
+    except Exception as e:
+        # Never block startup on this: a worker that cannot sweep is strictly better than a
+        # worker that will not boot, and the TTL still clears the key eventually.
+        logger.error(f"Could not sweep stale node-scoped Valkey locks: {e}")
+        return 0
+
+    if released:
+        logger.warning(
+            f"Cleared {len(released)} stale node-scoped Valkey lock(s) held by a process that no "
+            f"longer exists: {', '.join(released)}. This node's previous worker was killed "
+            "(OOM or SIGKILL) mid-task; without this sweep the next job would block until the "
+            "lock's TTL expired."
+        )
+    return len(released)
+
+
 @contextmanager
 def acquire_lock(lock_name: str, timeout: float = 600, expire: int = 600, node_scoped: bool = False):
     """

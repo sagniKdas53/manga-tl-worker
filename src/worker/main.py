@@ -14,6 +14,7 @@ import worker.concurrency as conc
 from worker.config import HEALTH_PORT, MODEL_TTL, publish_provider_config
 from worker.model_manager import model_manager
 from worker.schemas import JobSubmitRequest
+from worker.utils.lock import release_stale_node_locks
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,11 @@ async def lifespan(app: FastAPI):
     # every worker module imports worker.config, so an import-time publish let any host-run script
     # clobber it with a key-less environment.
     publish_provider_config()
+
+    # If the last process on this node was killed mid-task it never released its locks. Clear them
+    # before anything can queue behind them — jobs only arrive once startup completes, so this is
+    # the one moment an orphan is unambiguous.
+    release_stale_node_locks()
 
     # Cleanup old audit cache
     from app import cleanup_audit_cache, seed_models
