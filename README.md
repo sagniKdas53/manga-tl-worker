@@ -1,4 +1,4 @@
-# ML Worker (unified-workers)
+# ML Worker
 
 This directory contains the Python-based Machine Learning (ML) Worker service for the Manga Translation Platform. The worker processes computationally heavy and AI-driven tasks asynchronously, coordinating with the Spring Boot backend via a Valkey/Redis task queue.
 
@@ -23,7 +23,7 @@ Its primary responsibilities include:
 ## 📂 Project Structure
 
 ```txt
-unified-workers/
+worker/
 ├── app.py                   # Main entry point (starts HTTP health server and worker loop)
 ├── Dockerfile               # Production container image configuration
 ├── requirements.txt         # Core Python dependencies
@@ -63,7 +63,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 # Install requirements
-cd unified-workers
+cd worker
 pip install -r requirements.txt
 ```
 
@@ -91,4 +91,6 @@ python run_tests.py
 
 ## 🧼 Linting & Formatting
 
-See [linting.md](file:///home/sagnik/Projects/docker-composes/manga-library/unified-workers/linting.md) for details on code style guidelines using `ruff`, `black`, and `flake8`.
+Lint and format with `ruff` (it replaces Flake8, Black and isort) — see [COMMANDS.md](COMMANDS.md)
+for the exact invocations, and [../docs/guides/quality_gate.md](../docs/guides/quality_gate.md) for
+the full gate.

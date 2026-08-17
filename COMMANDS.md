@@ -33,7 +33,7 @@ pytest --cov=. --cov-report=xml --cov-report=html
 
 ## Linting & Formatting
 
-[Ruff](https://github.com/astral-sh/ruff) is an extremely fast Python linter and formatter that replaces Flake8, Black, isort, and more. Run these commands from the `unified-workers/` directory:
+[Ruff](https://github.com/astral-sh/ruff) is an extremely fast Python linter and formatter that replaces Flake8, Black, isort, and more. Run these commands from the `worker/` directory:
 
 ```bash
 # 1. Run lint checks

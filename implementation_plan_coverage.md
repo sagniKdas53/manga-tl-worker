@@ -1,6 +1,11 @@
 # Worker Quality Gate & Test Suite Alignment Plan
 
-This plan addresses all quality gate check failures for the Python worker (`worker/`) according to [quality_gate.md](file:///home/sagnik/Projects/docker-composes/manga-library/docs/quality_gate.md).
+> **Status: executed — kept for the root-cause write-up below, not as a worklist.** The gate is
+> green as of 2026-08-17 (`cd worker && ../.venv/bin/python -m pytest -q` -> **415 passed** in
+> ~7s), and the quality-gate doc this plan asks to fix already says `cd worker`. The remaining
+> `unified-workers` mentions below are quotations of the old state, not outstanding work.
+
+This plan addresses all quality gate check failures for the Python worker (`worker/`) according to [quality_gate.md](../docs/guides/quality_gate.md).
 
 ---
 
@@ -76,22 +81,22 @@ Below is the complete inventory of all failures observed during the quality gate
 
 ### Worker Configuration & Quality Gate Fixes
 
-#### [MODIFY] [provider_config.py](file:///home/sagnik/Projects/docker-composes/manga-library/worker/src/worker/provider_config.py)
+#### [MODIFY] [provider_config.py](src/worker/provider_config.py)
 - Update `get_provider_registry()` to include all defined providers from `providers.json` so `LLMClient` can route requests and format payloads correctly for all providers regardless of startup environment variables.
 - Fix pyright `reportOptionalIterable` error at line 153 by safely checking `task_models` before iterating.
 - Fix ruff lint issues (remove unused `field` import, remove redundant `"r"` mode in `open()`, use `datetime.UTC`).
 
-#### [MODIFY] [pyrightconfig.json](file:///home/sagnik/Projects/docker-composes/manga-library/worker/pyrightconfig.json)
+#### [MODIFY] [pyrightconfig.json](pyrightconfig.json)
 - Update `venvPath` to `".."` so Pyright accurately recognizes `.venv` located at the root directory.
 
-#### [MODIFY] [llm_client.py](file:///home/sagnik/Projects/docker-composes/manga-library/worker/src/worker/services/llm_client.py)
+#### [MODIFY] [llm_client.py](src/worker/services/llm_client.py)
 - Move import to top of file to resolve ruff `E402` lint warning.
 
 ---
 
 ### Worker Tests & Coverage
 
-#### [MODIFY] [test_provider_config.py](file:///home/sagnik/Projects/docker-composes/manga-library/worker/tests/test_provider_config.py)
+#### [MODIFY] [test_provider_config.py](tests/test_provider_config.py)
 - Clean up unused import `LLMClient` and sort import block according to ruff formatting standards.
 - Add test assertions verifying that all configured providers are present in the provider registry.
 
@@ -102,7 +107,7 @@ Below is the complete inventory of all failures observed during the quality gate
 
 ### Documentation
 
-#### [MODIFY] [quality_gate.md](file:///home/sagnik/Projects/docker-composes/manga-library/docs/quality_gate.md)
+#### [MODIFY] [quality_gate.md](../docs/guides/quality_gate.md)
 - Update directory path in worker quality gate section from `cd unified-workers` to `cd worker`.
 
 ---
