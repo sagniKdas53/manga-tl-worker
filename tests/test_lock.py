@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from worker.utils.lock import acquire_lock
+from worker.utils.lock import acquire_lock, release_stale_node_locks
 
 
 class FakeRedis:
@@ -37,6 +37,13 @@ class FakeRedis:
 
     def delete(self, key):
         return 1 if self.store.pop(key, None) is not None else 0
+
+    def scan_iter(self, match=None, count=None):
+        # Real redis-py returns bytes when decode_responses is off, which the worker's client is.
+        prefix, _, suffix = (match or "*").partition("*")
+        for key in list(self.store):
+            if key.startswith(prefix) and key.endswith(suffix):
+                yield key.encode()
 
 
 def test_lock_key_is_global_by_default():
@@ -92,3 +99,73 @@ def test_acquire_times_out_when_the_lock_is_held():
         acquire_lock("local-llm", timeout=0.1),
     ):
         pass
+
+
+class TestStaleNodeLockSweep:
+    """A SIGKILLed holder never runs the release, so its key outlives it by the whole TTL.
+
+    That is what an OOM kill leaves behind: the container restarts under the same hostname and
+    the new process blocks on a lock belonging to a process that no longer exists.
+    """
+
+    def test_orphaned_lock_for_this_node_is_cleared(self):
+        fake = FakeRedis()
+        fake.store["lock:ocr:worker-7"] = "token-of-a-dead-process"
+        with (
+            patch("worker.utils.lock.redis_client", fake),
+            patch("platform.node", return_value="worker-7"),
+        ):
+            assert release_stale_node_locks() == 1
+
+        assert fake.store == {}, "the dead process's lock must not survive our startup"
+
+    def test_locks_belonging_to_other_nodes_are_left_alone(self):
+        """Only this node's keys are provably orphaned — another container may still be running."""
+        fake = FakeRedis()
+        fake.store["lock:ocr:worker-7"] = "ours"
+        fake.store["lock:ocr:worker-9"] = "another-live-containers-token"
+        with (
+            patch("worker.utils.lock.redis_client", fake),
+            patch("platform.node", return_value="worker-7"),
+        ):
+            assert release_stale_node_locks() == 1
+
+        assert fake.store == {"lock:ocr:worker-9": "another-live-containers-token"}
+
+    def test_global_locks_are_never_swept(self):
+        """A non-node-scoped lock guards a shared service and may be held by a different worker."""
+        fake = FakeRedis()
+        fake.store["lock:local-llm"] = "held-by-some-worker"
+        with (
+            patch("worker.utils.lock.redis_client", fake),
+            patch("platform.node", return_value="worker-7"),
+        ):
+            assert release_stale_node_locks() == 0
+
+        assert fake.store == {"lock:local-llm": "held-by-some-worker"}
+
+    def test_a_sweep_failure_does_not_block_startup(self):
+        """Booting without the sweep beats not booting; the TTL still clears the key eventually."""
+
+        class ExplodingRedis(FakeRedis):
+            def scan_iter(self, match=None, count=None):
+                raise ConnectionError("valkey is not up yet")
+
+        with (
+            patch("worker.utils.lock.redis_client", ExplodingRedis()),
+            patch("platform.node", return_value="worker-7"),
+        ):
+            assert release_stale_node_locks() == 0
+
+    def test_the_sweep_unblocks_a_waiter(self):
+        """End to end: the exact production sequence, minus the ten minute wait."""
+        fake = FakeRedis()
+        fake.store["lock:ocr:worker-7"] = "token-of-the-oom-killed-process"
+        with (
+            patch("worker.utils.lock.redis_client", fake),
+            patch("platform.node", return_value="worker-7"),
+        ):
+            release_stale_node_locks()
+            # Previously this blocked for the orphan's full TTL before raising or proceeding.
+            with acquire_lock("ocr", timeout=0.1, node_scoped=True):
+                assert fake.store["lock:ocr:worker-7"] != "token-of-the-oom-killed-process"

@@ -327,25 +327,16 @@ class LocalOcrCatalog:
         An explicit *model_id* is honoured when that entry can read the language. When it cannot —
         the PP-OCRv6/Korean case — routing falls through to an entry that can, loudly, rather than
         returning a pair that would transcribe Hangul as noise.
+
+        Precedence is: explicit per-job choice, then the environment pin, then the catalog default.
         """
         lang = normalize_lang(source_language)
 
-        # An environment pin wins, except when the catalog positively knows the pinned recognition
-        # model cannot read this script. Honouring it there would reinstate the exact bug this
-        # module exists to fix for every deployment that still has the old vars in its .env.
-        override = env_override()
-        if override is not None:
-            det, rec = override
-            if self.rec_covers(rec, lang) is not False:
-                return ResolvedOcrModel(model_id="env-override", det=det, rec=rec, language=lang)
-            logger.warning(
-                f"[OCR Models] PADDLEOCR_DET_MODEL/PADDLEOCR_REC_MODEL pin '{det}' + '{rec}', but "
-                f"'{rec}' has no character set for '{lang}'. Ignoring the pin for this job and "
-                "choosing a model that can read it. Unset those vars to silence this."
-            )
-
         requested = self.get(model_id)
 
+        # An explicit per-job choice outranks the environment pin. The pin is a deployment-wide
+        # *default* for jobs that express no preference, not a veto over one that does: a caller
+        # that asks for PP-OCRv5 on a page has to get PP-OCRv5, or the choice is decorative.
         if requested is not None and requested.supports(lang):
             rec = requested.rec_for(lang)
             assert rec is not None  # supports() just checked the key exists
@@ -355,6 +346,21 @@ class LocalOcrCatalog:
                 rec=rec,
                 language=lang,
                 requested_model_id=requested.id,
+            )
+
+        # An environment pin beats the catalog default, except when the catalog positively knows
+        # the pinned recognition model cannot read this script. Honouring it there would reinstate
+        # the exact bug this module exists to fix for every deployment that still has the old vars
+        # in its .env.
+        override = env_override()
+        if override is not None:
+            det, rec = override
+            if self.rec_covers(rec, lang) is not False:
+                return ResolvedOcrModel(model_id="env-override", det=det, rec=rec, language=lang)
+            logger.warning(
+                f"[OCR Models] PADDLEOCR_DET_MODEL/PADDLEOCR_REC_MODEL pin '{det}' + '{rec}', but "
+                f"'{rec}' has no character set for '{lang}'. Ignoring the pin for this job and "
+                "choosing a model that can read it. Unset those vars to silence this."
             )
 
         chosen = self.default_for(lang)
