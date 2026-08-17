@@ -74,7 +74,7 @@ def test_korean_loads_a_recognition_model_that_can_read_hangul():
         assert mm.get_paddle_ocr_reader("ko") == "paddle_instance"
         kwargs = mock_paddle.call_args.kwargs
         assert kwargs["text_recognition_model_name"] == "korean_PP-OCRv5_mobile_rec"
-        assert kwargs["text_detection_model_name"] == "PP-OCRv5_server_det"
+        assert kwargs["text_detection_model_name"] == "PP-OCRv5_mobile_det"
         # `lang` must not be passed alongside explicit model names — PaddleOCR ignores it and warns.
         assert "lang" not in kwargs
     finally:

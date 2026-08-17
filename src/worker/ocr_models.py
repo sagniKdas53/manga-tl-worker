@@ -44,10 +44,14 @@ BUILTIN_LOCAL_OCR_MODELS: list[dict] = [
             "en": "PP-OCRv6_medium_rec",
         },
     },
+    # The detector is deliberately the *mobile* one even though ja/zh recognition is server-tier:
+    # PP-OCRv5_server_det peaks at ~3.9 GB RSS on a 1024px page, which exceeds the worker's 4 GiB
+    # cap once the process baseline is counted and OOM-kills the whole container mid-page. The
+    # mobile detector peaks at ~0.5 GB for effectively the same boxes.
     {
         "id": "PP-OCRv5",
-        "name": "PP-OCRv5 Server",
-        "det": "PP-OCRv5_server_det",
+        "name": "PP-OCRv5",
+        "det": "PP-OCRv5_mobile_det",
         "rec": {
             "ja": "PP-OCRv5_server_rec",
             "zh": "PP-OCRv5_server_rec",
