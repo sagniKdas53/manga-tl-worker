@@ -4,7 +4,7 @@ This directory contains the Python-based Machine Learning (ML) Worker service fo
 
 ---
 
-## 🏗️ Architecture & Core Duties
+## Architecture & core duties
 
 The worker runs a loop to consume tasks from Valkey/Redis and coordinates with MinIO S3 for downloading raw images and uploading processed layers and masks.
 
@@ -20,7 +20,7 @@ Its primary responsibilities include:
 
 ---
 
-## 📂 Project Structure
+## Project structure
 
 ```txt
 worker/
@@ -41,7 +41,7 @@ worker/
 
 ---
 
-## 🚀 Setup & Local Development
+## Setup & local development
 
 ### 1. Prerequisites
 
@@ -67,7 +67,7 @@ cd worker
 pip install -r requirements.txt
 ```
 
-### 3. Run the Worker
+### 3. Run the worker
 
 Start the HTTP health server and task listener:
 
@@ -79,7 +79,7 @@ By default, the health check endpoint will be available at `http://localhost:800
 
 ---
 
-## 🧪 Running Tests
+## Running tests
 
 A test runner is provided to verify spatial OCR merging and translation validation logic:
 
@@ -89,8 +89,8 @@ python run_tests.py
 
 ---
 
-## 🧼 Linting & Formatting
+## Linting & formatting
 
-Lint and format with `ruff` (it replaces Flake8, Black and isort) — see [COMMANDS.md](COMMANDS.md)
+Lint and format with `ruff` (it replaces Flake8, Black and isort). See [COMMANDS.md](COMMANDS.md)
 for the exact invocations, and [../docs/guides/quality_gate.md](../docs/guides/quality_gate.md) for
 the full gate.
