@@ -1,0 +1,57 @@
+name: Prune GHCR images
+
+# Runs on its own schedule rather than inside the build job. Pruning as a build step meant a
+# failed build still deleted images, and `keep-last` counted the set *before* the new push.
+#
+# Requires a PRUNE_TOKEN secret: a classic PAT with `delete:packages`. GITHUB_TOKEN cannot
+# delete user-scoped packages, so without it this workflow fails rather than silently no-ops.
+
+on:
+  schedule:
+    # Sundays, 04:00 UTC.
+    - cron: "0 4 * * 0"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List what would be deleted without deleting it"
+        type: boolean
+        default: true
+
+jobs:
+  prune:
+    name: Prune ghcr.io/sagnikdas53/manga-tl-worker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prune old versions
+        uses: vlaurin/action-ghcr-prune@v0.6.0
+        with:
+          token: ${{ secrets.PRUNE_TOKEN }}
+          user: ${{ github.repository_owner }}
+          container: manga-tl-worker
+          # Scheduled runs prune for real; a manual run defaults to a dry run so the delete
+          # list can be read first. The `&&` short-circuits to false on the schedule event,
+          # where `inputs` is empty.
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          # A week of per-commit images is the rollback window.
+          keep-younger-than: 7
+          keep-last: 10
+          # Multi-arch pushes leave manifests behind that no tag references.
+          prune-untagged: true
+          # docker/metadata-action strips the leading v, so a released image is tagged `1.4.0`,
+          # never `v1.4.0`. yt-diff's keep-list matched on `^v[0-9]+...` and so protected
+          # nothing; these patterns match what is actually published.
+          keep-tags-regexes: |
+            ^latest$
+            ^main$
+            ^master$
+            ^dev$
+            ^[0-9]+$
+            ^[0-9]+\.[0-9]+$
+            ^[0-9]+\.[0-9]+\.[0-9]+$
+          # `^[0-9a-f]{40}$` reclaims the 69 bare full-SHA tags left by an earlier revision of
+          # the publish workflow. Nothing else matches them, which is most of why this package
+          # reached 108 tags for 2 useful ones.
+          prune-tags-regexes: |
+            ^sha-
+            ^pr-
+            ^[0-9a-f]{40}$
