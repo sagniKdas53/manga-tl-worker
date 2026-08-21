@@ -1,16 +1,43 @@
 name: CI - Docker Publish
 
+# Two entry points, deliberately:
+#
+#   push        — every merge to main that touches the image, moving `latest`/`main`/`master`.
+#   workflow_call — invoked by release.yml after it cuts a vX.Y.Z tag, to publish the semver
+#                 tags for that release.
+#
+# The obvious alternative — `on: push: tags: ["v*"]` — does not work here. A tag pushed by a
+# workflow using GITHUB_TOKEN never triggers another workflow (GitHub's recursion guard), so
+# the release tag would silently publish nothing. Being called directly sidesteps that without
+# needing a PAT. It also avoids the second trap: `paths:` below is ANDed with the ref filters,
+# and a tag push carries no changed files, so a tag build would be filtered out anyway.
+
 on:
   push:
     branches: ["main"]
-    tags:
-      - "v*"
     paths:
       - "Dockerfile"
       - "app.py"
       - "requirements.txt"
       - "src/**"
       - ".github/workflows/ci-docker.yml"
+  workflow_call:
+    inputs:
+      version:
+        description: "Semver with no leading v (e.g. 1.4.0). When set, publishes X.Y.Z, X.Y and X alongside latest."
+        type: string
+        required: true
+  workflow_dispatch:
+
+# A release commit fires this twice: once from `push` (it touched the image) and once from
+# release.yml's call, for the semver tags. One shared group with no cancellation serialises
+# them, so they cannot race for the `latest` pointer. Cancelling is deliberately off: with
+# cancel-in-progress a later merge would kill an in-flight release build, which is the one
+# build that must not be lost. Both runs build the same commit and the second simply re-points
+# the same tags, so the cost is cache-warm CI minutes, not correctness.
+concurrency:
+  group: worker-docker-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-and-push:
@@ -50,51 +77,18 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ steps.registry_owner.outputs.owner }}/manga-tl-worker
-          flavor: |
-            latest=auto
+          # `master` is published alongside `main` on purpose. This repo's default branch is
+          # `main` while yt-diff's is `master`, and reaching for `:master` here is what produced
+          # `denied: denied` on pull — GHCR reports a path it cannot resolve as denied rather
+          # than 404. A tag is a pointer, so the alias costs no storage.
           tags: |
-            type=schedule,pattern={{date 'YYYYMMDD-HHmmss' tz='UTC'}}
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{major}}.{{minor}}.{{patch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=main,enable={{is_default_branch}}
+            type=raw,value=master,enable={{is_default_branch}}
             type=sha,prefix=sha-
-
-      # - name: Prune Old Images from GHCR
-      #   uses: vlaurin/action-ghcr-prune@v0.6.0
-      #   with:
-      #     token: ${{ secrets.PRUNE_TOKEN }}
-      #     user: ${{ github.repository_owner }}
-      #     container: manga-tl-worker
-      #     dry-run: false
-      #     keep-younger-than: 7
-      #     keep-last: 10
-      #     prune-untagged: true
-      #     keep-tags-regexes: |
-      #       ^v[0-9]+\.[0-9]+\.[0-9]+
-      #       ^main$
-      #       ^master$
-      #       ^dev$
-      #     prune-tags-regexes: |
-      #       ^sha-
-
-      # - name: Prune Old Images from Docker Hub
-      #   uses: lostlink/docker-cleanup@v1.0.1
-      #   with:
-      #     username: ${{ secrets.DOCKERHUB_USERNAME }}
-      #     password: ${{ secrets.DOCKERHUB_TOKEN }}
-      #     organization: ${{ github.repository_owner }}
-      #     repositories: "manga-tl-worker"
-      #     sha-retention-days: 7
-      #     protected-tags: "main,master,dev,latest"
-      #     custom-patterns: |
-      #       {
-      #         "^v[0-9]+\\.[0-9]+\\.[0-9]+$": 365,
-      #         "^sha-.*": 7
-      #       }
-      #     dry-run: true
-      #     verbose: true
+            type=semver,pattern={{major}}.{{minor}}.{{patch}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
 
       - name: Build and push image
         uses: docker/build-push-action@v6
@@ -103,7 +97,17 @@ jobs:
           file: Dockerfile
           push: true
           tags: ${{ steps.meta-ghcr.outputs.tags }}
+          # Carries org.opencontainers.image.source, which is what links the GHCR package back
+          # to this repository.
           labels: ${{ steps.meta-ghcr.outputs.labels }}
+          # amd64 only, unlike the backend image, and this is not an oversight. requirements.txt
+          # pins paddlepaddle==3.3.1, which publishes no linux_aarch64 wheel to PyPI — only
+          # manylinux1_x86_64, macosx_11_0_arm64 and win_amd64 — so an arm64 build dies at
+          # `pip install`. Revisit only via Baidu's own aarch64 wheel index, not by adding a
+          # platform here.
+          platforms: linux/amd64
+          # Every push otherwise minted an `unknown/unknown` attestation manifest that no tag
+          # references and nothing reclaims. Drop this line to get SLSA provenance back.
+          provenance: false
           cache-from: type=gha,scope=worker
           cache-to: type=gha,mode=max,scope=worker
-

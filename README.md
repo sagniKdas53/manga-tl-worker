@@ -41,6 +41,38 @@ worker/
 
 ---
 
+## Pre-built image
+
+Published to the GitHub Container Registry on every merge to `main`, and public — no
+`docker login` is needed to pull it.
+
+```bash
+docker pull ghcr.io/sagnikdas53/manga-tl-worker:latest
+```
+
+The parent stack's `docker-compose.yml` already references this image, so `docker compose up -d`
+there pulls rather than builds.
+
+| Tag | Points at | Use it for |
+| --- | --- | --- |
+| `latest` | current `main` | Deployments. This is the tag Watchtower follows. |
+| `main`, `master` | current `main` | Aliases of `latest`. Both exist so that `:master` — this repo's default branch is `main`, but yt-diff's is `master` — does not fail. |
+| `1.4.0` | that release | Pinning to an exact version. Note there is **no** leading `v`; the git tag is `v1.4.0` but `docker/metadata-action` strips it. |
+| `1.4` / `1` | newest 1.4.x / 1.x | Auto-updating within a minor or major line. |
+| `sha-a1b2c3d` | one commit | Rollback to a specific build. Kept for 7 days. |
+
+Version tags are cut automatically from [Conventional Commits](https://www.conventionalcommits.org/):
+a `feat:` on `main` bumps the minor, a `fix:` bumps the patch, and `BREAKING CHANGE:` bumps the
+major. A merge with no conventional prefix does not cut a release.
+
+> **linux/amd64 only.** `requirements.txt` pins `paddlepaddle==3.3.1`, which publishes no
+> `linux_aarch64` wheel to PyPI — only `manylinux1_x86_64`, `macosx_11_0_arm64` and
+> `win_amd64` — so an arm64 build fails at `pip install`. The backend image is amd64 + arm64,
+> but the stack as a whole needs an amd64 host because of this. Changing that means sourcing
+> paddle from Baidu's own aarch64 wheel index, not adding a platform to the build.
+
+---
+
 ## Setup & local development
 
 ### 1. Prerequisites
