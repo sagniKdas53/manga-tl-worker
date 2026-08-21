@@ -23,4 +23,4 @@ ruff==0.16.2
 pyright==1.1.411
 pydantic==2.13.4
 # Hyphenation dictionaries for the renderer's line breaking (D7). Pure Python, no native deps.
-pyphen==0.17.2
+pyphen==0.18.1
