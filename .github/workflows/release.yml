@@ -9,6 +9,21 @@ name: Release
 # with the parent's pointer. The git tag is the single source of truth and the image tags are
 # derived from it.
 #
+# REQUIRES AT LEAST ONE EXISTING TAG. github-tag-action anchors its commit range to the most
+# recent tag; with none it falls back to a synthetic v0.0.0 that points at no real commit, so
+# the range is empty and the log reads:
+#
+#   Previous tag was v0.0.0, previous version was 0.0.0.
+#   Analysis of 0 commits complete: no release
+#
+# It sees no history at all in that state and can never compute a bump, however the commits are
+# worded. Seed the history once and it works from then on:
+#
+#   git tag v0.1.0 origin/main && git push origin v0.1.0
+#
+# Corollary: do not ever delete every tag in this repo, or releases stop silently rather than
+# loudly.
+
 # Note the image build is *called*, not triggered. A tag pushed with GITHUB_TOKEN does not
 # start another workflow run, so `on: push: tags` in ci-docker.yml would never fire.
 
