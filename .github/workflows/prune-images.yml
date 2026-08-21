@@ -17,6 +17,8 @@ on:
         type: boolean
         default: true
 
+permissions: {}
+
 jobs:
   prune:
     name: Prune ghcr.io/sagnikdas53/manga-tl-worker
