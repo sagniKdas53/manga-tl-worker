@@ -470,3 +470,149 @@ def test_process_translation_retry_individual_fallback(
     payload = mock_post.call_args[1]["json"]
     assert payload["translations"][0]["translatedText"] == "Hello"
     assert payload["translations"][0]["translationNotes"] == "Individual translation fallback"
+
+
+def _image_info_one_region():
+    return {
+        "id": "image-uuid-1",
+        "ocrRegions": [
+            {
+                "id": "region-uuid-1",
+                "text": "こんにちは",
+                "detectedLanguage": "ja",
+                "confidence": 0.9,
+                "width": 100,
+                "height": 100,
+                "bubbleReadingOrder": 1,
+            }
+        ],
+        "conversations": [],
+    }
+
+
+def _batch_reply():
+    return json.dumps(
+        {
+            "translations": [
+                {
+                    "id": "region-uuid-1",
+                    "translation": "Hello",
+                    "translationNotes": "",
+                    "emotion": "neutral",
+                    "tone": "polite",
+                    "translationScore": 0.98,
+                }
+            ]
+        }
+    )
+
+
+@patch("worker.utils.rate_limit.get_job_costs")
+@patch("worker.services.translation.try_cloud_ai")
+@patch("worker.handlers.translation.requests.get")
+@patch("worker.handlers.translation.requests.post")
+@patch("worker.handlers.translation.TL_CONFIG")
+@patch("worker.config.TL_CONFIG")
+def test_model_identifier_reports_the_model_that_actually_ran(
+    mock_service_config,
+    mock_handler_config,
+    mock_post,
+    mock_get,
+    mock_try_cloud_ai,
+    mock_get_job_costs,
+):
+    """The worker's static default must not masquerade as the model that served the job.
+
+    modelIdentifier used to be built from the handler's TL_CONFIG, which is frozen at import,
+    so a page translated by gpt-5.6-luna was recorded as whatever the worker was configured
+    with. The corpus benchmark reads this field to attribute quality to a model, so a wrong
+    value there silently confounds the comparison. The two configs are patched to *different*
+    models on purpose: the handler's is the one the bug used.
+    """
+    for cfg, model in (
+        (mock_service_config, "openai/gpt-5.6-luna"),
+        (mock_handler_config, "deepseek/deepseek-v4-pro"),
+    ):
+        cfg.provider = "openrouter"
+        cfg.llm_model = model
+        cfg.resolve_key.return_value = "fake-key"
+
+    mock_get_res = MagicMock()
+    mock_get_res.status_code = 200
+    mock_get_res.json.return_value = _image_info_one_region()
+    mock_get.return_value = mock_get_res
+    mock_try_cloud_ai.return_value = _batch_reply()
+    mock_post.return_value = MagicMock(status_code=200)
+
+    # What the provider actually billed for this job.
+    mock_get_job_costs.return_value = [
+        {
+            "model": "openai/gpt-5.6-luna",
+            "provider": "openrouter",
+            "prompt_tokens": 1747,
+            "completion_tokens": 648,
+            "estimated_cost": None,
+        }
+    ]
+
+    process_translation(
+        {
+            "imageId": "image-uuid-1",
+            "sourceLanguage": "ja",
+            "targetLanguage": "en",
+            "tlProvider": "openrouter",
+            "tlModel": "openai/gpt-5.6-luna",
+        }
+    )
+
+    payload = mock_post.call_args.kwargs["json"]
+    identifiers = {t["modelIdentifier"] for t in payload["translations"]}
+    assert identifiers == {"openrouter/openai/gpt-5.6-luna"}
+    assert not any("deepseek" in i for i in identifiers), (
+        "modelIdentifier fell back to the worker's static TL_CONFIG default"
+    )
+
+
+@patch("worker.utils.rate_limit.get_job_costs")
+@patch("worker.services.translation.try_cloud_ai")
+@patch("worker.handlers.translation.requests.get")
+@patch("worker.handlers.translation.requests.post")
+@patch("worker.handlers.translation.TL_CONFIG")
+@patch("worker.config.TL_CONFIG")
+def test_model_identifier_falls_back_to_the_requested_model_when_no_cost_was_recorded(
+    mock_service_config,
+    mock_handler_config,
+    mock_post,
+    mock_get,
+    mock_try_cloud_ai,
+    mock_get_job_costs,
+):
+    """No cost records (cost calculation disabled) must still beat the static default."""
+    for cfg, model in (
+        (mock_service_config, "openai/gpt-5.6-luna"),
+        (mock_handler_config, "deepseek/deepseek-v4-pro"),
+    ):
+        cfg.provider = "openrouter"
+        cfg.llm_model = model
+        cfg.resolve_key.return_value = "fake-key"
+
+    mock_get_res = MagicMock()
+    mock_get_res.status_code = 200
+    mock_get_res.json.return_value = _image_info_one_region()
+    mock_get.return_value = mock_get_res
+    mock_try_cloud_ai.return_value = _batch_reply()
+    mock_post.return_value = MagicMock(status_code=200)
+    mock_get_job_costs.return_value = []
+
+    process_translation(
+        {
+            "imageId": "image-uuid-1",
+            "sourceLanguage": "ja",
+            "targetLanguage": "en",
+            "tlProvider": "openrouter",
+            "tlModel": "openai/gpt-5.6-luna",
+        }
+    )
+
+    payload = mock_post.call_args.kwargs["json"]
+    assert {t["modelIdentifier"] for t in payload["translations"]} == {"openrouter/openai/gpt-5.6-luna"}

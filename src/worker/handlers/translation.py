@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def process_translation(job_data):
-    from worker.utils.rate_limit import reset_job_costs
+    from worker.utils.rate_limit import get_job_costs, reset_job_costs
 
     reset_job_costs()
     image_id = job_data.get("imageId")
@@ -288,6 +288,20 @@ def process_translation(job_data):
                         logger.warning(f"{req_prefix}Giving up on '{text}' after 3 attempts.")
                         resolved_translations[rid] = None
 
+    # Resolve which model actually served this job. TL_CONFIG is the process-wide default
+    # frozen at import time, so reporting it here described the worker's configuration rather
+    # than the run -- a page translated by the model the job asked for was still recorded as
+    # whatever the worker happened to be configured with. The per-call cost records carry the
+    # real provider/model, so prefer those, then what the job requested, then the default.
+    # Note: when per-region fallback retries fired, several calls are recorded and the last
+    # one is attributed to every region; true per-region provenance would need threading the
+    # model through resolved_translations.
+    job_costs = get_job_costs()
+    last_call = job_costs[-1] if job_costs else {}
+    resolved_provider = last_call.get("provider") or job_data.get("tlProvider") or TL_CONFIG.provider
+    resolved_model = last_call.get("model") or job_data.get("tlModel") or TL_CONFIG.llm_model
+    model_identifier = f"{resolved_provider}/{resolved_model}"
+
     # Format the final callback response
     translations = []
     for r in ocr_regions:
@@ -320,7 +334,7 @@ def process_translation(job_data):
                 "emotion": emotion,
                 "tone": tone,
                 "translationScore": translation_score,
-                "modelIdentifier": f"{TL_CONFIG.provider}/{TL_CONFIG.llm_model}",
+                "modelIdentifier": model_identifier,
                 "confidence": translation_score,
             }
         )
@@ -342,7 +356,7 @@ def process_translation(job_data):
         "totalCount": len(translations),
     }
 
-    from worker.utils.rate_limit import format_cost, get_job_costs
+    from worker.utils.rate_limit import format_cost
 
     costs = get_job_costs()
     if costs:
