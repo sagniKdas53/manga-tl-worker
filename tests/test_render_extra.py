@@ -5,6 +5,8 @@ from unittest.mock import MagicMock, patch
 from worker.handlers.render import (
     draw_wrapped_text,
     fit_text_in_box_py,
+    halo_stroke_for,
+    has_detected_bubble,
     load_font,
     process_render,
     wrap_text,
@@ -185,3 +187,66 @@ def test_process_render_fail_api(mock_requests):
         pytest.raises(Exception, match=r".*"),
     ):
         process_render({"imageId": "123"})
+
+
+# The real geometry from HKXfexLbAAAN7IE p4, the caption that reads "Talk about peak laziness":
+# written down the character's hair with no balloon at all, so the region came back as
+# direct_text_0 at confidence 0.0 and `free_text_box` squared its 91x293 column into a 186x187 box
+# anchored at x=0.
+IUNO_P4_PLATE = [[2, 1005], [93, 1005], [93, 1298], [2, 1298]]
+IUNO_P4_BOX = (0, 1058, 186, 187)
+
+
+def test_halo_fires_when_the_widened_box_escapes_its_plate():
+    assert halo_stroke_for(IUNO_P4_PLATE, IUNO_P4_BOX, 37) == 4
+
+
+def test_halo_accepts_the_polygon_as_a_json_string():
+    assert halo_stroke_for(json.dumps(IUNO_P4_PLATE), IUNO_P4_BOX, 37) == 4
+
+
+def test_no_halo_when_the_box_is_an_inset_of_the_plate():
+    """The plate covers the box, so every glyph already has a backdrop."""
+    plate = [[100, 40], [240, 40], [240, 260], [100, 260]]
+    assert halo_stroke_for(plate, (110, 50, 120, 200), 30) == 0
+
+
+def test_no_halo_inside_a_detected_balloon_even_when_the_box_escapes_the_mask():
+    """A bubble's mask hugs the glyphs while the box is the bubble inset, so the box escapes on
+    nearly every balloon element -- and what it escapes onto is blank balloon interior."""
+    glyph_mask = [[150, 80], [190, 80], [190, 220], [150, 220]]
+    assert halo_stroke_for(glyph_mask, (110, 50, 120, 200), 30) > 0
+    assert halo_stroke_for(glyph_mask, (110, 50, 120, 200), 30, in_bubble=True) == 0
+
+
+def test_has_detected_bubble_reads_the_bbox_echo_as_no_bubble():
+    # p4's caption: the worker copies the bbox into bubble* when YOLO matched no balloon.
+    assert not has_detected_bubble(
+        {"bubbleW": 91, "bubbleH": 293, "bboxW": 91, "bboxH": 293, "bubbleId": "direct_text_0"}
+    )
+    # p4's first balloon, bubble_1 at 0.96.
+    assert has_detected_bubble({"bubbleW": 122, "bubbleH": 220, "bboxW": 67, "bboxH": 114, "bubbleId": "bubble_1"})
+    assert not has_detected_bubble({"bboxW": 91, "bboxH": 293})
+
+
+def test_no_halo_when_the_box_only_grazes_the_plate_edge():
+    """Two pixels of slack, so rounding in the geometry chain does not outline a contained box."""
+    plate = [[0, 0], [100, 0], [100, 100], [0, 100]]
+    assert halo_stroke_for(plate, (-1, -1, 102, 102), 30) == 0
+    assert halo_stroke_for(plate, (-4, 0, 100, 100), 30) > 0
+
+
+def test_halo_when_nothing_was_erased_at_all():
+    assert halo_stroke_for(None, IUNO_P4_BOX, 20) == 2
+    assert halo_stroke_for([], IUNO_P4_BOX, 20) == 2
+
+
+def test_halo_scales_with_font_size_but_never_hairline():
+    assert halo_stroke_for(IUNO_P4_PLATE, IUNO_P4_BOX, 80) == 8
+    assert halo_stroke_for(IUNO_P4_PLATE, IUNO_P4_BOX, 10) == 2
+    assert halo_stroke_for(IUNO_P4_PLATE, IUNO_P4_BOX, 0) == 0
+
+
+def test_malformed_polygon_does_not_halo_or_raise():
+    assert halo_stroke_for("not json", IUNO_P4_BOX, 30) == 0
+    assert halo_stroke_for([["a", "b"]], IUNO_P4_BOX, 30) == 0

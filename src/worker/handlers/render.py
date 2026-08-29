@@ -363,6 +363,89 @@ def mask_span_for_band(polygon, box_x, box_width, y_top, y_bottom):
     return (left, right)
 
 
+# Glyphs drawn past the erased plate need their own backdrop.
+#
+# `free_text_box` (backend `coordinator.rs`) squares a tall vertical Japanese column into a box
+# English can be set across -- equal area, up to 2.5x the column's width. The erase plate does not
+# grow with it; it stays the tight shape that covered the source text. For a balloon the two agree,
+# because the box is an inset of the bubble the plate fills. For free-floating text they do not, and
+# the difference is drawn straight onto artwork -- 329 of the 552 free-floating elements in the
+# 400-page corpus escape their plate, by a median 42% of the box width. HKXfexLbAAAN7IE p4 is the
+# case: a 91x293 column becomes a 186x187 box, and half of "Talk about peak laziness!" lands on the
+# character's bow and hand.
+#
+# Widening the plate to the box instead would cover her chin and shoulder, and clamping the box back
+# to the plate costs five font sizes and a hyphen break. Outlining the glyphs is what a human
+# typesetter does with a caption over art: the text reads anywhere and the art survives.
+#
+# The stroke is the plate's own colour, so it can only be seen where the pixels differ from the
+# plate -- which is exactly where the plate is not.
+#
+# Gated on the region having no detected bubble, and not on the geometry alone. A box inside a
+# balloon also escapes its mask, because the box is the bubble inset while the mask hugs the
+# glyphs; on the corpus that is 1122 of the 1504 elements a geometry-only gate would outline. There
+# the overhang lands on the balloon's own blank interior and needs no backdrop, and stroking it
+# would bet 4 px around every letter on `backgroundColor` having sampled the interior exactly.
+HALO_STROKE_RATIO = 0.10
+HALO_MIN_STROKE = 2
+HALO_TOLERANCE = 2.0
+
+
+def has_detected_bubble(region):
+    """The backend's `has_detected_bubble`, in Python.
+
+    bubble* describes a real container only when it is larger than the bbox; when the two match it
+    is the echo the worker writes for text YOLO matched to no balloon.
+    """
+    bubble_w = region.get("bubbleW")
+    bubble_h = region.get("bubbleH")
+    if bubble_w is None or bubble_h is None:
+        return False
+    return not (bubble_w == region.get("bboxW") and bubble_h == region.get("bboxH"))
+
+
+def halo_stroke_for(mask_polygon, box, font_size, in_bubble=False):
+    """Stroke width for text at `box` given the erased `mask_polygon`, or 0 when none is needed.
+
+    `box` is `(x, y, w, h)` in page pixels. Returns 0 when the box sits within the mask's extent --
+    the free-text case where the column was never widened -- and 0 for anything inside a detected
+    balloon, where whatever the box overhangs is the balloon's own blank interior.
+    """
+    if not font_size or font_size <= 0:
+        return 0
+    if in_bubble:
+        return 0
+
+    stroke = max(HALO_MIN_STROKE, round(font_size * HALO_STROKE_RATIO))
+
+    points = mask_polygon
+    if isinstance(points, str):
+        import json
+
+        try:
+            points = json.loads(points)
+        except Exception:
+            return 0
+    if not isinstance(points, list) or not points:
+        # Nothing was erased, so every glyph is sitting on artwork.
+        return stroke
+
+    try:
+        xs = [float(p[0]) for p in points]
+        ys = [float(p[1]) for p in points]
+    except (TypeError, ValueError, IndexError):
+        return 0
+
+    x, y, w, h = (float(v) for v in box)
+    escapes = (
+        x < min(xs) - HALO_TOLERANCE
+        or y < min(ys) - HALO_TOLERANCE
+        or x + w > max(xs) + HALO_TOLERANCE
+        or y + h > max(ys) + HALO_TOLERANCE
+    )
+    return stroke if escapes else 0
+
+
 def fit_text_in_box_py(
     text,
     max_width,
@@ -930,6 +1013,7 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
             return False
         image_info = res.json()
         layer_elements = image_info.get("layerElements", [])
+        regions_by_id = {r["id"]: r for r in image_info.get("ocrRegions", []) if r.get("id")}
     except Exception as e:
         logger.error(f"[Render] Error fetching image details: {e}")
         raise e
@@ -1000,8 +1084,21 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
             bold = "bold" in font_weight.lower()
             italic = "italic" in font_style.lower()
             mask_polygon = el.get("maskPolygon")
+            el_region = regions_by_id.get(el.get("regionId"))
+            in_bubble = bool(el_region) and has_detected_bubble(el_region)
 
-            # Masking
+            # Erase what we are about to typeset.
+            #
+            # The mask covers the source text; the box is where the English goes. Inside a balloon
+            # those agree closely enough -- the box is an inset of the bubble the mask fills, and
+            # what it overhangs is blank interior. For free-floating text they are two different
+            # rectangles: `free_text_box` pads the column and, for a column too narrow to set a
+            # word in, widens it. Filling only the mask left that difference on bare artwork.
+            #
+            # Filling the box as well costs nothing where the two overlap (same colour) and is
+            # bounded by the widening cap, which is why this became affordable only once
+            # `free_text_box` stopped squaring the column away.
+            painted_box = False
             if bg_color_hex and bg_color_hex.startswith("#"):
                 # Draw mask
                 if mask_polygon:
@@ -1014,10 +1111,15 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
                             draw.polygon(poly_tuples, fill=bg_color_hex)
                     except Exception as e:
                         logger.error(f"[Render] Failed to draw polygon mask: {e}")
+                    if not in_bubble:
+                        draw.rectangle([ex, ey, ex + ew, ey + eh], fill=bg_color_hex)
+                        painted_box = True
                 elif box_shape == "elliptical":
                     draw.ellipse([ex, ey, ex + ew, ey + eh], fill=bg_color_hex)
+                    painted_box = True
                 else:
                     draw.rectangle([ex, ey, ex + ew, ey + eh], fill=bg_color_hex)
+                    painted_box = True
 
             # Draw Text
             #
@@ -1050,6 +1152,17 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
 
             f_size = fit["fontSize"]
             font = load_font(f_size, font_name=font_name, bold=bold, italic=italic)
+            # The plate is only a backdrop where it actually reaches; see `halo_stroke_for`. When
+            # the box itself was filled above there is nothing left to escape onto.
+            halo_stroke = (
+                0 if painted_box else halo_stroke_for(mask_polygon, (ex, ey, ew, eh), f_size, in_bubble=in_bubble)
+            )
+            halo_fill = bg_color_hex if bg_color_hex and bg_color_hex.startswith("#") else "#ffffff"
+            if halo_stroke:
+                logger.info(
+                    f"[Render] Haloing '{text[:24]}' ({halo_stroke}px, {halo_fill}) -- its "
+                    f"{ew}x{eh} box escapes the erased area"
+                )
             if font:
                 line_height = f_size * 1.2
                 total_height = len(fit["lines"]) * line_height
@@ -1082,7 +1195,14 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
                     if line_width <= text_box_w:
                         line_x = min(max(line_x, text_box_x), text_box_x + text_box_w - line_width)
                     line_y = start_y + i * line_height
-                    draw.text((line_x, line_y), line, fill=text_color_hex, font=font)
+                    draw.text(
+                        (line_x, line_y),
+                        line,
+                        fill=text_color_hex,
+                        font=font,
+                        stroke_width=halo_stroke,
+                        stroke_fill=halo_fill if halo_stroke else None,
+                    )
 
         # Save flattened image
         out_buf = io.BytesIO()
