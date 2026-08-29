@@ -79,8 +79,10 @@ def process_translation(job_data):
     resolved_translations = {}
     unmatched_regions = []
 
+    typeset_skipped = []
     for r in ocr_regions:
         if not should_typeset_region(r):
+            typeset_skipped.append(r)
             # R3: leave the artwork alone. An empty translation draws nothing at all -- the render
             # loop skips the element before it paints the backdrop -- so the sound effect stays as
             # the artist drew it instead of being covered by a slab holding an invented sentence.
@@ -90,6 +92,17 @@ def process_translation(job_data):
             resolved_translations[r["id"]] = {"translatedText": r["text"]}
         else:
             unmatched_regions.append(r)
+
+    # A region dropped here never reaches the model and never gets English drawn for it, so the
+    # count is worth stating out loud: the iuno pair went 8 regions in, 6 sent, and the two that
+    # vanished were dialogue in detected balloons. A silent narrowing of the batch is exactly the
+    # shape of that bug, and it is invisible unless someone diffs the two numbers.
+    if typeset_skipped:
+        logger.warning(
+            f"{req_prefix}Typeset filter dropped {len(typeset_skipped)}/{len(ocr_regions)} "
+            f"regions before translation: "
+            + ", ".join(f"{(r.get('regionType') or 'speech')}:{(r.get('text') or '')[:12]!r}" for r in typeset_skipped)
+        )
 
     # Translate unmatched regions
     if unmatched_regions:

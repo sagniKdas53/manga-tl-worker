@@ -25,6 +25,25 @@ def bubble_compare(a, b, reading_direction="rtl"):
     return 1 if x_diff > 0 else -1
 
 
+# A bubble id from the detector, as opposed to the synthetic "direct_text_N" the OCR stage assigns
+# to lettering it found outside any balloon. Kept in sync with should_typeset_region's notion of
+# "enclosed" in services/translation.py.
+BUBBLE_DETECTION_MIN_CONFIDENCE = 0.5
+
+
+def _is_enclosed_in_bubble(region):
+    """True when the bubble detector put this region inside a balloon it was confident about."""
+    bubble_id = region.get("bubbleId") or region.get("bubble_id") or ""
+    if not bubble_id or str(bubble_id).startswith("direct_text"):
+        return False
+    detection_confidence = region.get("detectionConfidence")
+    if detection_confidence is None:
+        detection_confidence = region.get("detection_confidence")
+    if detection_confidence is None:
+        return True  # a real bubble id with no score attached still means enclosed
+    return float(detection_confidence) >= BUBBLE_DETECTION_MIN_CONFIDENCE
+
+
 def classify_region_type(region, panel, image_width, image_height):
     """Classify an OCR region as speech/narration/sfx/caption/sign.
 
@@ -38,9 +57,8 @@ def classify_region_type(region, panel, image_width, image_height):
     rw = region.get("bboxW") or region.get("width", 1)
     rh = region.get("bboxH") or region.get("height", 1)
 
-    # Aspect ratios
+    # Aspect ratio (width:height). The inverse was only used by the deleted vertical-SFX rule.
     aspect = rw / max(rh, 1)
-    tall_aspect = rh / max(rw, 1)
 
     # Check if text is kana-only (hiragana/katakana) — strong SFX signal
     cleaned = re.sub(r"[\s！？\?!\.\,\-\_\"]", "", text.strip())
@@ -49,10 +67,19 @@ def classify_region_type(region, panel, image_width, image_height):
         is_kana_only = bool(re.match(r"^[\u3040-\u309F\u30A0-\u30FF\u30FC\uFF66-\uFF9F]+$", cleaned))
 
     # --- SFX detection ---
-    # Kana-only text or very tall narrow region (vertical SFX)
-    if is_kana_only and len(cleaned) <= 5:
-        return "sfx"
-    if tall_aspect > 3.0 and len(text.strip()) <= 6:
+    # Only ever claimed for text the bubble detector did *not* enclose. A region sitting inside a
+    # balloon YOLO is confident about is a line somebody said, whatever its shape: the label costs
+    # the region its translation entirely (should_typeset_region drops it from the batch), so the
+    # bar for applying it outside the QA VLM is precision, not recall.
+    #
+    # The vertical-SFX rule that used to live here -- `tall_aspect > 3.0 and len <= 6` -- is gone.
+    # Vertical Japanese is always tall and narrow, so it fired on ordinary dialogue: across 397
+    # corpus exports it caught 55 kanji-bearing regions and not one of them was a sound effect --
+    # they were lines like "Excuse me.", "Of course!" and "Shall we go". Every region that
+    # survived did so by a hair: one cleared the aspect bound by 0.01 and another came in at seven
+    # characters only because its trailing question mark counted. Shape alone cannot separate
+    # dialogue from onomatopoeia and nothing here should try; see tests/test_layout_extra.py.
+    if is_kana_only and len(cleaned) <= 5 and not _is_enclosed_in_bubble(region):
         return "sfx"
 
     # --- Check if region is inside any panel ---

@@ -74,3 +74,80 @@ def test_chunk_regions_by_conversation():
     assert len(chunks) == 2
     assert chunks[0][0]["id"] == "1"
     assert chunks[1][0]["id"] == "3"
+
+
+# --- Regression: dialogue must not be typed as a sound effect -------------------------------
+#
+# Both cases below are real regions from corpus/gaps/unfiled/iuno, where the pipeline left the
+# Japanese sitting in a clean balloon while every neighbouring bubble came out in English. A
+# region typed "sfx" is dropped from the translation batch entirely by should_typeset_region, so
+# a false positive here costs the bubble its translation outright.
+
+IUNO_PAGE1_WATASHI = {
+    "text": "私だって…",
+    "bboxX": 1234, "bboxY": 1455, "bboxW": 92, "bboxH": 291,
+    "confidence": 0.9814,
+    "bubbleId": "bubble_3",
+    "detectionConfidence": 0.9662,
+}
+
+IUNO_PAGE2_TOMODACHI = {
+    "text": "え？友達",
+    "bboxX": 294, "bboxY": 1332, "bboxW": 70, "bboxH": 227,
+    "confidence": 0.9752,
+    "bubbleId": "bubble_4",
+    "detectionConfidence": 0.8440,
+}
+
+PANEL = {"bboxX": 0, "bboxY": 0, "bboxW": 1447, "bboxH": 2039}
+
+
+def test_tall_vertical_dialogue_in_a_balloon_is_speech_not_sfx():
+    """The deleted rule typed both of these sfx on shape alone: tall_aspect 3.16 and 3.24 with
+    five and four characters. Vertical Japanese is always tall and narrow."""
+    assert classify_region_type(IUNO_PAGE1_WATASHI, PANEL, 1447, 2039) == "speech"
+    assert classify_region_type(IUNO_PAGE2_TOMODACHI, PANEL, 1447, 2039) == "speech"
+
+
+def test_short_kana_interjection_in_a_balloon_is_speech():
+    """'え？' and 'ん?' are among the most common utterances in manga and the kana-only rule ate
+    them. Inside a detected balloon they are dialogue."""
+    for text in ("え？", "いや", "ん?", "はは"):
+        region = {
+            "text": text,
+            "bboxW": 60, "bboxH": 90, "confidence": 0.95,
+            "bubbleId": "bubble_1", "detectionConfidence": 0.9,
+        }
+        assert classify_region_type(region, PANEL, 1000, 1000) == "speech", text
+
+
+def test_unenclosed_kana_is_still_sfx():
+    """The kana rule keeps its job outside balloons — these are the real sound effects."""
+    for text in ("ドキ", "ザワ", "ガチャ", "ガサ"):
+        region = {"text": text, "bboxW": 80, "bboxH": 80, "confidence": 0.95}
+        assert classify_region_type(region, PANEL, 1000, 1000) == "sfx", text
+
+
+def test_lettering_the_detector_did_not_enclose_is_not_treated_as_enclosed():
+    """direct_text_N is the synthetic id the OCR stage gives text found outside any balloon; it
+    must not count as enclosure or the kana rule would never fire again."""
+    region = {
+        "text": "ドキ", "bboxW": 80, "bboxH": 80, "confidence": 0.95,
+        "bubbleId": "direct_text_0", "detectionConfidence": 0.0,
+    }
+    assert classify_region_type(region, PANEL, 1000, 1000) == "sfx"
+
+
+def test_low_confidence_bubble_detection_does_not_count_as_enclosure():
+    region = {
+        "text": "ドキ", "bboxW": 80, "bboxH": 80, "confidence": 0.95,
+        "bubbleId": "bubble_9", "detectionConfidence": 0.11,
+    }
+    assert classify_region_type(region, PANEL, 1000, 1000) == "sfx"
+
+
+def test_kanji_bearing_vertical_text_is_never_sfx():
+    """55 regions like these were typed sfx across 397 corpus exports; not one was onomatopoeia."""
+    for text in ("失礼します。", "当然です！", "行きますか", "それは即ち…", "真的嗎？"):
+        region = {"text": text, "bboxW": 40, "bboxH": 200, "confidence": 0.95}
+        assert classify_region_type(region, PANEL, 1000, 1000) != "sfx", text
