@@ -85,7 +85,10 @@ def test_chunk_regions_by_conversation():
 
 IUNO_PAGE1_WATASHI = {
     "text": "私だって…",
-    "bboxX": 1234, "bboxY": 1455, "bboxW": 92, "bboxH": 291,
+    "bboxX": 1234,
+    "bboxY": 1455,
+    "bboxW": 92,
+    "bboxH": 291,
     "confidence": 0.9814,
     "bubbleId": "bubble_3",
     "detectionConfidence": 0.9662,
@@ -93,7 +96,10 @@ IUNO_PAGE1_WATASHI = {
 
 IUNO_PAGE2_TOMODACHI = {
     "text": "え？友達",
-    "bboxX": 294, "bboxY": 1332, "bboxW": 70, "bboxH": 227,
+    "bboxX": 294,
+    "bboxY": 1332,
+    "bboxW": 70,
+    "bboxH": 227,
     "confidence": 0.9752,
     "bubbleId": "bubble_4",
     "detectionConfidence": 0.8440,
@@ -115,8 +121,11 @@ def test_short_kana_interjection_in_a_balloon_is_speech():
     for text in ("え？", "いや", "ん?", "はは"):
         region = {
             "text": text,
-            "bboxW": 60, "bboxH": 90, "confidence": 0.95,
-            "bubbleId": "bubble_1", "detectionConfidence": 0.9,
+            "bboxW": 60,
+            "bboxH": 90,
+            "confidence": 0.95,
+            "bubbleId": "bubble_1",
+            "detectionConfidence": 0.9,
         }
         assert classify_region_type(region, PANEL, 1000, 1000) == "speech", text
 
@@ -132,16 +141,24 @@ def test_lettering_the_detector_did_not_enclose_is_not_treated_as_enclosed():
     """direct_text_N is the synthetic id the OCR stage gives text found outside any balloon; it
     must not count as enclosure or the kana rule would never fire again."""
     region = {
-        "text": "ドキ", "bboxW": 80, "bboxH": 80, "confidence": 0.95,
-        "bubbleId": "direct_text_0", "detectionConfidence": 0.0,
+        "text": "ドキ",
+        "bboxW": 80,
+        "bboxH": 80,
+        "confidence": 0.95,
+        "bubbleId": "direct_text_0",
+        "detectionConfidence": 0.0,
     }
     assert classify_region_type(region, PANEL, 1000, 1000) == "sfx"
 
 
 def test_low_confidence_bubble_detection_does_not_count_as_enclosure():
     region = {
-        "text": "ドキ", "bboxW": 80, "bboxH": 80, "confidence": 0.95,
-        "bubbleId": "bubble_9", "detectionConfidence": 0.11,
+        "text": "ドキ",
+        "bboxW": 80,
+        "bboxH": 80,
+        "confidence": 0.95,
+        "bubbleId": "bubble_9",
+        "detectionConfidence": 0.11,
     }
     assert classify_region_type(region, PANEL, 1000, 1000) == "sfx"
 

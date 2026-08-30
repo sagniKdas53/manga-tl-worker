@@ -19,5 +19,9 @@ select = [
 ]
 ignore = [
     "E501", # line too long
-    "RUF001", # ambiguous characters
+    # This worker handles Japanese/Korean/Chinese text; CJK punctuation such as
+    # ？ and ・ is the subject matter, not a typo for its ASCII lookalike.
+    "RUF001", # ambiguous characters in strings
+    "RUF002", # ambiguous characters in docstrings
+    "RUF003", # ambiguous characters in comments
 ]
