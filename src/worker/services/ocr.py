@@ -80,6 +80,56 @@ def parse_paddle_ocr_results(raw_results):
     return results
 
 
+def _record_cloud_ocr_cost(res_json, provider, model):
+    """Record a cloud OCR call against the current job.
+
+    This path posts to the provider directly instead of going through LLMClient, so nothing else
+    records it — every cloud QA re-OCR and region-redo OCR call was invisible to cost accounting,
+    and the callback simply omitted the cost object because the job's list was empty.
+    """
+    from worker.utils.rate_limit import record_llm_call
+
+    try:
+        cache_write_tokens = 0
+        authoritative_cost = None
+
+        if provider == "gemini":
+            usage = res_json.get("usageMetadata") or {}
+            cached_tokens = usage.get("cachedContentTokenCount") or 0
+            prompt_tokens = usage.get("promptTokenCount") or 0
+            completion_tokens = usage.get("candidatesTokenCount") or 0
+        elif provider == "anthropic":
+            usage = res_json.get("usage") or {}
+            cached_tokens = usage.get("cache_read_input_tokens") or 0
+            cache_write_tokens = usage.get("cache_creation_input_tokens") or 0
+            # Normalised onto the OpenAI convention, as in llm_client._parse_response.
+            prompt_tokens = (usage.get("input_tokens") or 0) + cached_tokens + cache_write_tokens
+            completion_tokens = usage.get("output_tokens") or 0
+        else:
+            usage = res_json.get("usage") or {}
+            prompt_tokens = usage.get("prompt_tokens") or 0
+            completion_tokens = usage.get("completion_tokens") or 0
+            cached_tokens = (usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
+            authoritative_cost = usage.get("cost")
+
+        record_llm_call(
+            model,
+            prompt_tokens,
+            completion_tokens,
+            provider=provider,
+            cached_tokens=cached_tokens,
+            cache_write_tokens=cache_write_tokens,
+            generation_id=res_json.get("id") or "",
+            upstream_provider=res_json.get("provider") or "",
+            model_resolved=res_json.get("model") or "",
+            stage="ocr",
+            authoritative_cost=authoritative_cost,
+        )
+    except Exception as e:
+        # Never let accounting break OCR itself.
+        logger.warning(f"[OCR] Could not record cloud OCR cost: {redact(e)}")
+
+
 def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None, routing_strategy=None):
     import base64
 
@@ -166,6 +216,9 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None, ro
                 },
             },
             "plugins": [{"id": "response-healing"}],
+            # Same reason as llm_client: ask OpenRouter what the call actually cost rather than
+            # inferring it from a local rate table.
+            "usage": {"include": True},
         }
     elif provider == "gemini":
         gemini_model = model or "gemini-1.5-flash"
@@ -222,6 +275,7 @@ def try_cloud_ocr(img_crop_bytes, provider, api_key, model, qa_feedback=None, ro
         res = requests.post(url, json=payload, headers=headers, timeout=(10, 45))
         if res.status_code == 200:
             res_json = res.json()
+            _record_cloud_ocr_cost(res_json, provider, model)
             if provider == "gemini":
                 raw = res_json["candidates"][0]["content"]["parts"][0]["text"]
             elif provider == "anthropic":

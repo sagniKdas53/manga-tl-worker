@@ -236,9 +236,6 @@ def _qa_cloud_vlm(prov, api_key, user_model, prompt, base64_image, routing_strat
 
 
 def process_qa(job_data):
-    from worker.utils.rate_limit import reset_job_costs
-
-    reset_job_costs()
     image_id = job_data["imageId"]
     page_num = job_data.get("pageNumber")
     chapter_num = job_data.get("chapterNumber")
@@ -631,26 +628,18 @@ You MUST return a JSON object containing a "results" key with an array of object
         "pageId": job_data.get("pageId"),
         "qaResults": results_vlm,
     }
-    from worker.utils.rate_limit import format_cost, get_job_costs
+    from worker.utils.rate_limit import build_cost_payload, format_cost, get_job_costs
 
-    costs = get_job_costs()
-    if costs:
-        has_na = any(c.get("estimated_cost") is None for c in costs)
-        total_estimated_cost = None if has_na else sum(c.get("estimated_cost", 0.0) or 0.0 for c in costs)
-        total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
-        total_completion_tokens = sum(c.get("completion_tokens", 0) or 0 for c in costs)
-
-        cost_payload = {
-            "currency": "USD",
-            "prompt_tokens": total_prompt_tokens,
-            "completion_tokens": total_completion_tokens,
-            "breakdown": costs,
-        }
-        if total_estimated_cost is not None:
-            cost_payload["estimated_cost"] = total_estimated_cost
+    cost_payload = build_cost_payload(get_job_costs())
+    if cost_payload:
         callback_payload["cost"] = cost_payload
+        total_estimated_cost = cost_payload.get("estimated_cost")
+        total_prompt_tokens = cost_payload["prompt_tokens"]
+        total_completion_tokens = cost_payload["completion_tokens"]
 
         cost_str = format_cost(total_estimated_cost)
+        if cost_payload["unknown_calls"]:
+            cost_str += f" ({cost_payload['unknown_calls']} of {len(cost_payload['breakdown'])} calls unpriced)"
 
         logger.info(
             f"[QA] Hybrid QA VLM pass estimated cost: {cost_str} "
@@ -705,26 +694,18 @@ def _auto_pass_all(job_data):
         "pageId": job_data.get("pageId"),
         "qaResults": results,
     }
-    from worker.utils.rate_limit import format_cost, get_job_costs
+    from worker.utils.rate_limit import build_cost_payload, format_cost, get_job_costs
 
-    costs = get_job_costs()
-    if costs:
-        has_na = any(c.get("estimated_cost") is None for c in costs)
-        total_estimated_cost = None if has_na else sum(c.get("estimated_cost", 0.0) or 0.0 for c in costs)
-        total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
-        total_completion_tokens = sum(c.get("completion_tokens", 0) or 0 for c in costs)
-
-        cost_payload = {
-            "currency": "USD",
-            "prompt_tokens": total_prompt_tokens,
-            "completion_tokens": total_completion_tokens,
-            "breakdown": costs,
-        }
-        if total_estimated_cost is not None:
-            cost_payload["estimated_cost"] = total_estimated_cost
+    cost_payload = build_cost_payload(get_job_costs())
+    if cost_payload:
         callback_payload["cost"] = cost_payload
+        total_estimated_cost = cost_payload.get("estimated_cost")
+        total_prompt_tokens = cost_payload["prompt_tokens"]
+        total_completion_tokens = cost_payload["completion_tokens"]
 
         cost_str = format_cost(total_estimated_cost)
+        if cost_payload["unknown_calls"]:
+            cost_str += f" ({cost_payload['unknown_calls']} of {len(cost_payload['breakdown'])} calls unpriced)"
 
         logger.info(
             f"[QA] Auto-pass QA job estimated cost: {cost_str} "
@@ -888,26 +869,18 @@ You MUST return a JSON object containing a "results" key with an array of object
         "pageId": job_data.get("pageId"),
         "qaResults": results,
     }
-    from worker.utils.rate_limit import format_cost, get_job_costs
+    from worker.utils.rate_limit import build_cost_payload, format_cost, get_job_costs
 
-    costs = get_job_costs()
-    if costs:
-        has_na = any(c.get("estimated_cost") is None for c in costs)
-        total_estimated_cost = None if has_na else sum(c.get("estimated_cost", 0.0) or 0.0 for c in costs)
-        total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
-        total_completion_tokens = sum(c.get("completion_tokens", 0) or 0 for c in costs)
-
-        cost_payload = {
-            "currency": "USD",
-            "prompt_tokens": total_prompt_tokens,
-            "completion_tokens": total_completion_tokens,
-            "breakdown": costs,
-        }
-        if total_estimated_cost is not None:
-            cost_payload["estimated_cost"] = total_estimated_cost
+    cost_payload = build_cost_payload(get_job_costs())
+    if cost_payload:
         callback_payload["cost"] = cost_payload
+        total_estimated_cost = cost_payload.get("estimated_cost")
+        total_prompt_tokens = cost_payload["prompt_tokens"]
+        total_completion_tokens = cost_payload["completion_tokens"]
 
         cost_str = format_cost(total_estimated_cost)
+        if cost_payload["unknown_calls"]:
+            cost_str += f" ({cost_payload['unknown_calls']} of {len(cost_payload['breakdown'])} calls unpriced)"
 
         logger.info(
             f"[QA] LLM QA job estimated cost: {cost_str} "
@@ -1130,26 +1103,18 @@ You MUST return a JSON object containing a "results" key with an array of object
         "pageId": job_data.get("pageId"),
         "qaResults": results,
     }
-    from worker.utils.rate_limit import format_cost, get_job_costs
+    from worker.utils.rate_limit import build_cost_payload, format_cost, get_job_costs
 
-    costs = get_job_costs()
-    if costs:
-        has_na = any(c.get("estimated_cost") is None for c in costs)
-        total_estimated_cost = None if has_na else sum(c.get("estimated_cost", 0.0) or 0.0 for c in costs)
-        total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
-        total_completion_tokens = sum(c.get("completion_tokens", 0) or 0 for c in costs)
-
-        cost_payload = {
-            "currency": "USD",
-            "prompt_tokens": total_prompt_tokens,
-            "completion_tokens": total_completion_tokens,
-            "breakdown": costs,
-        }
-        if total_estimated_cost is not None:
-            cost_payload["estimated_cost"] = total_estimated_cost
+    cost_payload = build_cost_payload(get_job_costs())
+    if cost_payload:
         callback_payload["cost"] = cost_payload
+        total_estimated_cost = cost_payload.get("estimated_cost")
+        total_prompt_tokens = cost_payload["prompt_tokens"]
+        total_completion_tokens = cost_payload["completion_tokens"]
 
         cost_str = format_cost(total_estimated_cost)
+        if cost_payload["unknown_calls"]:
+            cost_str += f" ({cost_payload['unknown_calls']} of {len(cost_payload['breakdown'])} calls unpriced)"
 
         logger.info(
             f"[QA] VLM QA job estimated cost: {cost_str} "

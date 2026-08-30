@@ -98,18 +98,63 @@ def test_update_model_costs(mock_redis, mock_req, tmp_path):
         "data": {"endpoints": [{"pricing": {"prompt": "0.000001", "completion": "0.000002"}}]}
     }
     mock_req.get.return_value = mock_res
+    mock_redis.keys.return_value = []
 
     update_model_costs(["meta-llama/llama-3-8b-instruct:free"])
 
-    mock_redis.set.assert_called_with(
-        "model_cost:meta-llama/llama-3-8b-instruct:free",
-        json.dumps({"prompt": 0.0, "completion": 0.0}),
-    )
+    key, payload = mock_redis.set.call_args[0]
+    assert key == "model_cost:meta-llama/llama-3-8b-instruct:free"
+    stored = json.loads(payload)
+    assert stored["prompt"] == 0.000001
+    assert stored["completion"] == 0.000002
 
     # A paid model with no available endpoint is still surfaced as an error.
     mock_res.status_code = 404
     with pytest.raises(ValueError):
         update_model_costs(["unknown/model"])
+
+
+@patch("worker.utils.rate_limit.requests")
+@patch("worker.utils.rate_limit.redis_client")
+def test_free_slug_without_a_free_endpoint_is_rejected(mock_redis, mock_req):
+    """A `:free` slug OpenRouter does not actually serve must not be priced at $0.
+
+    The availability check used to run *after* a free short-circuit, so a nonexistent `:free` model
+    was written to Redis as a successful $0 while its paid base slug was what actually billed.
+    """
+    mock_redis.keys.return_value = []
+
+    free_res = MagicMock()
+    free_res.status_code = 200
+    free_res.json.return_value = {"data": {"endpoints": []}}
+
+    paid_res = MagicMock()
+    paid_res.status_code = 200
+    paid_res.json.return_value = {
+        "data": {"endpoints": [{"pricing": {"prompt": "0.00000013", "completion": "0.00000053"}}]}
+    }
+
+    mock_req.get.side_effect = [free_res, paid_res]
+
+    with pytest.raises(ValueError, match="no free endpoint"):
+        update_model_costs(["openai/gpt-oss-20b:free"])
+
+    mock_redis.set.assert_not_called()
+
+
+@patch("worker.utils.rate_limit.requests")
+@patch("worker.utils.rate_limit.redis_client")
+def test_fallback_models_do_not_stop_the_worker_booting(mock_redis, mock_req):
+    """Primary models are fatal on failure; fallbacks are not. Priming the fallback lists would
+    otherwise turn three misconfigured `:free` slugs into a boot loop."""
+    mock_redis.keys.return_value = []
+
+    res = MagicMock()
+    res.status_code = 404
+    mock_req.get.return_value = res
+
+    update_model_costs(["unknown/model"], fatal=False)
+    mock_redis.set.assert_not_called()
 
 
 def test_job_costs():
@@ -120,17 +165,25 @@ def test_job_costs():
     assert costs[0]["model"] == "model:free"
 
 
-def test_concurrent_cost_tracking():
+def test_chunk_threads_record_against_the_owning_job():
+    """Chunked stages hand work to a ThreadPoolExecutor, and a new thread does not inherit the
+    spawning thread's context. The call sites submit through copy_context().run so the worker
+    thread mutates the same list; without that the costs would land in a thread-local list the job
+    never reads."""
+    import contextvars
     from concurrent.futures import ThreadPoolExecutor
 
     reset_job_costs()
 
     def worker(idx):
-        estimate_cost(f"model_{idx}", 100, 50)
+        estimate_cost(f"model_{idx}:free", 100, 50)
 
     num_threads = 10
-    with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        executor.map(worker, range(num_threads))
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        # copy_context() is evaluated here, in the submitting thread — that is the whole point.
+        futures = [executor.submit(contextvars.copy_context().run, worker, i) for i in range(num_threads)]
+        for future in futures:
+            future.result()
 
     costs = get_job_costs()
     assert len(costs) == num_threads
@@ -138,7 +191,25 @@ def test_concurrent_cost_tracking():
     models = {c["model"] for c in costs}
     assert len(models) == num_threads
     for idx in range(num_threads):
-        assert f"model_{idx}" in models
+        assert f"model_{idx}:free" in models
+
+
+def test_concurrent_jobs_do_not_see_each_others_costs():
+    """The regression this replaces: costs lived in a module-global list that every handler reset on
+    entry, so with CONCURRENT_JOBS=5 a job starting mid-flight wiped another job's costs and then
+    aggregated the wrong calls into its own total."""
+    import contextvars
+
+    def run_job(name):
+        reset_job_costs()
+        estimate_cost(f"{name}:free", 100, 50)
+        return [c["model"] for c in get_job_costs()]
+
+    job_a = contextvars.copy_context().run(run_job, "job-a")
+    job_b = contextvars.copy_context().run(run_job, "job-b")
+
+    assert job_a == ["job-a:free"]
+    assert job_b == ["job-b:free"]
 
 
 @patch("worker.utils.rate_limit.time")

@@ -104,6 +104,21 @@ def process_qa_re_ocr(job_data):
         "results": results,
     }
 
+    # This handler calls a VLM like every other stage but reported no cost at all, so re-OCR spend
+    # was invisible in both the database and the dashboard.
+    from worker.utils.rate_limit import build_cost_payload, format_cost, get_job_costs
+
+    cost_payload = build_cost_payload(get_job_costs())
+    if cost_payload:
+        callback_payload["cost"] = cost_payload
+        cost_str = format_cost(cost_payload.get("estimated_cost"))
+        if cost_payload["unknown_calls"]:
+            cost_str += f" ({cost_payload['unknown_calls']} of {len(cost_payload['breakdown'])} calls unpriced)"
+        logger.info(
+            f"[QA Re-OCR] Re-OCR job estimated cost: {cost_str} "
+            f"(Tokens: in={cost_payload['prompt_tokens']}, out={cost_payload['completion_tokens']})"
+        )
+
     try:
         callback_url = f"{CALLBACK_URL}/qa-re-ocr"
         res = requests.post(callback_url, json=callback_payload, headers=backend_headers())

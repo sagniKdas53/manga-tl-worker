@@ -1,3 +1,9 @@
+[project]
+name = "manga-tl-worker"
+version = "0.1.0"
+description = "Manga translation pipeline worker (OCR, layout, translation, QA, render)."
+requires-python = ">=3.13"
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
