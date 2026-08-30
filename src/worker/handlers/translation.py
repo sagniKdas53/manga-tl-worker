@@ -1,4 +1,5 @@
 import concurrent.futures
+import contextvars
 import logging
 import uuid
 
@@ -26,9 +27,8 @@ logger = logging.getLogger(__name__)
 
 
 def process_translation(job_data):
-    from worker.utils.rate_limit import get_job_costs, reset_job_costs
+    from worker.utils.rate_limit import get_job_costs
 
-    reset_job_costs()
     image_id = job_data.get("imageId")
     page_id = job_data.get("pageId")
     request_id = str(uuid.uuid4())[:8]
@@ -173,7 +173,10 @@ def process_translation(job_data):
                 return None
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            futures = {executor.submit(process_chunk, idx, chunk): chunk for idx, chunk in enumerate(unmatched_chunks)}
+            futures = {
+                executor.submit(contextvars.copy_context().run, process_chunk, idx, chunk): chunk
+                for idx, chunk in enumerate(unmatched_chunks)
+            }
             for future in concurrent.futures.as_completed(futures):
                 chunk_mapping = future.result()
                 if chunk_mapping:
@@ -241,7 +244,7 @@ def process_translation(job_data):
             retry_mapping = {}
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 futures = {
-                    executor.submit(process_retry_chunk, idx, r_chunk): r_chunk
+                    executor.submit(contextvars.copy_context().run, process_retry_chunk, idx, r_chunk): r_chunk
                     for idx, r_chunk in enumerate(retry_chunks)
                 }
                 for future in concurrent.futures.as_completed(futures):
@@ -369,26 +372,18 @@ def process_translation(job_data):
         "totalCount": len(translations),
     }
 
-    from worker.utils.rate_limit import format_cost
+    from worker.utils.rate_limit import build_cost_payload, format_cost
 
-    costs = get_job_costs()
-    if costs:
-        has_na = any(c.get("estimated_cost") is None for c in costs)
-        total_estimated_cost = None if has_na else sum(c.get("estimated_cost", 0.0) or 0.0 for c in costs)
-        total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
-        total_completion_tokens = sum(c.get("completion_tokens", 0) or 0 for c in costs)
-
-        cost_payload = {
-            "currency": "USD",
-            "prompt_tokens": total_prompt_tokens,
-            "completion_tokens": total_completion_tokens,
-            "breakdown": costs,
-        }
-        if total_estimated_cost is not None:
-            cost_payload["estimated_cost"] = total_estimated_cost
+    cost_payload = build_cost_payload(get_job_costs())
+    if cost_payload:
         callback_payload["cost"] = cost_payload
+        total_estimated_cost = cost_payload.get("estimated_cost")
+        total_prompt_tokens = cost_payload["prompt_tokens"]
+        total_completion_tokens = cost_payload["completion_tokens"]
 
         cost_str = format_cost(total_estimated_cost)
+        if cost_payload["unknown_calls"]:
+            cost_str += f" ({cost_payload['unknown_calls']} of {len(cost_payload['breakdown'])} calls unpriced)"
 
         logger.info(
             f"{req_prefix}Translation job estimated cost: {cost_str} "

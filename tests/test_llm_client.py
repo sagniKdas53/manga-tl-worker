@@ -117,6 +117,78 @@ def test_llm_client_null_token_details(mock_post):
 
 
 @patch("worker.services.llm_client.requests.post")
+def test_openrouter_cost_comes_from_the_provider_not_the_local_table(mock_post):
+    """OpenRouter reports what the call actually cost when the request asks for it. That figure
+    already accounts for which endpoint served the request and for the cache discount — neither of
+    which a local rate table can know — so it wins over any local estimate."""
+    from worker.utils.rate_limit import get_job_costs, reset_job_costs
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "id": "gen-1788073484-abc",
+        "provider": "StreamLake",
+        "model": "deepseek/deepseek-v4-pro",
+        "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+        "usage": {
+            "prompt_tokens": 1000,
+            "completion_tokens": 100,
+            "total_tokens": 1100,
+            "cost": 0.00042,
+            "prompt_tokens_details": {"cached_tokens": 900},
+        },
+    }
+    mock_post.return_value = mock_resp
+
+    reset_job_costs()
+    client = LLMClient(provider="openrouter", api_key="test_key", model="deepseek/deepseek-v4-pro")
+    res = client.complete(messages=[{"role": "user", "content": "Hi"}])
+
+    assert res is not None
+    assert res.cost == 0.00042
+    assert res.cost_source == "authoritative"
+    assert res.generation_id == "gen-1788073484-abc"
+    assert res.upstream_provider == "StreamLake"
+
+    # The figure is only returned because the request asks for it.
+    assert mock_post.call_args.kwargs["json"]["usage"] == {"include": True}
+
+    # And it reaches the breakdown, where it can be reconciled against the invoice.
+    entry = get_job_costs()[-1]
+    assert entry["generation_id"] == "gen-1788073484-abc"
+    assert entry["cost_source"] == "authoritative"
+    assert entry["estimated_cost"] == 0.00042
+
+
+@patch("worker.services.llm_client.requests.post")
+def test_anthropic_prompt_tokens_include_cache_reads_and_writes(mock_post):
+    """Anthropic reports input_tokens excluding cached reads and cache writes; the OpenAI shape
+    includes them. Normalising here keeps cached_tokens a subset of prompt_tokens, which the
+    cache-hit ratio and the pricing both assume."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "content": [{"text": "ok"}],
+        "usage": {
+            "input_tokens": 200,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 150,
+            "cache_creation_input_tokens": 50,
+        },
+    }
+    mock_post.return_value = mock_resp
+
+    client = LLMClient(provider="anthropic", api_key="test_key", model="claude-sonnet-5")
+    res = client.complete(messages=[{"role": "user", "content": "Hi"}])
+
+    assert res is not None
+    assert res.cached_tokens == 150
+    assert res.cache_write_tokens == 50
+    assert res.prompt_tokens == 400
+    assert res.cached_tokens <= res.prompt_tokens
+
+
+@patch("worker.services.llm_client.requests.post")
 def test_auth_failure_parks_the_provider_instead_of_retrying_it(mock_post):
     """AUDIT triage 2026-08-02: an invalid neurometric key produced 323 identical 401s.
 

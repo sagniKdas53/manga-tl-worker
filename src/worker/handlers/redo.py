@@ -12,9 +12,6 @@ from worker.utils.text import detect_language
 
 
 def process_region_redo(job_data):
-    from worker.utils.rate_limit import reset_job_costs
-
-    reset_job_costs()
     image_id = job_data["imageId"]
     region_id = job_data["regionId"]
     redo_type = job_data["redoType"]  # 'ocr' or 'translation'
@@ -123,25 +120,20 @@ def process_region_redo(job_data):
             callback_payload["translatedText"] = translated
             callback_payload["translationFailed"] = translated is None
             logger.info(f"{req_prefix}Redo Translation result: '{translated}' (failed={translated is None})")
-            from worker.utils.rate_limit import get_job_costs
+            from worker.utils.rate_limit import build_cost_payload, format_cost, get_job_costs
 
-            costs = get_job_costs()
-            if costs:
-                has_na = any(c.get("estimated_cost") is None for c in costs)
-                total_estimated_cost = None if has_na else sum(c.get("estimated_cost", 0.0) or 0.0 for c in costs)
-                total_prompt_tokens = sum(c.get("prompt_tokens", 0) or 0 for c in costs)
-                total_completion_tokens = sum(c.get("completion_tokens", 0) or 0 for c in costs)
-
-                if total_estimated_cost is None:
-                    cost_str = "N/A"
-                elif total_estimated_cost == 0.0:
-                    cost_str = "$0.000"
-                else:
-                    cost_str = f"${total_estimated_cost:.5f}"
-
+            # This block used to log a cost and then throw it away — the payload was never attached
+            # to the callback, so a redo's spend never reached the database. It also inlined its own
+            # formatter with thresholds that disagreed with format_cost.
+            cost_payload = build_cost_payload(get_job_costs())
+            if cost_payload:
+                callback_payload["cost"] = cost_payload
+                cost_str = format_cost(cost_payload.get("estimated_cost"))
+                if cost_payload["unknown_calls"]:
+                    cost_str += f" ({cost_payload['unknown_calls']} of {len(cost_payload['breakdown'])} calls unpriced)"
                 logger.info(
                     f"{req_prefix}Redo translation estimated cost: {cost_str} "
-                    f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
+                    f"(Tokens: in={cost_payload['prompt_tokens']}, out={cost_payload['completion_tokens']})"
                 )
         except Exception as e:
             logger.error(f"{req_prefix}Redo Translation failed: {e}")

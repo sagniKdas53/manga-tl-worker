@@ -16,7 +16,7 @@ from tenacity.wait import wait_exponential
 
 from worker.config import logger
 from worker.provider_config import get_config_loader, get_provider_registry
-from worker.utils.rate_limit import enforce_rate_limit, estimate_cost
+from worker.utils.rate_limit import enforce_rate_limit, record_llm_call
 
 # Anthropic already sent max_tokens; everyone else was sending none at all, so the ceiling was
 # whatever the routed model happened to default to. A QA pass over a dense page blew through it and
@@ -48,9 +48,25 @@ class LLMResponse:
     completion_tokens: int = 0
     total_tokens: int = 0
     cached_tokens: int = 0
+    # Anthropic bills cache *writes* at a premium and reports them separately from input_tokens.
+    # Nothing read them before, so the premium on the first call of every session was invisible.
+    cache_write_tokens: int = 0
     model: str = ""
     provider: str = ""
     cost: float | None = None
+    # "authoritative" when the provider reported the cost itself, "estimated" from the local rate
+    # table, "free"/"unknown" otherwise. A total built from mixed sources is only as good as its
+    # worst entry, which is why the source travels with the number.
+    cost_source: str = ""
+    # OpenRouter's generation id (gen-...). Without it a call cannot be looked up after the fact,
+    # which is what made spend impossible to reconcile against an invoice.
+    generation_id: str = ""
+    # Which upstream endpoint OpenRouter actually routed to. Same model id, different silicon —
+    # the first thing worth knowing when a page is unexpectedly slow, costly, or garbled.
+    upstream_provider: str = ""
+    # OpenRouter rewrites :floor/:nitro suffixes, so what ran is not always what was asked for.
+    model_resolved: str = ""
+    duration_ms: int | None = None
     # "stop" on a complete answer, "length" when the model ran out of output budget. Callers that
     # parse structured JSON must check this: OpenRouter's response-healing plugin closes a truncated
     # object so json.loads() still succeeds, and the result looks valid while having silently lost
@@ -285,6 +301,10 @@ class LLMClient:
         if self.provider != "openrouter":
             return
 
+        # Ask OpenRouter to report what the call actually cost. It knows which endpoint served the
+        # request and what the cache discount came to; a local rate table can only guess at both.
+        payload["usage"] = {"include": True}
+
         if self.routing_strategy == "lowest-cost":
             payload["provider"] = {
                 "allow_fallbacks": True,
@@ -390,6 +410,14 @@ class LLMClient:
         with _STATE_LOCK:
             PROVIDER_CONSECUTIVE_429S.pop(self.provider, None)
             PROVIDER_AUTH_FAILURES.pop(self.provider, None)
+
+        # Only the OpenAI-shaped response carries these; the Anthropic branch leaves them at their
+        # defaults and falls back to the local estimator.
+        authoritative_cost = None
+        generation_id = ""
+        upstream_provider = ""
+        model_resolved = ""
+
         if self.is_anthropic:
             # content[0] is not reliably the text block — a thinking block precedes it whenever
             # thinking is on — and .get("text") yields None on any block that is not text.
@@ -398,10 +426,15 @@ class LLMClient:
                 "",
             )
             usage = data.get("usage", {})
-            prompt_tokens = usage.get("input_tokens", 0)
-            completion_tokens = usage.get("output_tokens", 0)
+            cached_tokens = usage.get("cache_read_input_tokens", 0) or 0
+            cache_write_tokens = usage.get("cache_creation_input_tokens", 0) or 0
+            # Anthropic reports input_tokens EXCLUDING cache reads and cache writes; the OpenAI
+            # shape reports prompt_tokens INCLUDING them. Normalise onto the OpenAI convention so
+            # cached_tokens is always a subset of prompt_tokens — the cache-hit ratio logged below
+            # and the pricing downstream both depend on that being true.
+            prompt_tokens = (usage.get("input_tokens", 0) or 0) + cached_tokens + cache_write_tokens
+            completion_tokens = usage.get("output_tokens", 0) or 0
             total_tokens = prompt_tokens + completion_tokens
-            cached_tokens = usage.get("cache_read_input_tokens", 0)
             # Anthropic spells it "max_tokens"; normalize onto the OpenAI vocabulary.
             finish_reason = "length" if data.get("stop_reason") == "max_tokens" else "stop"
         else:
@@ -417,6 +450,13 @@ class LLMClient:
             total_tokens = usage.get("total_tokens") or (prompt_tokens + completion_tokens)
             details = usage.get("prompt_tokens_details") or {}
             cached_tokens = details.get("cached_tokens") or 0
+            cache_write_tokens = details.get("cache_write_tokens") or 0
+            # Present only because _inject_routing_and_caching asks for it; absent on providers
+            # that do not report a cost, which is what the estimator fallback is for.
+            authoritative_cost = usage.get("cost")
+            generation_id = data.get("id") or ""
+            upstream_provider = data.get("provider") or ""
+            model_resolved = data.get("model") or ""
 
         logger.info(f"{self.req_prefix}Provider={self.provider} Model={self.model} Time={elapsed:.2f}s")
         logger.info(f"{self.req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
@@ -433,9 +473,27 @@ class LLMClient:
                 f"{self.req_prefix}Cache hit: {cached_tokens}/{prompt_tokens} tokens ({cache_ratio:.0%} cached)"
             )
 
-        cost = estimate_cost(self.model, prompt_tokens, completion_tokens, self.provider)
+        duration_ms = int(elapsed * 1000)
+        cost, cost_source = record_llm_call(
+            self.model,
+            prompt_tokens,
+            completion_tokens,
+            provider=self.provider,
+            cached_tokens=cached_tokens,
+            cache_write_tokens=cache_write_tokens,
+            total_tokens=total_tokens,
+            generation_id=generation_id,
+            upstream_provider=upstream_provider,
+            model_resolved=model_resolved,
+            duration_ms=duration_ms,
+            authoritative_cost=authoritative_cost,
+        )
         if cost is not None:
-            logger.info(f"{self.req_prefix}Estimated cost: ${cost:.5f}")
+            logger.info(f"{self.req_prefix}Cost ({cost_source}): ${cost:.5f}")
+        else:
+            logger.warning(f"{self.req_prefix}Cost unknown for {self.model} — no price available")
+        if generation_id:
+            logger.info(f"{self.req_prefix}Generation {generation_id} via {upstream_provider or 'unknown'}")
 
         return LLMResponse(
             content=content,
@@ -443,8 +501,14 @@ class LLMClient:
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             cached_tokens=cached_tokens,
+            cache_write_tokens=cache_write_tokens,
             model=self.model,
             provider=self.provider,
             cost=cost,
+            cost_source=cost_source,
+            generation_id=generation_id,
+            upstream_provider=upstream_provider,
+            model_resolved=model_resolved or self.model,
+            duration_ms=duration_ms,
             finish_reason=finish_reason,
         )

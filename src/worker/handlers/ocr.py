@@ -1,5 +1,6 @@
 import base64
 import concurrent.futures
+import contextvars
 import gc
 import json
 import logging
@@ -554,9 +555,6 @@ def contour_bubble_for_unmatched(img, rx, ry, rw, rh, img_w, img_h):
 
 
 def process_ocr(job_data):
-    from worker.utils.rate_limit import reset_job_costs
-
-    reset_job_costs()
 
     image_id = job_data["imageId"]
     # The backend sets these from the series context when it enqueues the job.
@@ -1179,7 +1177,7 @@ def process_ocr(job_data):
 
                         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                             futures = {
-                                executor.submit(process_crop_chunk, idx, chunk): chunk
+                                executor.submit(contextvars.copy_context().run, process_crop_chunk, idx, chunk): chunk
                                 for idx, chunk in enumerate(crop_chunks)
                             }
                             for future in concurrent.futures.as_completed(futures):
@@ -1458,18 +1456,22 @@ def process_ocr(job_data):
         }
 
         try:
-            from worker.utils.rate_limit import get_job_costs
+            from worker.utils.rate_limit import build_cost_payload, format_cost, get_job_costs
 
-            costs = get_job_costs()
-            if costs:
-                cost_payload = {
-                    "currency": "USD",
-                    "breakdown": costs,
-                    "prompt_tokens": sum((c.get("prompt_tokens") or 0) for c in costs),
-                    "estimated_cost": sum((c.get("estimated_cost") or 0.0) for c in costs),
-                    "completion_tokens": sum((c.get("completion_tokens") or 0) for c in costs),
-                }
+            # This block used to sum with `c.get("estimated_cost") or 0.0`, which turned an unpriced
+            # call into a confident $0.00 and sent it on to the database and the dashboard with
+            # nothing marking it as unknown. build_cost_payload omits the total instead, and reports
+            # how many calls it could not price.
+            cost_payload = build_cost_payload(get_job_costs())
+            if cost_payload:
                 callback_payload["cost"] = cost_payload
+                cost_str = format_cost(cost_payload.get("estimated_cost"))
+                if cost_payload["unknown_calls"]:
+                    cost_str += f" ({cost_payload['unknown_calls']} of {len(cost_payload['breakdown'])} calls unpriced)"
+                logger.info(
+                    f"[OCR] OCR job estimated cost: {cost_str} "
+                    f"(Tokens: in={cost_payload['prompt_tokens']}, out={cost_payload['completion_tokens']})"
+                )
         except Exception as e:
             logger.error(f"[OCR] Error fetching job costs: {e}")
 

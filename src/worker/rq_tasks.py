@@ -17,6 +17,7 @@ from worker.handlers import (
     process_render,
     process_translation,
 )
+from worker.utils.rate_limit import reset_job_costs
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,10 @@ def process_job_rq(queue_name, job_data):
     # every backend call it makes (via backend_headers), so one page's six stages share a single
     # greppable string across both containers.
     trace_token = set_trace_id(job_data.get("traceId"))
+    # Same argument as the trace id, and the same one place to do it: cost records accumulate per
+    # job, so the list is bound here rather than reset inside each handler. Handler-level resets
+    # against a shared global meant a job starting mid-flight discarded another job's costs.
+    reset_job_costs()
     try:
         if check_stale_job(queue_name, job_data):
             update_job_status(job_id, "FAILED", "Stale job")

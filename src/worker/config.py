@@ -579,3 +579,31 @@ if OCR_CONFIG.provider == "openrouter" or TL_CONFIG.provider == "openrouter" or 
             import sys
 
             sys.exit(1)
+
+    # The fallback lists are reachable models too, and an unpriced one is recorded as "cost
+    # unknown" for every call it serves — google/gemini-3.5-flash sits in all four lists and is the
+    # most expensive model the worker can reach. Price them, but not the way the primaries are
+    # priced: there are ~15 of them at a 10s timeout each, and this module is imported
+    # synchronously at boot. So off-thread, and non-fatal — a fallback that OpenRouter cannot serve
+    # is a warning, not a reason to refuse to start.
+    fallback_models = set()
+    for _cfg in (TL_CONFIG, OCR_CONFIG, QA_CONFIG):
+        fallback_models.update(_cfg.llm_model_list)
+        fallback_models.update(_cfg.vlm_model_list)
+    fallback_models.difference_update(models_to_check)
+
+    if fallback_models:
+        import threading
+
+        def _prime_fallback_costs(models):
+            try:
+                update_model_costs(models, fatal=False)
+            except Exception as _e:
+                logger.warning(f"Could not prime fallback model costs: {_e}")
+
+        threading.Thread(
+            target=_prime_fallback_costs,
+            args=(sorted(fallback_models),),
+            daemon=True,
+            name="prime-fallback-costs",
+        ).start()
