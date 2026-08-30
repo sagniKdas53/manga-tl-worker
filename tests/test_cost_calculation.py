@@ -8,6 +8,7 @@ from worker.utils.rate_limit import (
     build_cost_payload,
     estimate_cost,
     get_job_costs,
+    record_llm_call,
     reset_job_costs,
     update_model_costs,
 )
@@ -186,3 +187,100 @@ def test_build_cost_payload_totals_when_every_call_is_priced():
 
 def test_build_cost_payload_is_none_when_nothing_ran():
     assert build_cost_payload([]) is None
+
+
+@patch("worker.utils.rate_limit.redis_client")
+@patch("worker.utils.rate_limit.requests.get")
+def test_rates_come_from_one_endpoint_not_a_blend_of_the_cheapest_components(mock_get, mock_redis):
+    """Endpoint prices cross: one can be cheapest on input while another is cheapest on output.
+    Taking each component's minimum separately would synthesise a rate no endpoint charges."""
+    mock_redis.get.return_value = None
+    mock_redis.keys.return_value = []
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "data": {
+            "endpoints": [
+                # Cheapest input, expensive output — this is the one sort=price picks.
+                {"pricing": {"prompt": "0.000001", "completion": "0.000009"}},
+                # Cheapest output, but pricier input.
+                {"pricing": {"prompt": "0.000002", "completion": "0.000001"}},
+            ]
+        }
+    }
+    mock_get.return_value = mock_resp
+
+    update_model_costs(["some/model"])
+
+    stored = json.loads(mock_redis.set.call_args[0][1])
+    assert stored["prompt"] == 0.000001
+    # 0.000001 here would mean the two endpoints had been blended into a rate neither offers.
+    assert stored["completion"] == 0.000009
+
+
+@patch("worker.utils.rate_limit.redis_client")
+def test_missing_usage_counters_are_unknown_not_free(mock_redis):
+    """A paid provider that returns no usage counters has not waived the charge. Reporting $0.00
+    would be the same unknown-as-zero conflation this change exists to remove."""
+    mock_redis.get.return_value = None
+    reset_job_costs()
+
+    cost = estimate_cost("deepseek/deepseek-v4-pro", 0, 0, provider="openrouter")
+
+    assert cost is None
+    assert get_job_costs()[-1]["cost_source"] == "unknown"
+
+
+@patch("worker.utils.rate_limit.redis_client")
+def test_disable_flag_also_suppresses_a_provider_reported_cost(mock_redis):
+    """DISABLE_COST_CALCULATION means "do not report costs". An authoritative figure from the
+    provider must not sail past it just because it skips the estimator."""
+    mock_redis.get.return_value = None
+    reset_job_costs()
+
+    with patch.dict(os.environ, {"DISABLE_COST_CALCULATION": "true"}):
+        cost, source = record_llm_call(
+            "deepseek/deepseek-v4-pro",
+            1000,
+            100,
+            provider="openrouter",
+            authoritative_cost=0.00042,
+        )
+
+    assert cost is None
+    assert source == "disabled"
+    assert get_job_costs()[-1]["estimated_cost"] is None
+
+
+@patch("worker.services.ocr.requests.post")
+def test_cloud_ocr_calls_are_recorded(mock_post):
+    """try_cloud_ocr posts to the provider directly rather than going through LLMClient, so without
+    an explicit record every cloud QA re-OCR and region-redo OCR call was invisible: the job's cost
+    list stayed empty and the callback omitted the cost object entirely."""
+    from worker.services.ocr import try_cloud_ocr
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "id": "gen-cloud-ocr-1",
+        "provider": "Alibaba",
+        "model": "qwen/qwen3-vl-32b-instruct",
+        "choices": [{"message": {"content": '{"text": "hello", "confidence": 0.9}'}}],
+        "usage": {"prompt_tokens": 800, "completion_tokens": 20, "cost": 0.00011},
+    }
+    mock_post.return_value = mock_resp
+
+    reset_job_costs()
+    result = try_cloud_ocr(b"fake-image", "openrouter", "key", "qwen/qwen3-vl-32b-instruct")
+
+    assert result == ("hello", 0.9)
+
+    entry = get_job_costs()[-1]
+    assert entry["estimated_cost"] == 0.00011
+    assert entry["cost_source"] == "authoritative"
+    assert entry["generation_id"] == "gen-cloud-ocr-1"
+    assert entry["stage"] == "ocr"
+
+    # And it asks for the figure in the first place.
+    assert mock_post.call_args.kwargs["json"]["usage"] == {"include": True}

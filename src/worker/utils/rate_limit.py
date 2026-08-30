@@ -111,33 +111,36 @@ def format_cost(cost):
 
 
 def _endpoint_rates(endpoints):
-    """Cheapest prompt/completion/cache-read rates across a model's serving endpoints.
+    """Pricing from the single cheapest endpoint serving a model.
 
-    The cheapest, not the average. Requests are routed with `provider: {"sort": "price"}` (see
-    llm_client._inject_routing_and_caching), so they land on the least expensive endpoint —
+    The cheapest, not the average: requests are routed with `provider: {"sort": "price"}` (see
+    llm_client._inject_routing_and_caching), so they land on the least expensive endpoint, and
     averaging across all of them overstated the TL model's cost by 3.2x.
+
+    One whole endpoint's tuple, not the minimum of each component separately. Endpoint prices
+    cross — one can be cheapest on input while another is cheapest on output — and taking three
+    independent minima would synthesise a rate no endpoint actually charges, under-reporting the
+    cost. A request is served by one endpoint, so the rates have to come from one endpoint.
     """
-    prompt_costs = []
-    completion_costs = []
-    cache_read_costs = []
+    priced = []
     for ep in endpoints:
         pricing = ep.get("pricing")
         if not pricing:
             continue
-        prompt_costs.append(float(pricing.get("prompt") or 0))
-        completion_costs.append(float(pricing.get("completion") or 0))
         cache_read = pricing.get("input_cache_read")
-        if cache_read is not None:
-            cache_read_costs.append(float(cache_read))
+        priced.append(
+            (
+                float(pricing.get("prompt") or 0),
+                float(pricing.get("completion") or 0),
+                float(cache_read) if cache_read is not None else None,
+            )
+        )
 
-    if not prompt_costs or not completion_costs:
+    if not priced:
         return None
 
-    return (
-        min(prompt_costs),
-        min(completion_costs),
-        min(cache_read_costs) if cache_read_costs else None,
-    )
+    # Ranked the way `sort: "price"` ranks: cheapest input first, completion as the tie-break.
+    return min(priced, key=lambda rates: (rates[0], rates[1]))
 
 
 def _fetch_endpoints(model):
@@ -301,15 +304,16 @@ def _resolve_rates(model_lower: str, provider_lower: str):
     return None
 
 
-def _price_call(model, provider, prompt_tokens, completion_tokens, cached_tokens):
-    """(cost, source) for one call. cost is None when no price is known."""
-    if os.environ.get("DISABLE_COST_CALCULATION", "").strip().lower() in (
+def _cost_calculation_disabled() -> bool:
+    return os.environ.get("DISABLE_COST_CALCULATION", "").strip().lower() in (
         "true",
         "1",
         "yes",
-    ):
-        return None, "disabled"
+    )
 
+
+def _price_call(model, provider, prompt_tokens, completion_tokens, cached_tokens):
+    """(cost, source) for one call. cost is None when no price is known."""
     model_lower = (model or "").lower()
     provider_lower = (provider or "").lower()
 
@@ -325,7 +329,10 @@ def _price_call(model, provider, prompt_tokens, completion_tokens, cached_tokens
         return 0.0, "free"
 
     if prompt_tokens == 0 and completion_tokens == 0:
-        return 0.0, "free"
+        # A successful response from a paid provider that reported no usage counters. Missing usage
+        # is not a waived charge, so this is unknown, not zero — the same conflation this change
+        # exists to remove. Genuinely free models and local providers already returned above.
+        return None, "unknown"
 
     rates = _resolve_rates(model_lower, provider_lower)
     if rates is None:
@@ -371,7 +378,11 @@ def record_llm_call(
     cached_tokens = cached_tokens or 0
     cache_write_tokens = cache_write_tokens or 0
 
-    if authoritative_cost is not None:
+    if _cost_calculation_disabled():
+        # Checked before choosing a source, not inside the estimator: the flag means "do not report
+        # costs at all", and a provider-reported figure would otherwise sail straight past it.
+        cost, source = None, "disabled"
+    elif authoritative_cost is not None:
         cost, source = float(authoritative_cost), "authoritative"
     else:
         cost, source = _price_call(model, provider, prompt_tokens, completion_tokens, cached_tokens)
