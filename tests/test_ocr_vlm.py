@@ -392,3 +392,135 @@ def test_process_ocr_vlm_batched_multiple_regions(
     assert mapped_regions["bubble_0"] == "Hello from Bubble 0"
     assert mapped_regions["bubble_1"] == "Hello from Bubble 1"
     assert mapped_regions["direct_text_0"] == "Hello from Free Text"
+
+
+@patch("worker.handlers.ocr.download_image")
+@patch("worker.handlers.ocr.detect_bubbles_yolo")
+@patch("worker.handlers.ocr.try_cloud_ai_vision_batch")
+@patch("worker.handlers.ocr.model_manager")
+@patch("worker.handlers.ocr.requests.get")
+@patch("worker.handlers.ocr.requests.post")
+@patch("worker.handlers.ocr.OCR_CONFIG")
+@patch("worker.config.OCR_CONFIG")
+@patch.dict(
+    os.environ,
+    {
+        "DISABLE_LOCAL_OCR": "true",
+    },
+)
+def test_model_identifier_names_every_model_that_read_the_page(
+    mock_global_config,
+    mock_ocr_config,
+    mock_post,
+    mock_get,
+    mock_model_manager,
+    mock_try_cloud_vlm,
+    mock_detect_yolo,
+    mock_download,
+):
+    """Crops are batched ten at a time, and each chunk falls back independently. The model name used
+    to live in one shared slot that every chunk overwrote, so a page whose second chunk fell back
+    reported only the fallback and hid the fact that the first chunk had been read by something
+    else. Both models have to appear."""
+    # Both names, because the fallback tier re-imports OCR_CONFIG from worker.config inside the
+    # chunk worker — patching only the handler's binding leaves that tier reading the real config.
+    for cfg in (mock_ocr_config, mock_global_config):
+        cfg.provider = "openrouter"
+        cfg.resolve_key.return_value = "fake-openrouter-key"
+        # The global default, which is what the fallback tier reaches for.
+        cfg.vlm_model = "fallback/model"
+
+    mock_model_manager.get_paddle_ocr_detector.return_value = MagicMock()
+    mock_download.return_value = get_dummy_image_bytes()
+
+    # Eleven bubbles: ten in the first chunk, one in the second.
+    mock_detect_yolo.return_value = [
+        {
+            "bbox": [10, 10 + i * 5, 100, 60 + i * 5],
+            "confidence": 0.95,
+            "mask_polygon": [[10, 10], [110, 10], [110, 60], [10, 60]],
+            "safe_rect": [15, 15 + i * 5, 90, 50],
+        }
+        for i in range(11)
+    ]
+
+    def fake_batch(provider, api_key, model, chunk, *args, **kwargs):
+        ids = [crop["id"] for crop in chunk]
+        # The second chunk refuses the requested model, which is what drives the fallback tier.
+        if "region_10" in ids and model == "primary/model":
+            return None
+        return json.dumps({"results": [{"id": crop_id, "text": f"text for {crop_id}"} for crop_id in ids]})
+
+    mock_try_cloud_vlm.side_effect = fake_batch
+
+    mock_get_res = MagicMock()
+    mock_get_res.status_code = 200
+    mock_get_res.json.return_value = {"id": "image-uuid-1", "panels": []}
+    mock_get.return_value = mock_get_res
+
+    mock_post_res = MagicMock()
+    mock_post_res.status_code = 200
+    mock_post.return_value = mock_post_res
+
+    process_ocr({"imageId": "image-uuid-1", "ocrModel": "primary/model"})
+
+    identifier = mock_post.call_args[1]["json"]["modelIdentifier"]
+    assert "primary/model" in identifier, identifier
+    assert "fallback/model" in identifier, identifier
+
+
+@patch("worker.handlers.ocr.download_image")
+@patch("worker.handlers.ocr.detect_bubbles_yolo")
+@patch("worker.handlers.ocr.try_cloud_ai_vision_batch")
+@patch("worker.handlers.ocr.model_manager")
+@patch("worker.handlers.ocr.requests.get")
+@patch("worker.handlers.ocr.requests.post")
+@patch("worker.handlers.ocr.OCR_CONFIG")
+@patch.dict(
+    os.environ,
+    {
+        "DISABLE_LOCAL_OCR": "true",
+    },
+)
+def test_model_identifier_unchanged_when_one_model_reads_the_page(
+    mock_ocr_config,
+    mock_post,
+    mock_get,
+    mock_model_manager,
+    mock_try_cloud_vlm,
+    mock_detect_yolo,
+    mock_download,
+):
+    """The ordinary case has to keep producing the same string it always did: corpus_audit.py reads
+    modelIdentifier off the OCR layer to answer which engine read a page, and a changed format there
+    breaks that audit silently."""
+    mock_ocr_config.provider = "openrouter"
+    mock_ocr_config.resolve_key.return_value = "fake-openrouter-key"
+    mock_ocr_config.vlm_model = "primary/model"
+
+    mock_model_manager.get_paddle_ocr_detector.return_value = MagicMock()
+    mock_download.return_value = get_dummy_image_bytes()
+    mock_detect_yolo.return_value = [
+        {
+            "bbox": [10, 20, 100, 80],
+            "confidence": 0.95,
+            "mask_polygon": [[10, 20], [110, 20], [110, 100], [10, 100]],
+            "safe_rect": [15, 25, 90, 70],
+        }
+    ]
+    mock_try_cloud_vlm.return_value = json.dumps({"results": [{"id": "region_0", "text": "hello"}]})
+
+    mock_get_res = MagicMock()
+    mock_get_res.status_code = 200
+    mock_get_res.json.return_value = {"id": "image-uuid-1", "panels": []}
+    mock_get.return_value = mock_get_res
+
+    mock_post_res = MagicMock()
+    mock_post_res.status_code = 200
+    mock_post.return_value = mock_post_res
+
+    process_ocr({"imageId": "image-uuid-1", "ocrModel": "primary/model"})
+
+    identifier = mock_post.call_args[1]["json"]["modelIdentifier"]
+    assert identifier.endswith(" + primary/model"), identifier
+    assert identifier.count("+") == 1, identifier

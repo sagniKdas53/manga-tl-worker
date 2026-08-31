@@ -5,10 +5,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from worker.config import get_stage, reset_stage, set_stage
 from worker.utils.rate_limit import (
     enforce_rate_limit,
     estimate_cost,
     get_job_costs,
+    record_llm_call,
     reset_job_costs,
     update_model_costs,
 )
@@ -210,6 +212,78 @@ def test_concurrent_jobs_do_not_see_each_others_costs():
 
     assert job_a == ["job-a:free"]
     assert job_b == ["job-b:free"]
+
+
+def test_recorded_calls_carry_the_bound_stage():
+    """job_costs.stage was added with the other provenance columns and stayed NULL on every row:
+    the shared spending helpers are called by translation, QA and redo alike, so no caller could
+    name the stage without every caller naming it. process_job_rq binds it once per job instead."""
+    reset_job_costs()
+    token = set_stage("translation")
+    try:
+        estimate_cost("model:free", 100, 50)
+    finally:
+        reset_stage(token)
+
+    assert get_job_costs()[-1]["stage"] == "translation"
+    # And it comes back unbound, rather than labelling whatever runs next on this thread.
+    assert get_stage() == ""
+
+
+def test_an_explicit_stage_still_wins():
+    """The argument is not decorative: a caller that knows better than the queue name keeps its say.
+    Only the hardcoded one on the redo path was removed, because there the queue knew better."""
+    reset_job_costs()
+    token = set_stage("qa")
+    try:
+        record_llm_call("model:free", 100, 50, stage="something-specific")
+    finally:
+        reset_stage(token)
+
+    assert get_job_costs()[-1]["stage"] == "something-specific"
+
+
+def test_chunk_threads_inherit_the_stage():
+    """Same propagation the cost list depends on: a pool thread does not inherit the spawning
+    thread's context, so without copy_context().run at the submit site every chunked OCR and
+    translation call would record a blank stage and only the unchunked ones would be attributable."""
+    import contextvars
+    from concurrent.futures import ThreadPoolExecutor
+
+    reset_job_costs()
+    token = set_stage("ocr")
+    try:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [
+                executor.submit(contextvars.copy_context().run, estimate_cost, f"model_{i}:free", 100, 50)
+                for i in range(6)
+            ]
+            for future in futures:
+                future.result()
+    finally:
+        reset_stage(token)
+
+    costs = get_job_costs()
+    assert len(costs) == 6
+    assert {c["stage"] for c in costs} == {"ocr"}
+
+
+def test_concurrent_jobs_do_not_bleed_stages():
+    """An OCR job and a translation job run at the same time on different threads. A module global
+    would give both whichever stage was bound last."""
+    import contextvars
+
+    def run_job(stage, model):
+        reset_job_costs()
+        set_stage(stage)
+        estimate_cost(model, 100, 50)
+        return [(c["model"], c["stage"]) for c in get_job_costs()]
+
+    ocr = contextvars.copy_context().run(run_job, "ocr", "ocr-model:free")
+    translation = contextvars.copy_context().run(run_job, "translation", "tl-model:free")
+
+    assert ocr == [("ocr-model:free", "ocr")]
+    assert translation == [("tl-model:free", "translation")]
 
 
 @patch("worker.utils.rate_limit.time")

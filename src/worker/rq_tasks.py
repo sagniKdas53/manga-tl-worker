@@ -6,7 +6,14 @@ from tenacity.retry import retry_if_exception_type
 from tenacity.stop import stop_after_attempt
 from tenacity.wait import wait_exponential
 
-from worker.config import CALLBACK_URL, backend_headers, reset_trace_id, set_trace_id
+from worker.config import (
+    CALLBACK_URL,
+    backend_headers,
+    reset_stage,
+    reset_trace_id,
+    set_stage,
+    set_trace_id,
+)
 from worker.handlers import (
     process_layout,
     process_ocr,
@@ -121,6 +128,11 @@ def process_job_rq(queue_name, job_data):
     # every backend call it makes (via backend_headers), so one page's six stages share a single
     # greppable string across both containers.
     trace_token = set_trace_id(job_data.get("traceId"))
+    # The queue name is the stage, so every job labels its own spending with no mapping table and
+    # no handler signature change: "queue:region-redo-ocr" -> "region-redo-ocr". Bound beside the
+    # trace id because this is the one place every job passes through, and chunk workers inherit it
+    # through the copy_context().run submissions already in place for the cost list.
+    stage_token = set_stage(queue_name.removeprefix("queue:"))
     # Same argument as the trace id, and the same one place to do it: cost records accumulate per
     # job, so the list is bound here rather than reset inside each handler. Handler-level resets
     # against a shared global meant a job starting mid-flight discarded another job's costs.
@@ -190,3 +202,4 @@ def process_job_rq(queue_name, job_data):
         # Jobs run concurrently on reused threads; an id left bound would label the next unrelated
         # job's output with this one's pipeline.
         reset_trace_id(trace_token)
+        reset_stage(stage_token)

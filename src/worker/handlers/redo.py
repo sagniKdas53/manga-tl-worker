@@ -74,7 +74,11 @@ def process_region_redo(job_data):
             logger.error(f"[Region Redo] Error downloading image: {e}")
         return
 
+    # jobId travels with the callback so the cost row it produces can be tied back to the job that
+    # spent it, the way every other callback's can. The region route has only the region id to go on.
     callback_payload = {}
+    if job_data.get("jobId"):
+        callback_payload["jobId"] = job_data["jobId"]
 
     if redo_type == "ocr":
         try:
@@ -120,24 +124,30 @@ def process_region_redo(job_data):
             callback_payload["translatedText"] = translated
             callback_payload["translationFailed"] = translated is None
             logger.info(f"{req_prefix}Redo Translation result: '{translated}' (failed={translated is None})")
-            from worker.utils.rate_limit import build_cost_payload, format_cost, get_job_costs
-
-            # This block used to log a cost and then throw it away — the payload was never attached
-            # to the callback, so a redo's spend never reached the database. It also inlined its own
-            # formatter with thresholds that disagreed with format_cost.
-            cost_payload = build_cost_payload(get_job_costs())
-            if cost_payload:
-                callback_payload["cost"] = cost_payload
-                cost_str = format_cost(cost_payload.get("estimated_cost"))
-                if cost_payload["unknown_calls"]:
-                    cost_str += f" ({cost_payload['unknown_calls']} of {len(cost_payload['breakdown'])} calls unpriced)"
-                logger.info(
-                    f"{req_prefix}Redo translation estimated cost: {cost_str} "
-                    f"(Tokens: in={cost_payload['prompt_tokens']}, out={cost_payload['completion_tokens']})"
-                )
         except Exception as e:
             logger.error(f"{req_prefix}Redo Translation failed: {e}")
             raise
+
+    # Attach the job's spend to the callback. This lived inside the translation branch alone, so a
+    # region redo that re-read the crop through a paid cloud model — exactly what perform_redo_ocr
+    # does whenever the OCR provider is not local — recorded the call and then dropped it, the same
+    # way redo translation did before PR #30. Both branches spend money; both report it now.
+    from worker.utils.rate_limit import build_cost_payload, format_cost, get_job_costs
+
+    cost_payload = build_cost_payload(get_job_costs())
+    if cost_payload:
+        callback_payload["cost"] = cost_payload
+        cost_str = format_cost(cost_payload.get("estimated_cost"))
+        if cost_payload["unknown_calls"]:
+            cost_str += f" ({cost_payload['unknown_calls']} of {len(cost_payload['breakdown'])} calls unpriced)"
+        cost_msg = (
+            f"Redo {redo_type} estimated cost: {cost_str} "
+            f"(Tokens: in={cost_payload['prompt_tokens']}, out={cost_payload['completion_tokens']})"
+        )
+        if redo_type == "translation":
+            logger.info(f"{req_prefix}{cost_msg}")
+        else:
+            logger.info(f"[Region Redo] {cost_msg}")
 
     try:
         callback_url = CALLBACK_URL.replace("/jobs/callback", f"/ocr-regions/{region_id}/callback")
