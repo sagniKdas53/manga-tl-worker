@@ -174,3 +174,101 @@ def test_process_qa_re_ocr(mock_post, mock_get, mock_perform_ocr, mock_download)
     assert payload["results"][0]["text"] == "Redone OCR text 1"
     assert payload["results"][1]["regionId"] == "region-2"
     assert payload["results"][1]["text"] == "Redone OCR text 2"
+
+
+@patch("worker.handlers.redo.download_image")
+@patch("worker.handlers.redo.perform_redo_ocr")
+@patch("worker.handlers.redo.requests.get")
+@patch("worker.handlers.redo.requests.post")
+def test_region_redo_ocr_reports_what_it_spent(mock_post, mock_get, mock_perform_ocr, mock_download):
+    """perform_redo_ocr goes out to a paid cloud model whenever the OCR provider is not local, and
+    the cost payload was attached inside the translation branch only — so a region redo billed for
+    the call and then dropped it, exactly as redo translation did before PR #30. Four such redos
+    went unrecorded on 2026-08-31 before this was found."""
+    from worker.config import reset_stage, set_stage
+    from worker.utils.rate_limit import record_llm_call, reset_job_costs
+
+    mock_get_res = MagicMock()
+    mock_get_res.status_code = 200
+    mock_get_res.json.return_value = {
+        "id": "image-uuid-1",
+        "storagePath": "originals/page1.png",
+        "ocrRegions": [
+            {
+                "id": "region-uuid-1",
+                "bboxX": 10,
+                "bboxY": 20,
+                "bboxW": 100,
+                "bboxH": 50,
+                "detectedLanguage": "ja",
+            }
+        ],
+    }
+    mock_get.return_value = mock_get_res
+    mock_download.return_value = get_dummy_image_bytes()
+
+    # Stand in for the cloud call perform_redo_ocr makes: it records against the job's cost list.
+    def redo_ocr(*_args, **_kwargs):
+        record_llm_call("qwen/qwen3-vl-32b-instruct", 800, 20, provider="openrouter", authoritative_cost=0.00011)
+        return ("あんなに大きかったけ…", 1.0)
+
+    mock_perform_ocr.side_effect = redo_ocr
+
+    mock_post_res = MagicMock()
+    mock_post_res.status_code = 200
+    mock_post.return_value = mock_post_res
+
+    reset_job_costs()
+    stage_token = set_stage("region-redo-ocr")
+    try:
+        process_region_redo({"imageId": "image-uuid-1", "regionId": "region-uuid-1", "redoType": "ocr"})
+    finally:
+        reset_stage(stage_token)
+
+    payload = mock_post.call_args[1]["json"]
+    assert "cost" in payload, "redo OCR callback carried no cost — the spend never reaches the DB"
+    assert payload["cost"]["estimated_cost"] == 0.00011
+    # And it is attributed to the redo queue, not flattened to plain "ocr".
+    assert payload["cost"]["breakdown"][0]["stage"] == "region-redo-ocr"
+
+
+@patch("worker.handlers.redo.download_image")
+@patch("worker.handlers.redo.translate_text")
+@patch("worker.handlers.redo.requests.get")
+@patch("worker.handlers.redo.requests.post")
+def test_region_redo_translation_still_reports_its_cost(mock_post, mock_get, mock_translate, mock_download):
+    """The cost attach moved out of the translation branch to cover both; translation must not have
+    lost it on the way."""
+    from worker.config import reset_stage, set_stage
+    from worker.utils.rate_limit import record_llm_call, reset_job_costs
+
+    mock_get_res = MagicMock()
+    mock_get_res.status_code = 200
+    mock_get_res.json.return_value = {
+        "id": "image-uuid-1",
+        "storagePath": "originals/page1.png",
+        "ocrRegions": [{"id": "region-uuid-1", "text": "あんなに", "detectedLanguage": "ja"}],
+    }
+    mock_get.return_value = mock_get_res
+    mock_download.return_value = get_dummy_image_bytes()
+
+    def translate(*_args, **_kwargs):
+        record_llm_call("openai/gpt-5.6-luna", 500, 40, provider="openrouter", authoritative_cost=0.00022)
+        return "Was it really that big...?"
+
+    mock_translate.side_effect = translate
+
+    mock_post_res = MagicMock()
+    mock_post_res.status_code = 200
+    mock_post.return_value = mock_post_res
+
+    reset_job_costs()
+    stage_token = set_stage("region-redo-tl")
+    try:
+        process_region_redo({"imageId": "image-uuid-1", "regionId": "region-uuid-1", "redoType": "translation"})
+    finally:
+        reset_stage(stage_token)
+
+    payload = mock_post.call_args[1]["json"]
+    assert payload["cost"]["estimated_cost"] == 0.00022
+    assert payload["cost"]["breakdown"][0]["stage"] == "region-redo-tl"
