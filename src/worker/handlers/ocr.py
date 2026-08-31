@@ -562,7 +562,10 @@ def process_ocr(job_data):
     source_language = (job_data.get("sourceLanguage") or "ja").strip().lower()
     reading_direction = (job_data.get("readingDirection") or "rtl").strip().lower()
 
-    vlm_model_used = None
+    # Every model that actually transcribed a chunk, in first-use order. This was a single slot
+    # that each chunk overwrote, so a page whose chunks fell back to a different model kept only
+    # the last chunk's name and silently misreported the rest.
+    vlm_models_used: list[str] = []
     transcriptions: dict = {}
 
     if logger.isEnabledFor(logging.DEBUG):
@@ -1035,7 +1038,6 @@ def process_ocr(job_data):
                         crop_chunks = chunk_list(crops_payload, 10)
 
                         def process_crop_chunk(chunk_idx, chunk):
-                            nonlocal vlm_model_used
                             logger.info(
                                 f"[OCR] Processing cloud OCR batch chunk {chunk_idx + 1}/{len(crop_chunks)} ({len(chunk)} crops)..."
                             )
@@ -1073,7 +1075,7 @@ def process_ocr(job_data):
                                             logger.info(
                                                 f"[OCR] Successfully processed chunk {chunk_idx + 1} using model '{user_model}'"
                                             )
-                                            vlm_model_used = user_model
+                                            vlm_models_used.append(user_model)
 
                                     if not chunk_res or not results_list:
                                         # Fallback to global default model (only if use_fallback_models is True)
@@ -1109,7 +1111,7 @@ def process_ocr(job_data):
                                                     logger.warning(
                                                         f"[OCR] Successfully processed chunk {chunk_idx + 1} using global fallback model '{global_model}'"
                                                     )
-                                                    vlm_model_used = global_model
+                                                    vlm_models_used.append(global_model)
                                         else:
                                             logger.warning(
                                                 "[OCR] No fallback applied (global provider different or model identical)."
@@ -1160,7 +1162,7 @@ def process_ocr(job_data):
                                                             "confidence": parsed.get("confidence", 0.99),
                                                         }
                                                     )
-                                                    vlm_model_used = local_model
+                                                    vlm_models_used.append(local_model)
                                                 except Exception:
                                                     results_list.append(
                                                         {
@@ -1439,8 +1441,10 @@ def process_ocr(job_data):
         # the stored provenance.
         rec_model = resolved_local_model.rec if resolved_local_model else "unknown"
         model_identifier = f"PaddleOCR({rec_model})"
-        if vlm_model_used:
-            model_identifier += f" + {vlm_model_used}"
+        # Name every distinct model that read part of this page, not just the last one to finish.
+        # A page read by a single model - the normal case - produces the same string as before.
+        for vlm_model in dict.fromkeys(vlm_models_used):
+            model_identifier += f" + {vlm_model}"
 
         page_id = job_data.get("pageId")
         callback_payload = {
