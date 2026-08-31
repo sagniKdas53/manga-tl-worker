@@ -6,7 +6,7 @@ import time
 
 import requests
 
-from worker.config import logger, redis_client
+from worker.config import get_stage, logger, redis_client
 
 RATE_LIMIT_LOCK = threading.Lock()
 PROVIDER_LAST_REQUEST_TIME = {}
@@ -402,7 +402,10 @@ def record_llm_call(
         "upstream_provider": upstream_provider or "",
         "model_resolved": model_resolved or model,
         "cost_source": source,
-        "stage": stage or "",
+        # An explicit stage wins; otherwise take the one process_job_rq bound for this job. Every
+        # caller but one passes nothing, which is why this column was NULL on all 362 rows written
+        # since it was added.
+        "stage": stage or get_stage(),
         "duration_ms": duration_ms,
     }
 

@@ -55,6 +55,36 @@ def get_trace_id() -> str:
     return _trace_id.get()
 
 
+# Which pipeline step the current job belongs to ("ocr", "translation", "qa", ...), or "" between
+# jobs. job_costs.stage was added in PR #110 and every row since has been NULL: record_llm_call
+# defaults it to "", and the shared helpers that do the spending (LLMClient, services/translation.py)
+# are called by translation, QA and redo alike — so no caller could supply a stage without every
+# caller supplying one.
+#
+# Binding it here costs the call sites nothing. The queue name IS the stage, so process_job_rq
+# derives it with a removeprefix and there is no mapping table to keep in step.
+_stage: contextvars.ContextVar[str] = contextvars.ContextVar("stage", default="")
+
+
+def set_stage(stage):
+    """Bind the pipeline stage for the current job. Returns the reset token."""
+    return _stage.set(str(stage) if stage else "")
+
+
+def reset_stage(token):
+    """Unbind, restoring whatever was bound before. Pair with the token from set_stage."""
+    try:
+        _stage.reset(token)
+    except ValueError:
+        # Same thread-migration case as reset_trace_id: an unset stage is correct-but-empty, a
+        # stale one bills the next job's calls to this job's step.
+        _stage.set("")
+
+
+def get_stage() -> str:
+    return _stage.get()
+
+
 class _TraceIdFilter(logging.Filter):
     """Injects ``trace`` into every record so the formatter can print it unconditionally.
 

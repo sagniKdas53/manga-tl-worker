@@ -204,6 +204,63 @@ def test_process_job_rq_queues():
             mock_handler.assert_called_once_with(job_data)
 
 
+def test_process_job_rq_binds_the_stage_from_the_queue_name():
+    """The queue name IS the stage, which is why nothing has to map one to the other and why the two
+    redo queues tell themselves apart without anyone reading redoType. Every cost record written
+    during the job picks this up, so spend can finally be grouped by pipeline step."""
+    from worker.config import get_stage
+
+    job_data = {"jobId": "job-1"}
+    mock_res = MagicMock()
+    mock_res.status_code = 200
+    mock_res.json.return_value = {"status": "PENDING"}
+
+    seen = {}
+
+    queues_to_handler = [
+        ("queue:ocr", "worker.rq_tasks.process_ocr", "ocr"),
+        ("queue:translation", "worker.rq_tasks.process_translation", "translation"),
+        ("queue:qa", "worker.rq_tasks.process_qa", "qa"),
+        ("queue:qa-re-ocr", "worker.rq_tasks.process_qa_re_ocr", "qa-re-ocr"),
+        ("queue:region-redo-ocr", "worker.rq_tasks.process_region_redo", "region-redo-ocr"),
+        ("queue:region-redo-tl", "worker.rq_tasks.process_region_redo", "region-redo-tl"),
+    ]
+
+    for qname, target, expected in queues_to_handler:
+        with (
+            patch("worker.rq_tasks.check_stale_job", return_value=False),
+            patch("requests.get", return_value=mock_res),
+            patch("worker.rq_tasks.update_job_status"),
+            patch(target, side_effect=lambda _d, q=qname: seen.__setitem__(q, get_stage())),
+        ):
+            process_job_rq(qname, job_data)
+
+        assert seen[qname] == expected, f"{qname} bound {seen[qname]!r}"
+        # Unbound again on the way out, so the next job on this thread is not billed to this stage.
+        assert get_stage() == ""
+
+
+def test_process_job_rq_unbinds_the_stage_after_a_failure():
+    """The reset lives in the finally block for the same reason the trace id's does: a handler that
+    raises must not leave its stage bound to the thread for whatever runs next."""
+    from worker.config import get_stage
+
+    job_data = {"jobId": "job-1"}
+    mock_res = MagicMock()
+    mock_res.status_code = 200
+    mock_res.json.return_value = {"status": "PENDING"}
+
+    with (
+        patch("worker.rq_tasks.check_stale_job", return_value=False),
+        patch("requests.get", return_value=mock_res),
+        patch("worker.rq_tasks.update_job_status"),
+        patch("worker.rq_tasks.process_ocr", side_effect=RuntimeError("boom")),
+    ):
+        process_job_rq("queue:ocr", job_data)
+
+    assert get_stage() == ""
+
+
 def test_process_job_rq_does_not_dispatch_bare_region_redo():
     """AUDIT-Q3: `queue:region-redo` is a queue nothing produces and nothing consumes.
 

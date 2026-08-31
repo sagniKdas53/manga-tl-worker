@@ -122,7 +122,10 @@ def _record_cloud_ocr_cost(res_json, provider, model):
             generation_id=res_json.get("id") or "",
             upstream_provider=res_json.get("provider") or "",
             model_resolved=res_json.get("model") or "",
-            stage="ocr",
+            # No explicit stage: this path is reached only from perform_redo_ocr, so the callers are
+            # qa_re_ocr and redo. Hardcoding "ocr" here labelled every QA re-OCR and region redo as
+            # ordinary OCR — record_llm_call now takes the queue-derived stage instead, which tells
+            # those three apart.
             authoritative_cost=authoritative_cost,
         )
     except Exception as e:

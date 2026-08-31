@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from worker.config import reset_stage, set_stage
 from worker.utils.rate_limit import (
     build_cost_payload,
     estimate_cost,
@@ -272,7 +273,13 @@ def test_cloud_ocr_calls_are_recorded(mock_post):
     mock_post.return_value = mock_resp
 
     reset_job_costs()
-    result = try_cloud_ocr(b"fake-image", "openrouter", "key", "qwen/qwen3-vl-32b-instruct")
+    # This path is only ever reached from a redo queue, so the stage under test is the one
+    # process_job_rq would have bound — not the flat "ocr" this call site used to hardcode.
+    stage_token = set_stage("region-redo-ocr")
+    try:
+        result = try_cloud_ocr(b"fake-image", "openrouter", "key", "qwen/qwen3-vl-32b-instruct")
+    finally:
+        reset_stage(stage_token)
 
     assert result == ("hello", 0.9)
 
@@ -280,7 +287,7 @@ def test_cloud_ocr_calls_are_recorded(mock_post):
     assert entry["estimated_cost"] == 0.00011
     assert entry["cost_source"] == "authoritative"
     assert entry["generation_id"] == "gen-cloud-ocr-1"
-    assert entry["stage"] == "ocr"
+    assert entry["stage"] == "region-redo-ocr"
 
     # And it asks for the figure in the first place.
     assert mock_post.call_args.kwargs["json"]["usage"] == {"include": True}
