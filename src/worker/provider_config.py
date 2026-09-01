@@ -20,6 +20,7 @@ class ModelEntry:
     id: str
     name: str
     free: bool = False
+    pricing: dict[str, Any] | None = None
 
 
 @dataclass
@@ -168,6 +169,7 @@ class ProviderConfigLoader:
                             id=m["id"],
                             name=m.get("name", m["id"]),
                             free=m.get("free", False),
+                            pricing=m.get("pricing") if isinstance(m.get("pricing"), dict) else None,
                         )
                         for m in task_models
                     ]
@@ -284,7 +286,15 @@ class ProviderConfigLoader:
                 for task, model_list in prov.models.items():
                     if model_list is not None:
                         capabilities.append(task)
-                        models_export[task] = [{"id": m.id, "name": m.name, "free": m.free} for m in model_list]
+                        models_export[task] = [
+                            {
+                                "id": m.id,
+                                "name": m.name,
+                                "free": m.free,
+                                **({"pricing": m.pricing} if m.pricing else {}),
+                            }
+                            for m in model_list
+                        ]
 
                 # The local provider's OCR list is replaced wholesale by the validated catalog: the
                 # generic parse above keeps only id/name/free, which would advertise pairs whose det
