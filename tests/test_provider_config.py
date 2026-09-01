@@ -1,4 +1,5 @@
 import ast
+import json
 import pathlib
 from unittest.mock import MagicMock
 
@@ -39,6 +40,45 @@ def test_publish_config_to_redis():
     assert mock_redis.publish.called
     args = mock_redis.set.call_args[0]
     assert args[0] == "system:providers:config"
+
+
+def test_model_pricing_is_preserved_in_published_catalog(tmp_path):
+    config_path = tmp_path / "providers.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "providers": {
+                    "test": {
+                        "models": {
+                            "tl": [
+                                {
+                                    "id": "priced/model",
+                                    "name": "Priced model",
+                                    "pricing": {
+                                        "currency": "USD",
+                                        "promptPerMillion": 0.25,
+                                        "completionPerMillion": 1.5,
+                                        "source": "test",
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    loader = ProviderConfigLoader(str(config_path))
+    mock_redis = MagicMock()
+
+    loader.publish_config_to_redis(mock_redis)
+
+    published = json.loads(mock_redis.set.call_args.args[1])
+    pricing = published["providers"]["test"]["models"]["tl"][0]["pricing"]
+    assert pricing["promptPerMillion"] == 0.25
+    assert pricing["completionPerMillion"] == 1.5
 
 
 def test_importing_worker_config_does_not_publish():
