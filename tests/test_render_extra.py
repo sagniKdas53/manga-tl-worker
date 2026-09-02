@@ -320,3 +320,64 @@ def test_element_rotation_ignores_noise_and_junk():
     assert element_rotation({"rotation": float("nan")}) == 0.0
     assert element_rotation({"rotation": 37.5}) == 37.5
     assert element_rotation({"rotation": "37.5"}) == 37.5
+
+
+# ---------------------------------------------------------------------------
+# AUDIT-R1 / AUDIT-F16 — one fitted rectangle, shared with the frontend
+# ---------------------------------------------------------------------------
+
+
+def test_text_fit_box_matches_the_frontend_parity_table():
+    """The same table is asserted in `frontend/src/__tests__/utils/textFitBox.test.ts`.
+
+    The two implementations are in different languages and nothing else can catch them drifting
+    apart -- which is exactly what happened when each side owned its own literal: the live reader
+    used the raw box, the frontend's exports insetted 4px, and render.py insetted 4px and then took
+    95%. Three rectangles, and the one on screen was not the one that shipped.
+    """
+    from worker.handlers.render import text_fit_box
+
+    cases = [
+        # width, height, padding, safety, expected_w, expected_h
+        (300, 120, 4, 95, 277, 106),
+        (100, 40, 4, 95, 87, 30),
+        (91, 293, 4, 95, 78, 270),
+        (50, 50, 0, 100, 50, 50),
+        (9, 9, 4, 95, 1, 1),
+        (1, 1, 4, 95, 1, 1),
+    ]
+    for width, height, padding, safety, expected_w, expected_h in cases:
+        _, _, box_w, box_h = text_fit_box(0, 0, width, height, padding, safety)
+        assert (box_w, box_h) == (expected_w, expected_h), f"{width}x{height} @ {padding}/{safety}"
+
+
+def test_text_fit_box_reproduces_the_old_literals():
+    """The default inset is exactly what the pipeline used before it was configurable."""
+    from worker.handlers.render import text_fit_box
+
+    box_x, box_y, box_w, box_h = text_fit_box(100, 200, 300, 120, 4, 95)
+    assert (box_x, box_y) == (104, 204)
+    assert box_w == int((300 - 8) * 0.95)
+    assert box_h == int((120 - 8) * 0.95)
+
+
+def test_text_fit_box_never_insets_a_box_away_to_nothing():
+    from worker.handlers.render import text_fit_box
+
+    _, _, box_w, box_h = text_fit_box(0, 0, 6, 6, 4, 95)
+    assert box_w > 0 and box_h > 0
+
+
+def test_resolve_text_box_inset_defaults_and_clamps():
+    """A job payload is not a trusted source of numbers: a 0% safety margin fits everything into
+    a zero-width box, which would stop the whole library typesetting."""
+    from worker.handlers.render import resolve_text_box_inset
+
+    assert resolve_text_box_inset(None) == (4, 95)
+    assert resolve_text_box_inset({}) == (4, 95)
+    assert resolve_text_box_inset({"textBoxPaddingPx": 12, "textBoxSafetyPercent": 80}) == (12, 80)
+    assert resolve_text_box_inset({"textBoxPaddingPx": "oops"}) == (4, 95)
+    assert resolve_text_box_inset({"textBoxSafetyPercent": 0}) == (4, 1)
+    assert resolve_text_box_inset({"textBoxSafetyPercent": 500}) == (4, 100)
+    assert resolve_text_box_inset({"textBoxPaddingPx": -5}) == (0, 95)
+    assert resolve_text_box_inset({"textBoxPaddingPx": 9999}) == (64, 95)

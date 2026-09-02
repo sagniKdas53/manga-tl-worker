@@ -1044,6 +1044,51 @@ def box_outline_points(ex, ey, ew, eh, degrees, elliptical=False, segments=32):
     return [rotate_point_deg(px, py, cx, cy, degrees) for px, py in raw]
 
 
+DEFAULT_TEXT_BOX_PADDING_PX = 4
+DEFAULT_TEXT_BOX_SAFETY_PERCENT = 95
+
+
+def resolve_text_box_inset(job_data):
+    """`(padding_px, safety_percent)` for this job, defaulted and clamped.
+
+    AUDIT-R1/F16. The clamps are not decoration: a safety percent of 0, or a padding wider than
+    half the box, fits every element into a zero-width rectangle, and a job payload is not a
+    trusted source of numbers.
+    """
+    job_data = job_data or {}
+
+    def read(key, default, low, high):
+        try:
+            value = round(float(job_data.get(key, default)))
+        except (TypeError, ValueError):
+            return default
+        return max(low, min(high, value))
+
+    return (
+        read("textBoxPaddingPx", DEFAULT_TEXT_BOX_PADDING_PX, 0, 64),
+        read("textBoxSafetyPercent", DEFAULT_TEXT_BOX_SAFETY_PERCENT, 1, 100),
+    )
+
+
+def text_fit_box(ex, ey, ew, eh, padding_px, safety_percent):
+    """The rectangle text is fitted into, given an element's box.
+
+    Mirrors `textFitBox` in `frontend/src/utils/textFitBox.ts`; the two must agree, which is the
+    entire point of both existing. Truncating (not rounding) the scaled extents is what keeps the
+    integer results identical to the frontend's `Math.floor`.
+    """
+    # QA re-renders a page without a job payload (qa.py), so an unset inset means "whatever the
+    # pipeline has always used" rather than an error.
+    usable_w = max(1, ew - padding_px * 2)
+    usable_h = max(1, eh - padding_px * 2)
+    return (
+        ex + padding_px,
+        ey + padding_px,
+        max(1, int(usable_w * safety_percent / 100)),
+        max(1, int(usable_h * safety_percent / 100)),
+    )
+
+
 def element_rotation(el):
     """An element's angle in degrees, or 0.0. Treated as unrotated below a tenth of a degree."""
     try:
@@ -1053,7 +1098,7 @@ def element_rotation(el):
     return 0.0 if abs(degrees) < 0.1 or not math.isfinite(degrees) else degrees
 
 
-def render_image_core(image_id, page_id=None, chapter_id=None):
+def render_image_core(image_id, page_id=None, chapter_id=None, text_box_inset=None):
     try:
         render_target_id = image_id
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
@@ -1083,6 +1128,15 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
     try:
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         draw = ImageDraw.Draw(img)
+
+        # AUDIT-R1/F16: the inset applied before fitting. It used to be the literals 4 and 0.95
+        # here and three *different* answers in the frontend, one of them the live reader -- the
+        # screen the typesetting was being judged on. One value now, from settings, sent on the
+        # job.
+        box_padding_px, box_safety_percent = text_box_inset or (
+            DEFAULT_TEXT_BOX_PADDING_PX,
+            DEFAULT_TEXT_BOX_SAFETY_PERCENT,
+        )
 
         # Render only visible elements from visible translation/sfx layers.
         #
@@ -1197,10 +1251,9 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
             # few pixels off, at a height where an oval mask has already narrowed. That was
             # invisible at the small font sizes the old width//3 cap produced; larger text reaches
             # further toward the taper, where the same few-pixel drift becomes visible overflow.
-            text_box_x = ex + 4
-            text_box_y = ey + 4
-            text_box_w = int((ew - 8) * 0.95)  # 5% safety margin
-            text_box_h = int((eh - 8) * 0.95)  # 5% safety margin
+            text_box_x, text_box_y, text_box_w, text_box_h = text_fit_box(
+                ex, ey, ew, eh, box_padding_px, box_safety_percent
+            )
 
             font_name = el.get("font") or "Comic Neue"
             fit = fit_text_in_box_py(
@@ -1400,7 +1453,12 @@ def process_render(job_data):
         else:
             qa_mode_resolved = "none"
 
-    if not render_image_core(image_id, page_id=page_id, chapter_id=job_data.get("chapterId")):
+    if not render_image_core(
+        image_id,
+        page_id=page_id,
+        chapter_id=job_data.get("chapterId"),
+        text_box_inset=resolve_text_box_inset(job_data),
+    ):
         raise Exception("Render failed")
 
     # Trigger callback
