@@ -1,5 +1,6 @@
 import io
 import logging
+import math
 import os
 
 import requests
@@ -997,6 +998,61 @@ def readable_text_color(bg_hex, fg_hex, floor=CONTRAST_FLOOR):
     return "#000000" if bg > 0.4 else "#ffffff"
 
 
+# ---------------------------------------------------------------------------
+# AUDIT-R5 — an element's angle
+#
+# `rotation` is the angle of the element's *box*, in degrees, about the box centre. The box itself
+# (x/y/maxWidth/maxHeight) is always stored unrotated; a `maskPolygon` is the opposite, already in
+# absolute page coordinates with the angle baked in. So the plate drawn from a polygon must not be
+# turned again, and everything derived from the box must.
+#
+# Sign convention follows the editor, which is SVG/canvas: y grows downward and a positive angle
+# turns clockwise on screen. PIL's `Image.rotate` turns counter-clockwise, hence the negation where
+# it is used.
+# ---------------------------------------------------------------------------
+
+
+def rotate_point_deg(px, py, cx, cy, degrees):
+    """Rotate (px, py) about (cx, cy). Matches `rotatePoint` in the frontend's polygonUtils.ts."""
+    rad = math.radians(degrees)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+    dx, dy = px - cx, py - cy
+    return (cx + dx * cos_a - dy * sin_a, cy + dx * sin_a + dy * cos_a)
+
+
+def box_outline_points(ex, ey, ew, eh, degrees, elliptical=False, segments=32):
+    """The element box as a point list, turned to `degrees`.
+
+    A rotated rectangle is no longer expressible as a PIL rectangle and a rotated ellipse is not
+    expressible as a PIL ellipse, so both become polygons. The ellipse is sampled rather than
+    approximated by its bounding box, because the plate has to follow the balloon.
+    """
+    cx, cy = ex + ew / 2.0, ey + eh / 2.0
+    if elliptical:
+        rx, ry = ew / 2.0, eh / 2.0
+        raw = [
+            (
+                cx + rx * math.cos(2.0 * math.pi * i / segments),
+                cy + ry * math.sin(2.0 * math.pi * i / segments),
+            )
+            for i in range(segments)
+        ]
+    else:
+        raw = [(ex, ey), (ex + ew, ey), (ex + ew, ey + eh), (ex, ey + eh)]
+    if not degrees:
+        return raw
+    return [rotate_point_deg(px, py, cx, cy, degrees) for px, py in raw]
+
+
+def element_rotation(el):
+    """An element's angle in degrees, or 0.0. Treated as unrotated below a tenth of a degree."""
+    try:
+        degrees = float(el.get("rotation") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return 0.0 if abs(degrees) < 0.1 or not math.isfinite(degrees) else degrees
+
+
 def render_image_core(image_id, page_id=None, chapter_id=None):
     try:
         render_target_id = image_id
@@ -1098,6 +1154,11 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
             # Filling the box as well costs nothing where the two overlap (same colour) and is
             # bounded by the widening cap, which is why this became affordable only once
             # `free_text_box` stopped squaring the column away.
+            # AUDIT-R5: the box turns with the element, the mask polygon does not. The polygon is
+            # page-space and already carries the angle; the box is stored unrotated. Filling the
+            # box axis-aligned beside a turned mask is what laid a straight white rectangle across
+            # artwork on every rotated caption.
+            rotation_deg = element_rotation(el)
             painted_box = False
             if bg_color_hex and bg_color_hex.startswith("#"):
                 # Draw mask
@@ -1112,13 +1173,19 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
                     except Exception as e:
                         logger.error(f"[Render] Failed to draw polygon mask: {e}")
                     if not in_bubble:
-                        draw.rectangle([ex, ey, ex + ew, ey + eh], fill=bg_color_hex)
+                        draw.polygon(
+                            box_outline_points(ex, ey, ew, eh, rotation_deg),
+                            fill=bg_color_hex,
+                        )
                         painted_box = True
-                elif box_shape == "elliptical":
+                elif box_shape == "elliptical" and not rotation_deg:
                     draw.ellipse([ex, ey, ex + ew, ey + eh], fill=bg_color_hex)
                     painted_box = True
                 else:
-                    draw.rectangle([ex, ey, ex + ew, ey + eh], fill=bg_color_hex)
+                    draw.polygon(
+                        box_outline_points(ex, ey, ew, eh, rotation_deg, elliptical=(box_shape == "elliptical")),
+                        fill=bg_color_hex,
+                    )
                     painted_box = True
 
             # Draw Text
@@ -1168,6 +1235,12 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
                 total_height = len(fit["lines"]) * line_height
                 start_y = text_box_y + (text_box_h - total_height) / 2
 
+                # Where each line goes, in page coordinates, before any rotation. Collected rather
+                # than drawn straight away so a rotated element can render the same placements onto
+                # its own tile — the fitting and centring logic below must not have to know whether
+                # the element is turned.
+                placements = []
+
                 for i, line in enumerate(fit["lines"]):
                     line_center_x = (
                         fit["lineCenters"][i]
@@ -1195,13 +1268,63 @@ def render_image_core(image_id, page_id=None, chapter_id=None):
                     if line_width <= text_box_w:
                         line_x = min(max(line_x, text_box_x), text_box_x + text_box_w - line_width)
                     line_y = start_y + i * line_height
-                    draw.text(
-                        (line_x, line_y),
-                        line,
-                        fill=text_color_hex,
-                        font=font,
-                        stroke_width=halo_stroke,
-                        stroke_fill=halo_fill if halo_stroke else None,
+                    placements.append((line_x, line_y, line, line_width))
+
+                if not rotation_deg:
+                    for line_x, line_y, line, _ in placements:
+                        draw.text(
+                            (line_x, line_y),
+                            line,
+                            fill=text_color_hex,
+                            font=font,
+                            stroke_width=halo_stroke,
+                            stroke_fill=halo_fill if halo_stroke else None,
+                        )
+                elif placements:
+                    # AUDIT-R5: draw the lines level onto a transparent tile, turn the tile, and
+                    # composite. Rotating the text rather than the coordinates is what keeps the
+                    # glyphs themselves upright-relative-to-the-box instead of merely repositioned.
+                    #
+                    # The tile is sized from the actual placements unioned with the element box,
+                    # not from the box alone: `fit` is allowed to produce a line wider than the box
+                    # (the clamp above only fires when the line already fits), and a tile cut to
+                    # the box would silently crop exactly those overflowing lines that the halo
+                    # exists to make readable.
+                    pad = math.ceil(halo_stroke * 2) + 4
+                    min_x = min([ex] + [px for px, _, _, _ in placements]) - pad
+                    min_y = min([ey] + [py for _, py, _, _ in placements]) - pad
+                    max_x = max([ex + ew] + [px + w for px, _, _, w in placements]) + pad
+                    max_y = max([ey + eh] + [py + line_height for _, py, _, _ in placements]) + pad
+                    tile_w = max(1, math.ceil(max_x - min_x))
+                    tile_h = max(1, math.ceil(max_y - min_y))
+
+                    tile = Image.new("RGBA", (tile_w, tile_h), (0, 0, 0, 0))
+                    tile_draw = ImageDraw.Draw(tile)
+                    for line_x, line_y, line, _ in placements:
+                        tile_draw.text(
+                            (line_x - min_x, line_y - min_y),
+                            line,
+                            fill=text_color_hex,
+                            font=font,
+                            stroke_width=halo_stroke,
+                            stroke_fill=halo_fill if halo_stroke else None,
+                        )
+
+                    # Negated: PIL turns counter-clockwise, the editor (SVG/canvas, y down) turns
+                    # clockwise for a positive angle.
+                    rotated = tile.rotate(-rotation_deg, resample=Image.BICUBIC, expand=True)
+                    # The tile turns about the element box's centre, not the tile's own, so the
+                    # text ends up where the rotated plate is.
+                    box_cx, box_cy = ex + ew / 2.0, ey + eh / 2.0
+                    tile_cx, tile_cy = (min_x + max_x) / 2.0, (min_y + max_y) / 2.0
+                    spun_cx, spun_cy = rotate_point_deg(tile_cx, tile_cy, box_cx, box_cy, rotation_deg)
+                    img.paste(
+                        rotated,
+                        (
+                            round(spun_cx - rotated.width / 2.0),
+                            round(spun_cy - rotated.height / 2.0),
+                        ),
+                        rotated,
                     )
 
         # Save flattened image
