@@ -11,6 +11,8 @@ character from the edge, because balloons have margins. Text distance cannot sep
 cases -- the gap distributions overlap -- and this can.
 """
 
+import os
+
 import cv2
 import numpy as np
 
@@ -62,3 +64,49 @@ def bubble_grouping_context(mask, mask_polygon):
         return _sample_min(dt, p, q)
 
     return GroupingContext(clearance=clearance, solidity=mask_solidity(mask_polygon))
+
+
+# How far a vertex may sit from the outline its neighbours describe before it is worth keeping,
+# in page pixels. Absolute, not a fraction of the perimeter -- see `simplify_mask_polygon`.
+MASK_POLYGON_TOLERANCE_PX = float(os.environ.get("MASK_POLYGON_TOLERANCE_PX", "2.0"))
+
+# A polygon is never simplified below this. Three points is the minimum that still encloses area,
+# and dropping to it would turn a balloon into a triangle if the tolerance were ever set absurdly.
+MIN_MASK_POLYGON_POINTS = 4
+
+
+def simplify_mask_polygon(points, tolerance_px=None):
+    """Drop vertices that do not move the outline by more than `tolerance_px`.
+
+    AUDIT-R7. Every contour in this pipeline used to be simplified with
+    ``epsilon = 0.002 * cv2.arcLength(contour, True)`` -- a tolerance proportional to the
+    perimeter. That is backwards. It gives a 3000px-perimeter balloon a 6px tolerance, which is
+    fine, and a 200px-perimeter caption plate a **0.4px** tolerance, which is below one pixel and
+    therefore removes nothing at all. The smaller and simpler the shape, the tighter the tolerance
+    it was held to, so the shapes that should have come back as four points came back with dozens.
+
+    Every one of those is a drag handle in reshape mode, is stored in `mask_polygon`, is
+    re-serialised on every save, and is walked by `mask_solidity` and the merge hull.
+
+    An absolute tolerance inverts that: 2px flattens rasterisation jitter along a straight edge at
+    any size, while a balloon's tail -- which sticks out far more than 2px, that being the point of
+    a tail -- survives untouched at every size.
+
+    Returns a plain ``[[x, y], ...]`` list. Input may be that or a cv2 contour.
+    """
+    if points is None:
+        return points
+    tolerance = MASK_POLYGON_TOLERANCE_PX if tolerance_px is None else tolerance_px
+    try:
+        contour = np.array(points, dtype=np.float32).reshape(-1, 1, 2)
+    except (ValueError, TypeError):
+        return points
+    if contour.shape[0] <= MIN_MASK_POLYGON_POINTS or tolerance <= 0:
+        return np.rint(contour.reshape(-1, 2)).astype(int).tolist()
+
+    simplified = cv2.approxPolyDP(contour, float(tolerance), True)
+    # approxPolyDP can over-collapse a nearly-degenerate shape; keep the original rather than hand
+    # back something that no longer encloses anything.
+    if simplified.shape[0] < MIN_MASK_POLYGON_POINTS:
+        simplified = contour
+    return np.rint(simplified.reshape(-1, 2)).astype(int).tolist()

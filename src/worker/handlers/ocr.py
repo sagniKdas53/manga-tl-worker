@@ -35,7 +35,7 @@ from worker.config import (
 )
 from worker.model_manager import model_manager, resolve_local_ocr_model
 from worker.services.bubble_detector import detect_bubbles_yolo
-from worker.services.bubble_geometry import bubble_grouping_context
+from worker.services.bubble_geometry import bubble_grouping_context, simplify_mask_polygon
 from worker.services.fragment_grouping import GroupingConfig
 from worker.services.layout import bubble_compare
 from worker.services.merge_regions import merge_ocr_regions
@@ -310,7 +310,11 @@ def cover_balloon_polygon(x, y, width, height, img_w, img_h, corner_steps=6):
         for i in range(corner_steps + 1):
             a = math.radians(start + 90.0 * i / corner_steps)
             pts.append([round(cx + r * math.cos(a)), round(cy + r * math.sin(a))])
-    return pts
+    # AUDIT-R7: `corner_steps` samples every corner the same however small its radius, so a plate
+    # around a short caption came back as 28 points -- 28 drag handles on what reads as a
+    # rectangle. Simplifying is self-tuning: a generous radius keeps the points that describe its
+    # curve, a tight one collapses to the corner.
+    return simplify_mask_polygon(pts)
 
 
 def cover_fill_for_region(img, mask_polygon, x, y, width, height):
@@ -399,9 +403,8 @@ def get_split_polygon(mask, bbox, img_w, img_h, margin=20):
             return None
 
         contour = max(contours, key=cv2.contourArea)
-        epsilon = 0.002 * cv2.arcLength(contour, True)
-        simplified = cv2.approxPolyDP(contour, epsilon, True)
-        return [[int(pt[0][0]), int(pt[0][1])] for pt in simplified]
+        # AUDIT-R7: absolute tolerance; see simplify_mask_polygon.
+        return simplify_mask_polygon(contour)
     except Exception as e:
         logger.error(f"[OCR] Error splitting polygon: {e}")
         raise e
@@ -471,9 +474,9 @@ def detect_bubble_contour(img, ocr_x, ocr_y, ocr_w, ocr_h):
 
     if best_rect is not None and best_contour is not None and max_overlap_area > 0:
         bx, by, bw, bh = best_rect
-        epsilon = 0.002 * cv2.arcLength(best_contour, True)
-        simplified = cv2.approxPolyDP(best_contour, epsilon, True)
-        polygon = [[int(x1 + pt[0][0]), int(y1 + pt[0][1])] for pt in simplified]
+        # AUDIT-R7: absolute tolerance; see simplify_mask_polygon. Simplified in crop space, then
+        # translated, so the tolerance means the same thing here as everywhere else.
+        polygon = [[x1 + px, y1 + py] for px, py in simplify_mask_polygon(best_contour)]
         return {
             "x": x1 + bx,
             "y": y1 + by,

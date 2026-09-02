@@ -3,6 +3,7 @@ import logging
 import os
 import re
 
+from worker.services.bubble_geometry import simplify_mask_polygon
 from worker.services.fragment_grouping import (
     DEFAULT_THRESHOLD_RATIO,
     GroupingConfig,
@@ -76,7 +77,9 @@ def _merged_mask_polygon(regions, comp):
     points = [pt for polygon in polygons for pt in polygon]
     hull = _convex_hull(points)
     if len(hull) >= 3:
-        return json.dumps(hull)
+        # AUDIT-R7: the hull of several rounded outlines carries every point that happens to be
+        # extreme, and nothing simplified it. Same absolute tolerance as everywhere else.
+        return json.dumps(simplify_mask_polygon(hull))
 
     largest = max(polygons, key=_polygon_area)
     return json.dumps(largest)
