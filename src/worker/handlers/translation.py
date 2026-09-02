@@ -360,7 +360,10 @@ def process_translation(job_data):
     failed_count = sum(1 for t in translations if t.get("translationFailed"))
     all_failed = failed_count > 0 and failed_count == len(translations)
     if all_failed:
-        logger.error(f"{req_prefix}All {failed_count} translation(s) failed — reporting error to backend")
+        logger.warning(
+            f"{req_prefix}No region produced a translation ({failed_count} of {len(translations)}) — "
+            "reporting to the backend as a warning"
+        )
 
     callback_payload = {
         "jobId": job_data.get("jobId"),
@@ -401,5 +404,17 @@ def process_translation(job_data):
     except Exception as e:
         logger.error(f"{req_prefix}Failed to post callback to backend: {e}")
 
+    # AUDIT-B13: do not raise here.
+    #
+    # Raising made process_job_rq retry the whole job up to maxAttempts, and the page then landed
+    # in the queue as a red FAILED row the user had to dismiss by hand. Neither is right: by the
+    # time this line is reached every region has already had up to three attempts — the batch
+    # call, the batch retry, then an individual call through the fallback models — so a whole-job
+    # retry is three more rounds of LLM calls that cannot produce a different answer. And a page
+    # whose only regions were an SFX, a watermark or an OCR misfire on a texture has not failed at
+    # all; there was simply nothing to translate.
+    #
+    # The callback above already carries allFailed/failedCount/totalCount. The backend completes
+    # the job and raises a WARNING notification off that.
     if all_failed:
-        raise RuntimeError(f"All {failed_count} translation(s) failed — no regions translated successfully")
+        logger.warning(f"{req_prefix}Translation job finished with nothing translated; leaving the page as it is")

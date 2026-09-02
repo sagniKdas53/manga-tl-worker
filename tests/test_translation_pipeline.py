@@ -616,3 +616,58 @@ def test_model_identifier_falls_back_to_the_requested_model_when_no_cost_was_rec
 
     payload = mock_post.call_args.kwargs["json"]
     assert {t["modelIdentifier"] for t in payload["translations"]} == {"openrouter/openai/gpt-5.6-luna"}
+
+
+@patch("worker.services.translation.try_local_ai")
+@patch("worker.services.translation.try_cloud_ai")
+@patch("worker.handlers.translation.translate_text")
+@patch("worker.handlers.translation.requests.get")
+@patch("worker.handlers.translation.requests.post")
+@patch("worker.config.TL_CONFIG")
+def test_a_page_with_nothing_translatable_finishes_instead_of_raising(
+    mock_tl_config,
+    mock_post,
+    mock_get,
+    mock_translate_text,
+    mock_try_cloud_ai,
+    mock_try_local_ai,
+):
+    """AUDIT-B13.
+
+    This used to raise, which made process_job_rq retry the whole job up to maxAttempts and then
+    leave a red FAILED row in the queue. Every region has already had three attempts by this
+    point, so those retries could not produce a different answer — and a page whose only region
+    was an SFX or an OCR misfire has not failed at all. The callback must still be posted, and it
+    must say so.
+    """
+    mock_tl_config.provider = "gemini"
+    mock_tl_config.resolve_key.return_value = "fake-gemini-key"
+    mock_tl_config.llm_model = "gemini-1.5-pro"
+
+    mock_get_res = MagicMock()
+    mock_get_res.status_code = 200
+    mock_get_res.json.return_value = _image_info_one_region()
+    mock_get.return_value = mock_get_res
+
+    # Nothing translates it, at any tier.
+    mock_try_cloud_ai.return_value = None
+    mock_try_local_ai.return_value = None
+    mock_translate_text.return_value = None
+
+    mock_post_res = MagicMock()
+    mock_post_res.status_code = 200
+    mock_post.return_value = mock_post_res
+
+    process_translation(
+        {
+            "imageId": "image-uuid-1",
+            "sourceLanguage": "ja",
+            "targetLanguage": "en",
+        }
+    )
+
+    payload = mock_post.call_args[1]["json"]
+    assert payload["allFailed"] is True
+    assert payload["failedCount"] == 1
+    assert payload["totalCount"] == 1
+    assert payload["translations"][0]["translationFailed"] is True
