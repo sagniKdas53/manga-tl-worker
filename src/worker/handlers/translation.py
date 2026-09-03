@@ -95,7 +95,6 @@ def process_translation(job_data):
     def note_failure(region_id, answer):
         failure_reasons[region_id] = "rejected" if answer else "unavailable"
 
-
     typeset_skipped = []
     for r in ocr_regions:
         if not should_typeset_region(r):
