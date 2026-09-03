@@ -1,6 +1,8 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from worker.handlers.translation import process_translation
 
 
@@ -618,13 +620,35 @@ def test_model_identifier_falls_back_to_the_requested_model_when_no_cost_was_rec
     assert {t["modelIdentifier"] for t in payload["translations"]} == {"openrouter/openai/gpt-5.6-luna"}
 
 
+def _echoed_batch_reply():
+    """A batch answer that is not a translation: the model handed the Japanese straight back.
+
+    `is_valid_translation` rejects this as identical_to_source. It is what an OCR misfire on a
+    texture actually produces -- the model has nothing to translate and echoes the input.
+    """
+    return json.dumps(
+        {
+            "translations": [
+                {
+                    "id": "region-uuid-1",
+                    "translation": "こんにちは",
+                    "translationNotes": "",
+                    "emotion": "neutral",
+                    "tone": "polite",
+                    "translationScore": 0.5,
+                }
+            ]
+        }
+    )
+
+
 @patch("worker.services.translation.try_local_ai")
 @patch("worker.services.translation.try_cloud_ai")
 @patch("worker.handlers.translation.translate_text")
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
 @patch("worker.config.TL_CONFIG")
-def test_a_page_with_nothing_translatable_finishes_instead_of_raising(
+def test_a_page_whose_text_is_rejected_finishes_instead_of_raising(
     mock_tl_config,
     mock_post,
     mock_get,
@@ -632,13 +656,12 @@ def test_a_page_with_nothing_translatable_finishes_instead_of_raising(
     mock_try_cloud_ai,
     mock_try_local_ai,
 ):
-    """AUDIT-B13.
+    """AUDIT-B13, the case it is actually about.
 
-    This used to raise, which made process_job_rq retry the whole job up to maxAttempts and then
-    leave a red FAILED row in the queue. Every region has already had three attempts by this
-    point, so those retries could not produce a different answer — and a page whose only region
-    was an SFX or an OCR misfire has not failed at all. The callback must still be posted, and it
-    must say so.
+    Every tier answers, and every answer is rejected as not-a-translation. Re-running the job
+    asks the same question of the same models, so it must finish and report rather than raise:
+    raising made process_job_rq retry to maxAttempts and leave a red FAILED row to dismiss by
+    hand. The callback must still go out, and must say allFailed.
     """
     mock_tl_config.provider = "gemini"
     mock_tl_config.resolve_key.return_value = "fake-gemini-key"
@@ -649,10 +672,10 @@ def test_a_page_with_nothing_translatable_finishes_instead_of_raising(
     mock_get_res.json.return_value = _image_info_one_region()
     mock_get.return_value = mock_get_res
 
-    # Nothing translates it, at any tier.
-    mock_try_cloud_ai.return_value = None
-    mock_try_local_ai.return_value = None
-    mock_translate_text.return_value = None
+    # Answers arrive at every tier; none of them is a translation.
+    mock_try_cloud_ai.return_value = _echoed_batch_reply()
+    mock_try_local_ai.return_value = _echoed_batch_reply()
+    mock_translate_text.return_value = "こんにちは"
 
     mock_post_res = MagicMock()
     mock_post_res.status_code = 200
@@ -671,3 +694,60 @@ def test_a_page_with_nothing_translatable_finishes_instead_of_raising(
     assert payload["failedCount"] == 1
     assert payload["totalCount"] == 1
     assert payload["translations"][0]["translationFailed"] is True
+
+
+@patch("worker.services.translation.try_local_ai")
+@patch("worker.services.translation.try_cloud_ai")
+@patch("worker.handlers.translation.translate_text")
+@patch("worker.handlers.translation.requests.get")
+@patch("worker.handlers.translation.requests.post")
+@patch("worker.config.TL_CONFIG")
+def test_a_page_that_got_no_answer_at_all_still_raises_for_retry(
+    mock_tl_config,
+    mock_post,
+    mock_get,
+    mock_translate_text,
+    mock_try_cloud_ai,
+    mock_try_local_ai,
+):
+    """The other half of AUDIT-B13, and the reason the first fix was wrong.
+
+    Nothing answers -- which is what a provider timeout, a 429, a 5xx or a malformed response
+    looks like from here, because `process_chunk` swallows the exception and returns None. That
+    is not an untranslatable page; it is a page nobody was asked about successfully, and a later
+    attempt can genuinely succeed. Suppressing this marked the job COMPLETED and left the page
+    permanently untranslated with no retry and no failed row.
+
+    The callback still goes out first, so the backend sees the attempt either way.
+    """
+    mock_tl_config.provider = "gemini"
+    mock_tl_config.resolve_key.return_value = "fake-gemini-key"
+    mock_tl_config.llm_model = "gemini-1.5-pro"
+
+    mock_get_res = MagicMock()
+    mock_get_res.status_code = 200
+    mock_get_res.json.return_value = _image_info_one_region()
+    mock_get.return_value = mock_get_res
+
+    # No answer at any tier.
+    mock_try_cloud_ai.return_value = None
+    mock_try_local_ai.return_value = None
+    mock_translate_text.return_value = None
+
+    mock_post_res = MagicMock()
+    mock_post_res.status_code = 200
+    mock_post.return_value = mock_post_res
+
+    with pytest.raises(RuntimeError, match="no answer at all"):
+        process_translation(
+            {
+                "imageId": "image-uuid-1",
+                "sourceLanguage": "ja",
+                "targetLanguage": "en",
+            }
+        )
+
+    # The backend was still told, before the raise.
+    payload = mock_post.call_args[1]["json"]
+    assert payload["allFailed"] is True
+    assert payload["failedCount"] == 1

@@ -78,6 +78,23 @@ def process_translation(job_data):
     # OCR Quality Filter & Separation
     resolved_translations = {}
     unmatched_regions = []
+    # Why a region ended with no translation, keyed by region id. Two very different things end
+    # up as `translationFailed` and only one of them is worth another job attempt:
+    #
+    #   "rejected"    -- a model answered and the answer was not a translation of the input.
+    #                    Trying again asks the same question of the same models and gets the same
+    #                    answer; this is the untranslatable-content case AUDIT-B13 is about.
+    #   "unavailable" -- nothing came back at all. `process_chunk` swallows every exception and
+    #                    returns None, so a provider timeout, a 429, a 5xx or a malformed response
+    #                    all land here. A later attempt genuinely can succeed.
+    #
+    # The last word for a region wins; a region that succeeds on a later pass has its entry
+    # ignored, because the check at the end only looks at regions that are still unresolved.
+    failure_reasons = {}
+
+    def note_failure(region_id, answer):
+        failure_reasons[region_id] = "rejected" if answer else "unavailable"
+
 
     typeset_skipped = []
     for r in ocr_regions:
@@ -199,6 +216,7 @@ def process_translation(job_data):
             if translated_text and is_valid_translation(r["text"], translated_text, request_id=request_id):
                 resolved_translations[rid] = translated
             else:
+                note_failure(rid, translated_text)
                 failed_batch_regions.append(r)
 
         # 3. Retry failed items
@@ -267,6 +285,7 @@ def process_translation(job_data):
                 if translated_text and is_valid_translation(r["text"], translated_text, request_id=request_id):
                     resolved_translations[rid] = translated
                 else:
+                    note_failure(rid, translated_text)
                     still_failed_regions.append(r)
 
             # 4. Individual fallback for still-failed regions
@@ -302,6 +321,7 @@ def process_translation(job_data):
                         }
                     else:
                         logger.warning(f"{req_prefix}Giving up on '{text}' after 3 attempts.")
+                        note_failure(rid, translated)
                         resolved_translations[rid] = None
 
     # Resolve which model actually served this job. TL_CONFIG is the process-wide default
@@ -404,17 +424,35 @@ def process_translation(job_data):
     except Exception as e:
         logger.error(f"{req_prefix}Failed to post callback to backend: {e}")
 
-    # AUDIT-B13: do not raise here.
+    # AUDIT-B13, corrected. Raise only when another attempt could answer differently.
     #
-    # Raising made process_job_rq retry the whole job up to maxAttempts, and the page then landed
-    # in the queue as a red FAILED row the user had to dismiss by hand. Neither is right: by the
-    # time this line is reached every region has already had up to three attempts — the batch
-    # call, the batch retry, then an individual call through the fallback models — so a whole-job
-    # retry is three more rounds of LLM calls that cannot produce a different answer. And a page
-    # whose only regions were an SFX, a watermark or an OCR misfire on a texture has not failed at
-    # all; there was simply nothing to translate.
+    # The original fix removed this raise outright, on the reasoning that "a page whose only
+    # regions were an SFX, a watermark or an OCR misfire has not failed at all". That case is
+    # real but it never reaches this line: `should_typeset_region` resolves a skipped SFX to an
+    # empty string and `should_translate_region` resolves garbage to its original text, both of
+    # which are non-None, so those regions are not `translationFailed` and `all_failed` stays
+    # False. What actually reaches here is every region having been *sent* and come back with
+    # nothing -- including a provider outage, where suppressing the raise marked the job
+    # COMPLETED and left the page permanently untranslated with no retry and no failed row.
     #
-    # The callback above already carries allFailed/failedCount/totalCount. The backend completes
-    # the job and raises a WARNING notification off that.
+    # So the two are separated rather than conflated. A region rejected on content is not worth
+    # re-asking: by this line it has had three attempts -- batch, batch retry, then an individual
+    # call through the fallback models -- and a whole-job retry is three more rounds of the same
+    # question. A region that got no answer at all is worth re-asking, because the thing that
+    # stopped it was a timeout or a 429 and that clears.
+    #
+    # The callback above has already gone out either way, carrying allFailed/failedCount/
+    # totalCount, so the backend can raise its WARNING notification off a page that is genuinely
+    # untranslatable.
     if all_failed:
+        unavailable = [
+            rid
+            for rid, reason in failure_reasons.items()
+            if reason == "unavailable" and resolved_translations.get(rid) is None
+        ]
+        if unavailable:
+            raise RuntimeError(
+                f"No region produced a translation and {len(unavailable)} of {failed_count} got no "
+                "answer at all (provider timeout, rate limit or malformed response) — retrying"
+            )
         logger.warning(f"{req_prefix}Translation job finished with nothing translated; leaving the page as it is")
