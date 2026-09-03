@@ -12,6 +12,8 @@ cases -- the gap distributions overlap -- and this can.
 """
 
 import os
+from collections.abc import Sequence
+from typing import Any, overload
 
 import cv2
 import numpy as np
@@ -73,6 +75,14 @@ MASK_POLYGON_TOLERANCE_PX = float(os.environ.get("MASK_POLYGON_TOLERANCE_PX", "2
 # A polygon is never simplified below this. Three points is the minimum that still encloses area,
 # and dropping to it would turn a balloon into a triangle if the tolerance were ever set absurdly.
 MIN_MASK_POLYGON_POINTS = 4
+
+
+@overload
+def simplify_mask_polygon(points: None, tolerance_px: float | None = ...) -> None: ...
+
+
+@overload
+def simplify_mask_polygon(points: Sequence[Any] | np.ndarray, tolerance_px: float | None = ...) -> list: ...
 
 
 def simplify_mask_polygon(points, tolerance_px=None):

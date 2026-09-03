@@ -1365,7 +1365,7 @@ def render_image_core(image_id, page_id=None, chapter_id=None, text_box_inset=No
 
                     # Negated: PIL turns counter-clockwise, the editor (SVG/canvas, y down) turns
                     # clockwise for a positive angle.
-                    rotated = tile.rotate(-rotation_deg, resample=Image.BICUBIC, expand=True)
+                    rotated = tile.rotate(-rotation_deg, resample=Image.Resampling.BICUBIC, expand=True)
                     # The tile turns about the element box's centre, not the tile's own, so the
                     # text ends up where the rotated plate is.
                     box_cx, box_cy = ex + ew / 2.0, ey + eh / 2.0
