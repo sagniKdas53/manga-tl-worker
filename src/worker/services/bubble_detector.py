@@ -12,6 +12,7 @@ from worker.config import (
     YOLO_MODEL_PATH,
     YOLO_PINNED_CHECKSUM,
 )
+from worker.services.bubble_geometry import simplify_mask_polygon
 
 logger = logging.getLogger(__name__)
 
@@ -198,12 +199,9 @@ def detect_bubbles_yolo(img):
         # Use the largest contour
         contour = max(contours, key=cv2.contourArea)
 
-        # Simplify Contour
-        epsilon = 0.002 * cv2.arcLength(contour, True)
-        simplified_contour = cv2.approxPolyDP(contour, epsilon, True)
-
-        # Exact mask polygon
-        mask_polygon = [[int(pt[0][0]), int(pt[0][1])] for pt in simplified_contour]  # type: ignore
+        # Simplify Contour (AUDIT-R7: an absolute tolerance, not a fraction of the perimeter --
+        # see simplify_mask_polygon for why 0.002 * arcLength was backwards).
+        mask_polygon = simplify_mask_polygon(contour)
 
         # Derive eroded safe text area
         erosion_px = YOLO_MASK_EROSION
