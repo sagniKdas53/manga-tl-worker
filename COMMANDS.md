@@ -1,59 +1,54 @@
-# ML Worker Commands Guide
+# ML worker commands
 
-This document lists the common commands used for development, testing, formatting, and linting the ML Worker (Python) codebase.
+Common commands for development, testing, and linting the ML worker codebase.
 
-We use **pytest** for testing and **Ruff** (recommended) for linting and code formatting, or alternatively a combination of **Black** (formatting) and **Flake8** (linting).
+## Virtual environment and dependencies
 
-## Setup & Virtual Environment
-
-You should use the unified virtual environment located at the root of the project (`.venv`) for consistency across components.
+Per the repository standard, all worker tasks use `uv` and the root virtual environment (`../.venv`):
 
 ```bash
-# Activate the root virtual environment
-source ../.venv/bin/activate
+# Install or update dependencies from repository root
+uv pip install -r worker/requirements.txt --python ./.venv/bin/python
 ```
 
-## Running the Worker
+## Running the worker
+
+From the `worker/` directory:
 
 ```bash
-# Run the Python worker locally (requires Redis and other services)
-python -m worker.main
+# Run the worker with health server and task listener
+../.venv/bin/python app.py
 ```
 
-## Testing & Coverage
+## Testing
+
+From the `worker/` directory:
 
 ```bash
-# Run all unit tests
-pytest
+# Run test suite
+../.venv/bin/python -m pytest -q
 
-# Run tests and generate code coverage report (including HTML report)
-pytest --cov=. --cov-report=xml --cov-report=html
+# Run tests with coverage
+../.venv/bin/python -m pytest --cov=. --cov-report=xml --cov-report=html
 ```
-*The HTML coverage report will be generated at `htmlcov/index.html`.*
 
-## Linting & Formatting
+HTML coverage reports are generated at `htmlcov/index.html`.
 
-[Ruff](https://github.com/astral-sh/ruff) is an extremely fast Python linter and formatter that replaces Flake8, Black, isort, and more. Run these commands from the `worker/` directory:
+## Linting and type-checking
+
+From the `worker/` directory:
 
 ```bash
-# 1. Run lint checks
-ruff check .
+# Auto-fix lint issues and format
+../.venv/bin/python -m ruff check --fix . && ../.venv/bin/python -m ruff format .
 
-# 2. Run lint checks and auto-fix safe issues
-ruff check . --fix
+# Check lint without modifying
+../.venv/bin/python -m ruff check .
 
-# 3. Format the code
-ruff format .
+# Check formatting without modifying
+../.venv/bin/python -m ruff format --check .
+
+# Type-check with Pyright
+../.venv/bin/python -m pyright .
 ```
 
-### Alternative Tools: Black & Flake8
-
-If you prefer standard tools, you can use **Black** for formatting and **Flake8** for linting.
-
-```bash
-# 1. Format code with Black
-black .
-
-# 2. Check style guidelines with Flake8
-flake8 .
-```

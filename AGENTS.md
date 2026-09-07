@@ -66,7 +66,17 @@ cd worker
 ../.venv/bin/python -m pytest -q
 ```
 
-The `.venv` is at the **parent** repo root (Python 3.13.12), not in here. Baseline: **315 passed**.
+The `.venv` is at the **parent** repo root (Python 3.13.12), not in here. Baseline: **473 passed**.
 
 Tests load `tests/test_providers.json` via `conftest.py`'s `PROVIDERS_CONFIG`, **not**
 `../config/providers.json` — check the fixture carries a key before assuming behaviour is broken.
+
+## Python Environment & Package Standards
+
+- **NEVER** run `pip install` or `python -m pip install` globally, with `sudo`, or with `--user`.
+- Always declare new dependencies in `requirements.txt` or `pyproject.toml`.
+- Install dependencies into the root `.venv` using `uv`:
+  ```bash
+  uv pip install -r requirements.txt --python ../.venv/bin/python
+  ```
+- Use `uvx` for one-off tool runs or invoke tools directly from `../.venv/bin/`.
