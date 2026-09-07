@@ -80,6 +80,7 @@ Per the repository standard, all worker development uses `uv` and the root virtu
 
 ```bash
 # From repository root
+uv venv --python 3.13 .venv
 uv pip install -r worker/requirements.txt --python ./.venv/bin/python
 ```
 
@@ -116,4 +117,3 @@ Lint and format with `ruff` via the root virtualenv:
 ```
 
 See [COMMANDS.md](COMMANDS.md) for individual commands.
-

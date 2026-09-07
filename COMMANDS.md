@@ -7,7 +7,8 @@ Common commands for development, testing, and linting the ML worker codebase.
 Per the repository standard, all worker tasks use `uv` and the root virtual environment (`../.venv`):
 
 ```bash
-# Install or update dependencies from repository root
+# Bootstrap once, then install or update dependencies from repository root
+uv venv --python 3.13 .venv
 uv pip install -r worker/requirements.txt --python ./.venv/bin/python
 ```
 
@@ -51,4 +52,3 @@ From the `worker/` directory:
 # Type-check with Pyright
 ../.venv/bin/python -m pyright .
 ```
-

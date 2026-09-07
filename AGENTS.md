@@ -75,8 +75,10 @@ Tests load `tests/test_providers.json` via `conftest.py`'s `PROVIDERS_CONFIG`, *
 
 - **NEVER** run `pip install` or `python -m pip install` globally, with `sudo`, or with `--user`.
 - Always declare new dependencies in `requirements.txt` or `pyproject.toml`.
-- Install dependencies into the root `.venv` using `uv`:
+- Bootstrap the root `.venv` once, then install dependencies using `uv`:
   ```bash
-  uv pip install -r requirements.txt --python ../.venv/bin/python
+  cd ..
+  uv venv --python 3.13 .venv
+  uv pip install -r worker/requirements.txt --python ./.venv/bin/python
   ```
 - Use `uvx` for one-off tool runs or invoke tools directly from `../.venv/bin/`.
