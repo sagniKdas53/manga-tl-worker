@@ -33,9 +33,7 @@ def get_local_ocr_backend() -> str:
         return "rapidocr" if machine in {"aarch64", "arm64"} else "paddle"
     if requested in {"paddle", "rapidocr"}:
         return requested
-    raise ValueError(
-        f"Unsupported LOCAL_OCR_BACKEND={requested!r}; expected 'auto', 'paddle', or 'rapidocr'."
-    )
+    raise ValueError(f"Unsupported LOCAL_OCR_BACKEND={requested!r}; expected 'auto', 'paddle', or 'rapidocr'.")
 
 
 def _rapidocr_route(source_language: str | None) -> tuple[str, str, str, str]:
