@@ -678,9 +678,7 @@ def process_ocr(job_data):
                 else None
             )
             rapid_ocr_engine = (
-                model_manager.get_rapid_ocr_reader(source_language, use_rec=use_local_ocr)
-                if use_rapid_ocr
-                else None
+                model_manager.get_rapid_ocr_reader(source_language, use_rec=use_local_ocr) if use_rapid_ocr else None
             )
 
             if use_paddle_ocr and paddle_ocr_reader is None:
