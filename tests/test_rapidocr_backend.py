@@ -96,6 +96,7 @@ def test_rapidocr_reader_uses_arm_safe_japanese_model(monkeypatch, tmp_path):
     assert params["Rec.ocr_version"] is FakeOcrVersion.PPOCRV6
     assert params["Det.model_type"] is FakeModelType.MEDIUM
     assert params["Rec.model_type"] is FakeModelType.MEDIUM
+    assert params["Det.lang_type"] == "multi"
     assert params["Rec.lang_type"] == "japan"
 
 
