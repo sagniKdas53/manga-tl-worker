@@ -16,3 +16,11 @@ pytest-*
 .agents/
 .claude/
 .playwright-mcp/*
+
+# Keep the standalone TDD skill available in isolated worker checkouts.
+!.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/tdd/
+!.agents/skills/tdd/SKILL.md
