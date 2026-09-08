@@ -52,6 +52,38 @@ def test_backend_override_rejected_when_package_missing(monkeypatch):
         get_local_ocr_backend()
 
 
+def test_perform_redo_ocr_routes_local_fallback_through_rapidocr(monkeypatch):
+    """On the RapidOCR backend, the local redo fallback must not touch PaddleOCR."""
+    from worker.services import ocr as ocr_service
+
+    monkeypatch.setattr(ocr_service, "get_local_ocr_backend", lambda: "rapidocr")
+
+    class _Cfg:
+        provider = "paddleocr"
+        vlm_model = ""
+
+        def resolve_key(self):
+            return ""
+
+    monkeypatch.setattr("worker.config.OCR_CONFIG", _Cfg())
+
+    calls = {"rapid": 0, "paddle": 0}
+
+    def _rapid(lang, *args, **kwargs):
+        calls["rapid"] += 1
+        return None  # not initialised -> perform_redo_ocr returns ("", 0.0) without decoding
+
+    def _paddle(*args, **kwargs):
+        calls["paddle"] += 1
+        raise AssertionError("PaddleOCR must not be used on the RapidOCR backend")
+
+    monkeypatch.setattr(ocr_service.model_manager, "get_rapid_ocr_reader", _rapid)
+    monkeypatch.setattr(ocr_service.model_manager, "get_paddle_ocr_reader", _paddle)
+
+    assert ocr_service.perform_redo_ocr(b"not-an-image", "ja") == ("", 0.0)
+    assert calls == {"rapid": 1, "paddle": 0}
+
+
 def test_invalid_backend_is_rejected(monkeypatch):
     monkeypatch.setenv("LOCAL_OCR_BACKEND", "tesseract")
 

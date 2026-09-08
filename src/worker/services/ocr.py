@@ -7,7 +7,7 @@ import numpy as np
 import requests
 
 from worker.config import redact
-from worker.model_manager import model_manager
+from worker.model_manager import get_local_ocr_backend, model_manager
 from worker.utils.image import downscale_for_ocr
 
 logger = logging.getLogger(__name__)
@@ -375,35 +375,44 @@ def perform_redo_ocr(img_crop_bytes, lang, qa_feedback=None):
             except Exception as e:
                 logger.error(f"[OCR Redo] Cloud AI OCR with model '{current_model}' failed: {redact(e)}")
 
-    # Try local PaddleOCR first — the lazy-init reader resolves a det/rec pair for the region's
+    # Try the local engine first — the lazy-init reader resolves a det/rec pair for the region's
     # language, so a Korean region redone here gets PP-OCRv5 rather than the PP-OCRv6 pair that has
     # no Hangul charset. No model id is threaded through: redo has no per-job model choice, and the
-    # catalog default already picks something that can read the script.
-    _redo_paddle_reader = None
+    # catalog default already picks something that can read the script. Which engine runs follows
+    # the same backend selection as process_ocr — RapidOCR on Linux ARM64, PaddleOCR elsewhere.
+    local_backend = get_local_ocr_backend()
+    _redo_reader = None
     if not api_key or provider == "paddleocr":
-        _redo_paddle_reader = model_manager.get_paddle_ocr_reader(lang)
+        if local_backend == "rapidocr":
+            _redo_reader = model_manager.get_rapid_ocr_reader(lang)
+        else:
+            _redo_reader = model_manager.get_paddle_ocr_reader(lang)
 
-    if _redo_paddle_reader is not None:
+    if _redo_reader is not None:
         try:
-            logger.debug("[OCR Redo] Trying local PaddleOCR...")
+            logger.debug(f"[OCR Redo] Trying local {local_backend} OCR...")
             nparr = np.frombuffer(img_crop_bytes, np.uint8)
             img_crop = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             del nparr
             if img_crop is not None:
                 img_crop, _ = downscale_for_ocr(img_crop, max_dim=1024)
-                crop_results = _redo_paddle_reader.predict(img_crop)
+                if local_backend == "rapidocr":
+                    crop_results = _redo_reader(img_crop)
+                    parsed_crop_results = parse_rapid_ocr_results(crop_results)
+                else:
+                    crop_results = _redo_reader.predict(img_crop)
+                    parsed_crop_results = parse_paddle_ocr_results(crop_results)
                 del img_crop
                 gc.collect()
-                parsed_crop_results = parse_paddle_ocr_results(crop_results)
                 if parsed_crop_results:
                     text = " ".join(line[1] for line in parsed_crop_results if line[1].strip())
                     if not is_valid_ocr_text(text):
-                        logger.warning(f"[OCR Redo] PaddleOCR result rejected by validation: '{text}'")
+                        logger.warning(f"[OCR Redo] Local OCR result rejected by validation: '{text}'")
                         text = ""
                     confidence = float(np.mean([line[2] for line in parsed_crop_results]))
-                    logger.debug(f"[OCR Redo] PaddleOCR Success: '{text}' (conf={confidence})")
+                    logger.debug(f"[OCR Redo] Local {local_backend} Success: '{text}' (conf={confidence})")
                     return text.strip(), confidence
         except Exception as e:
-            logger.error(f"[OCR Redo] PaddleOCR failed: {e}")
+            logger.error(f"[OCR Redo] Local {local_backend} OCR failed: {e}")
 
     return "", 0.0
