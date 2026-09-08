@@ -95,10 +95,11 @@ uv pip install -r worker/requirements.txt --python ./.venv/bin/python
 Start the HTTP health server and task listener:
 
 ```bash
-# From worker/ directory using root venv.
-# Dev only: the worker exits on startup unless WORKER_API_SECRET is set or the
-# unauthenticated opt-out is enabled (AUDIT-S3).
-ALLOW_UNAUTHENTICATED_WORKER_API=true ../.venv/bin/python app.py
+# From worker/ directory using root venv. PYTHONPATH=src puts the `worker`
+# package on the path (installing requirements.txt does not install this project).
+# Dev only: the worker also exits on startup unless WORKER_API_SECRET is set or
+# the unauthenticated opt-out is enabled (AUDIT-S3).
+PYTHONPATH=src ALLOW_UNAUTHENTICATED_WORKER_API=true ../.venv/bin/python app.py
 ```
 
 The health check endpoint is available at `http://localhost:8000/health`.
