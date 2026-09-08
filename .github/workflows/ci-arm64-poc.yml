@@ -1,0 +1,62 @@
+name: CI - ARM64 RapidOCR POC
+
+on:
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "requirements.txt"
+      - "src/**"
+      - ".github/workflows/ci-arm64-poc.yml"
+  workflow_dispatch:
+
+jobs:
+  build-arm64:
+    name: Build and smoke-test linux/arm64
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ARM64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/arm64
+          tags: manga-tl-worker:arm64-poc
+          load: true
+          push: false
+          provenance: false
+          cache-from: type=gha,scope=worker-arm64-poc
+          cache-to: type=gha,mode=max,scope=worker-arm64-poc
+
+      - name: Smoke-test ARM OCR runtime
+        run: |
+          docker run --rm --platform linux/arm64 --entrypoint python manga-tl-worker:arm64-poc -c "
+          import platform
+          import onnxruntime
+          import rapidocr
+
+          assert platform.machine() in ('aarch64', 'arm64'), platform.machine()
+          print('architecture:', platform.machine())
+          print('onnxruntime:', onnxruntime.__version__)
+          print('rapidocr:', getattr(rapidocr, '__version__', 'installed'))
+          "
+
+      - name: Confirm PaddlePaddle is not selected on ARM64
+        run: |
+          if docker run --rm --platform linux/arm64 --entrypoint python manga-tl-worker:arm64-poc -c "import paddle"; then
+            echo "PaddlePaddle was unexpectedly installed in the ARM64 image"
+            exit 1
+          fi
