@@ -38,7 +38,7 @@ def get_local_ocr_backend() -> str:
     )
 
 
-def _rapidocr_route(source_language: str | None) -> tuple[str, str, str, str, str]:
+def _rapidocr_route(source_language: str | None) -> tuple[str, str, str, str]:
     """Return RapidOCR version/model/language settings for one source language.
 
     PP-OCRv6 provides the Japanese/Chinese/English path used by this application. PP-OCRv6
@@ -46,7 +46,7 @@ def _rapidocr_route(source_language: str | None) -> tuple[str, str, str, str, st
     """
     language = (source_language or "ja").strip().lower()
     if language == "ko":
-        return ("PP-OCRv5", "mobile", "ch", "korean", "korean")
+        return ("PP-OCRv5", "mobile", "ch", "korean")
 
     rec_language = {
         "ja": "japan",
@@ -58,7 +58,7 @@ def _rapidocr_route(source_language: str | None) -> tuple[str, str, str, str, st
     }.get(language, "en")
     det_language = language if language in {"ja", "jp", "zh", "zh-cn", "zh-tw", "en"} else "en"
     model_type = os.environ.get("RAPIDOCR_MODEL_TYPE", "medium").strip().lower() or "medium"
-    return ("PP-OCRv6", model_type, det_language, rec_language, rec_language)
+    return ("PP-OCRv6", model_type, det_language, rec_language)
 
 
 LANG_TO_PADDLE: dict = {
@@ -234,7 +234,7 @@ class ModelManager:
         if not ModelManager.rapidocr_available:
             return None
 
-        version, model_type_name, det_language, rec_language, _ = _rapidocr_route(source_language)
+        version, model_type_name, det_language, rec_language = _rapidocr_route(source_language)
         cache_key = f"{version}:{model_type_name}:{rec_language}:{'ocr' if use_rec else 'det'}"
 
         with self.lock:
@@ -294,7 +294,7 @@ class ModelManager:
 
     def get_rapid_ocr_model_identifier(self, source_language: str, use_rec: bool = True) -> str:
         """Return a stable provenance label for the RapidOCR model selected for a page."""
-        version, model_type, _det_language, rec_language, _ = _rapidocr_route(source_language)
+        version, model_type, _det_language, rec_language = _rapidocr_route(source_language)
         role = rec_language if use_rec else "detector"
         return f"RapidOCR({version}/{model_type}, {role})"
 
