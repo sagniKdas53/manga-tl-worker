@@ -4,8 +4,11 @@
 # adopting them is behaviourally a no-op.
 redis==8.1.0
 minio==7.2.20
-paddleocr==3.7.0
-paddlepaddle==3.3.1
+# PaddlePaddle has no Linux ARM64 wheel. RapidOCR converts the same PP-OCR model
+# family to ONNX and uses the already-pinned cross-platform ONNX Runtime package.
+rapidocr==3.9.2; sys_platform == "linux" and (platform_machine == "aarch64" or platform_machine == "arm64")
+paddleocr==3.7.0; sys_platform != "linux" or (platform_machine != "aarch64" and platform_machine != "arm64")
+paddlepaddle==3.3.1; sys_platform != "linux" or (platform_machine != "aarch64" and platform_machine != "arm64")
 numpy==2.3.5
 requests==2.34.2
 opencv-python-headless==5.0.0.93
