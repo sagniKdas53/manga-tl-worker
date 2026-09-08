@@ -720,6 +720,7 @@ def process_ocr(job_data):
                             raw_results = paddle_ocr_reader.predict(img_decoded)
                             results = parse_paddle_ocr_results(raw_results)
                         else:
+                            assert rapid_ocr_engine is not None
                             raw_results = rapid_ocr_engine(img_decoded)
                             results = parse_rapid_ocr_results(raw_results)
                         logger.info(f"[OCR] {engine_name} returned.")
