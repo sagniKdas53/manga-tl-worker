@@ -10,7 +10,7 @@ The worker runs a loop to consume tasks from Valkey/Redis and coordinates with M
 
 Its primary responsibilities include:
 
-1. **Layout Analysis & OCR**: Runs local OCR (PaddleOCR for text detection/recognition and a YOLO bubble segmentation model for speech bubble coordinates and polygons).
+1. **Layout Analysis & OCR**: Runs local OCR (PaddleOCR on amd64 or RapidOCR/ONNX Runtime on ARM64) plus a YOLO bubble segmentation model for speech bubble coordinates and polygons.
 2. **Spatial OCR Region Merging**: Groups individual text lines into logical speech bubbles before panel mapping. Configurable via `OCR_MERGE_THRESHOLD` vertical/horizontal proximity algorithm multiplier.
 3. **AI Translation Pass**: Translates text using:
    - **VLM Vision-Language pass**: Contextual visual-dialogue mapping (NVIDIA NIM APIs like `nvidia/nemotron-nano-12b-v2-vl` or `microsoft/phi-4-multimodal-instruct`).
