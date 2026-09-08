@@ -239,7 +239,7 @@ class ModelManager:
             if cache_key not in self.rapid_readers or self.rapid_readers[cache_key] is None:
                 try:
                     from rapidocr import RapidOCR as _RapidOCR  # type: ignore
-                    from rapidocr.utils.typings import ModelType, OCRVersion
+                    from rapidocr.utils.typings import ModelType, OCRVersion  # type: ignore[reportMissingImports]
 
                     model_type = ModelType(model_type_name)
                     ocr_version = OCRVersion(version)
