@@ -36,16 +36,18 @@ def get_local_ocr_backend() -> str:
         # macOS Apple Silicon and Windows ARM64 also report "arm64" but get PaddleOCR.
         is_linux_arm = sys.platform.startswith("linux") and machine in {"aarch64", "arm64"}
         return "rapidocr" if is_linux_arm else "paddle"
-    if requested == "paddle":
-        return "paddle"
-    if requested == "rapidocr":
-        if importlib.util.find_spec("rapidocr") is None:
+    if requested in {"paddle", "rapidocr"}:
+        # requirements.txt installs paddleocr/paddlepaddle everywhere except Linux
+        # aarch64/arm64, and rapidocr only there. Reject an override whose package is
+        # absent now, with a clear message, rather than at the first OCR job.
+        package = "paddleocr" if requested == "paddle" else "rapidocr"
+        if importlib.util.find_spec(package) is None:
             raise ValueError(
-                "LOCAL_OCR_BACKEND=rapidocr but the 'rapidocr' package is not installed. "
-                "requirements.txt ships it only on Linux aarch64/arm64; run 'pip install rapidocr' "
-                "to use the override on another platform."
+                f"LOCAL_OCR_BACKEND={requested} but the '{package}' package is not installed. "
+                "requirements.txt installs PaddleOCR everywhere except Linux aarch64/arm64, and "
+                "RapidOCR only there; install the missing package to use the override elsewhere."
             )
-        return "rapidocr"
+        return requested
     raise ValueError(f"Unsupported LOCAL_OCR_BACKEND={requested!r}; expected 'auto', 'paddle', or 'rapidocr'.")
 
 

@@ -52,6 +52,19 @@ def test_backend_override_rejected_when_package_missing(monkeypatch):
         get_local_ocr_backend()
 
 
+def test_paddle_override_rejected_when_package_missing(monkeypatch):
+    """Symmetric to the RapidOCR guard: LOCAL_OCR_BACKEND=paddle on an image without
+    paddleocr (the stock Linux ARM64 build) must fail loudly, not at the first job."""
+    monkeypatch.setenv("LOCAL_OCR_BACKEND", "paddle")
+    monkeypatch.setattr(
+        "worker.model_manager.importlib.util.find_spec",
+        lambda name: None if name == "paddleocr" else object(),
+    )
+
+    with pytest.raises(ValueError, match="paddleocr"):
+        get_local_ocr_backend()
+
+
 def test_perform_redo_ocr_routes_local_fallback_through_rapidocr(monkeypatch):
     """On the RapidOCR backend, the local redo fallback must not touch PaddleOCR."""
     from worker.services import ocr as ocr_service
