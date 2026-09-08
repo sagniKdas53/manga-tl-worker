@@ -1,9 +1,11 @@
 """Model caching and manager logic for OCR libraries."""
 
 import gc
+import importlib.util
 import logging
 import os
 import platform
+import sys
 import threading
 import time
 
@@ -30,9 +32,20 @@ def get_local_ocr_backend() -> str:
     requested = os.environ.get("LOCAL_OCR_BACKEND", "auto").strip().lower()
     if requested == "auto":
         machine = platform.machine().strip().lower()
-        return "rapidocr" if machine in {"aarch64", "arm64"} else "paddle"
-    if requested in {"paddle", "rapidocr"}:
-        return requested
+        # Match the requirements.txt markers: rapidocr ships only for Linux aarch64/arm64.
+        # macOS Apple Silicon and Windows ARM64 also report "arm64" but get PaddleOCR.
+        is_linux_arm = sys.platform.startswith("linux") and machine in {"aarch64", "arm64"}
+        return "rapidocr" if is_linux_arm else "paddle"
+    if requested == "paddle":
+        return "paddle"
+    if requested == "rapidocr":
+        if importlib.util.find_spec("rapidocr") is None:
+            raise ValueError(
+                "LOCAL_OCR_BACKEND=rapidocr but the 'rapidocr' package is not installed. "
+                "requirements.txt ships it only on Linux aarch64/arm64; run 'pip install rapidocr' "
+                "to use the override on another platform."
+            )
+        return "rapidocr"
     raise ValueError(f"Unsupported LOCAL_OCR_BACKEND={requested!r}; expected 'auto', 'paddle', or 'rapidocr'.")
 
 

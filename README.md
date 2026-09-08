@@ -106,7 +106,10 @@ pip install -r requirements.txt
 
 # Optional backend override:
 # LOCAL_OCR_BACKEND=auto   # PaddleOCR on amd64, RapidOCR on ARM64 (default)
-# LOCAL_OCR_BACKEND=rapidocr
+# LOCAL_OCR_BACKEND=rapidocr   # needs the rapidocr package; requirements.txt installs it
+#                              # only on Linux aarch64/arm64, so run `pip install rapidocr`
+#                              # first to force it elsewhere (the worker rejects the override
+#                              # with a clear error if the package is missing)
 ```
 
 ### 3. Run the worker

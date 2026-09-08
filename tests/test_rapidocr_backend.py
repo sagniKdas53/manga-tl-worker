@@ -17,25 +17,39 @@ def _reset_rapidocr_availability():
 
 
 @pytest.mark.parametrize(
-    ("machine", "expected"),
+    ("platform_name", "machine", "expected"),
     [
-        ("aarch64", "rapidocr"),
-        ("arm64", "rapidocr"),
-        ("x86_64", "paddle"),
+        ("linux", "aarch64", "rapidocr"),
+        ("linux", "arm64", "rapidocr"),
+        ("linux", "x86_64", "paddle"),
+        # Apple Silicon / Windows ARM64 report "arm64" too, but get PaddleOCR — the
+        # rapidocr wheel is Linux-aarch64 only (see requirements.txt markers).
+        ("darwin", "arm64", "paddle"),
+        ("win32", "arm64", "paddle"),
     ],
 )
-def test_auto_backend_selection(monkeypatch, machine, expected):
+def test_auto_backend_selection(monkeypatch, platform_name, machine, expected):
+    monkeypatch.setattr("worker.model_manager.sys.platform", platform_name)
     monkeypatch.setattr("worker.model_manager.platform.machine", lambda: machine)
     monkeypatch.delenv("LOCAL_OCR_BACKEND", raising=False)
 
     assert get_local_ocr_backend() == expected
 
 
-def test_backend_override(monkeypatch):
+def test_backend_override_accepted_when_package_present(monkeypatch):
     monkeypatch.setenv("LOCAL_OCR_BACKEND", "rapidocr")
     monkeypatch.setattr("worker.model_manager.platform.machine", lambda: "x86_64")
+    monkeypatch.setattr("worker.model_manager.importlib.util.find_spec", lambda name: object())
 
     assert get_local_ocr_backend() == "rapidocr"
+
+
+def test_backend_override_rejected_when_package_missing(monkeypatch):
+    monkeypatch.setenv("LOCAL_OCR_BACKEND", "rapidocr")
+    monkeypatch.setattr("worker.model_manager.importlib.util.find_spec", lambda name: None)
+
+    with pytest.raises(ValueError, match="rapidocr"):
+        get_local_ocr_backend()
 
 
 def test_invalid_backend_is_rejected(monkeypatch):

@@ -851,7 +851,7 @@ def process_ocr(job_data):
 
                 if not assigned_frags:
                     # If Cloud VLM is active, we STILL want to crop and VLM-OCR empty bubbles to be safe!
-                    if not use_paddle_ocr:
+                    if not use_local_ocr:
                         candidate_regions.append(
                             {
                                 "type": "bubble",
@@ -992,7 +992,7 @@ def process_ocr(job_data):
                     )
 
             # 6. Now, recognize candidates
-            if not use_paddle_ocr:
+            if not use_local_ocr:
                 # CLOUD OCR MODE (VLM Batching)
                 if candidate_regions:
                     logger.info(f"[OCR] VLM OCR Mode active (batched) for {len(candidate_regions)} regions.")
