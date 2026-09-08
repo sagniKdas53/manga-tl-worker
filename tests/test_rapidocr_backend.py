@@ -61,9 +61,7 @@ def test_parse_rapidocr_detection_only_output():
         "scores": np.array([0.81]),
     }
 
-    assert parse_rapid_ocr_results(result) == [
-        ([[1, 2], [3, 2], [3, 4], [1, 4]], "", 0.81)
-    ]
+    assert parse_rapid_ocr_results(result) == [([[1, 2], [3, 2], [3, 4], [1, 4]], "", 0.81)]
 
 
 def test_rapidocr_reader_uses_arm_safe_japanese_model(monkeypatch, tmp_path):
