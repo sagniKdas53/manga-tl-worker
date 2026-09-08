@@ -113,11 +113,11 @@ def test_rapidocr_reader_routes_korean_to_ppocrv5(monkeypatch, tmp_path):
             self.params = params
 
     rapidocr_module = types.ModuleType("rapidocr")
-    rapidocr_module.RapidOCR = FakeRapidOCR
+    rapidocr_module.__dict__["RapidOCR"] = FakeRapidOCR
     rapidocr_utils = types.ModuleType("rapidocr.utils")
     rapidocr_typings = types.ModuleType("rapidocr.utils.typings")
-    rapidocr_typings.ModelType = FakeModelType
-    rapidocr_typings.OCRVersion = FakeOcrVersion
+    rapidocr_typings.__dict__["ModelType"] = FakeModelType
+    rapidocr_typings.__dict__["OCRVersion"] = FakeOcrVersion
 
     monkeypatch.setitem(sys.modules, "rapidocr", rapidocr_module)
     monkeypatch.setitem(sys.modules, "rapidocr.utils", rapidocr_utils)
