@@ -52,9 +52,7 @@ def test_parse_rapidocr_full_output():
         scores=(0.93,),
     )
 
-    assert parse_rapid_ocr_results(result) == [
-        ([[10, 20], [50, 20], [50, 40], [10, 40]], "日本語", 0.93)
-    ]
+    assert parse_rapid_ocr_results(result) == [([[10, 20], [50, 20], [50, 40], [10, 40]], "日本語", 0.93)]
 
 
 def test_parse_rapidocr_detection_only_output():
