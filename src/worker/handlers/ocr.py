@@ -691,9 +691,7 @@ def process_ocr(job_data):
                     f"Required local PaddleOCR detector failed to initialize for language: {source_language}."
                 )
             if use_rapid_ocr and rapid_ocr_engine is None:
-                raise RuntimeError(
-                    f"Required RapidOCR model failed to initialize for language: {source_language}."
-                )
+                raise RuntimeError(f"Required RapidOCR model failed to initialize for language: {source_language}.")
 
             if paddle_ocr_reader is not None or rapid_ocr_engine is not None:
                 try:
