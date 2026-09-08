@@ -17,8 +17,10 @@ uv pip install -r worker/requirements.txt --python ./.venv/bin/python
 From the `worker/` directory:
 
 ```bash
-# Run the worker with health server and task listener
-../.venv/bin/python app.py
+# Run the worker with health server and task listener.
+# Dev only: without WORKER_API_SECRET the worker exits on startup (AUDIT-S3);
+# set the opt-out for a local run.
+ALLOW_UNAUTHENTICATED_WORKER_API=true ../.venv/bin/python app.py
 ```
 
 ## Testing
