@@ -33,13 +33,13 @@ from worker.config import (
     backend_headers,
     redis_client,
 )
-from worker.model_manager import model_manager, resolve_local_ocr_model
+from worker.model_manager import get_local_ocr_backend, model_manager, resolve_local_ocr_model
 from worker.services.bubble_detector import detect_bubbles_yolo
 from worker.services.bubble_geometry import bubble_grouping_context, simplify_mask_polygon
 from worker.services.fragment_grouping import GroupingConfig
 from worker.services.layout import bubble_compare
 from worker.services.merge_regions import merge_ocr_regions
-from worker.services.ocr import parse_paddle_ocr_results
+from worker.services.ocr import parse_paddle_ocr_results, parse_rapid_ocr_results
 from worker.services.translation import (
     LANG_MAP,
     try_cloud_ai_vision_batch,
@@ -630,17 +630,31 @@ def process_ocr(job_data):
         )
 
         provider = (job_data.get("ocrProvider") or OCR_CONFIG.provider or "local").lower().strip()
-        use_paddle_ocr = (provider == "local") and not disable_local_ocr
+        use_local_ocr = (provider == "local") and not disable_local_ocr
+        local_ocr_backend = get_local_ocr_backend()
+        use_paddle_ocr = local_ocr_backend == "paddle" and use_local_ocr
+        use_rapid_ocr = local_ocr_backend == "rapidocr"
 
-        # Which local det+rec pair to run. Only meaningful for provider=local; the catalog ignores a
-        # choice that cannot read this page's script and routes to one that can.
+        # PaddleOCR's catalog is only relevant when the selected backend is Paddle. RapidOCR
+        # selects its ONNX model family per language inside ModelManager.
         local_ocr_model = (job_data.get("ocrModel") or "").strip() if use_paddle_ocr else ""
-        resolved_local_model = resolve_local_ocr_model(source_language, local_ocr_model)
+        resolved_local_model = (
+            resolve_local_ocr_model(source_language, local_ocr_model) if local_ocr_backend == "paddle" else None
+        )
         if resolved_local_model is not None and resolved_local_model.auto_routed:
             logger.info(
                 f"[OCR] Local OCR auto-routed from '{resolved_local_model.requested_model_id}' to "
                 f"'{resolved_local_model.model_id}' — it has no recognition model for "
                 f"'{source_language}'."
+            )
+
+        local_model_identifier = "unknown"
+        if local_ocr_backend == "paddle":
+            rec_model = resolved_local_model.rec if resolved_local_model else "unknown"
+            local_model_identifier = f"PaddleOCR({rec_model})"
+        elif use_rapid_ocr:
+            local_model_identifier = model_manager.get_rapid_ocr_model_identifier(
+                source_language, use_rec=use_local_ocr
             )
 
         # WARNING: Even when using Cloud VLM OCR (where transcription is offloaded), local models
@@ -653,32 +667,36 @@ def process_ocr(job_data):
         # worker. AUDIT-W4 changed the default the other way for locks like local-llm, which do
         # guard a shared endpoint.
         with acquire_lock("ocr", node_scoped=True):
-            # Reader is lazily created per resolved det/rec pair, which depends on the language.
+            # Load only the selected backend. In cloud-VLM mode the selected local engine runs
+            # in detection-only mode to produce candidate crops; in local mode it also recognizes text.
             paddle_ocr_reader = (
                 model_manager.get_paddle_ocr_reader(source_language, local_ocr_model) if use_paddle_ocr else None
             )
-            paddle_ocr_detector = model_manager.get_paddle_ocr_detector(source_language) if not use_paddle_ocr else None
+            paddle_ocr_detector = (
+                model_manager.get_paddle_ocr_detector(source_language)
+                if local_ocr_backend == "paddle" and not use_local_ocr
+                else None
+            )
+            rapid_ocr_engine = (
+                model_manager.get_rapid_ocr_reader(source_language, use_rec=use_local_ocr) if use_rapid_ocr else None
+            )
 
             if use_paddle_ocr and paddle_ocr_reader is None:
                 raise RuntimeError(
                     f"Required local PaddleOCR model failed to initialize for language: {source_language}. "
                     "Cannot proceed in offline mode without the required model."
                 )
-            if not use_paddle_ocr and paddle_ocr_detector is None:
+            if local_ocr_backend == "paddle" and not use_local_ocr and paddle_ocr_detector is None:
                 raise RuntimeError(
                     f"Required local PaddleOCR detector failed to initialize for language: {source_language}."
                 )
+            if use_rapid_ocr and rapid_ocr_engine is None:
+                raise RuntimeError(f"Required RapidOCR model failed to initialize for language: {source_language}.")
 
-            if paddle_ocr_reader is not None:
+            if paddle_ocr_reader is not None or rapid_ocr_engine is not None:
                 try:
-                    # Report the pair that was actually resolved, not the environment defaults — the
-                    # two differ exactly when auto-routing saved the job (e.g. Korean off PP-OCRv6).
-                    logger.info(
-                        f"[OCR] Running PaddleOCR ({resolved_local_model.det}/{resolved_local_model.rec}, "
-                        f"lang={source_language}, model={resolved_local_model.model_id})."
-                        if resolved_local_model
-                        else f"[OCR] Running PaddleOCR (lang={source_language})."
-                    )
+                    engine_name = "PaddleOCR" if paddle_ocr_reader is not None else "RapidOCR/ONNX Runtime"
+                    logger.info(f"[OCR] Running {engine_name} (lang={source_language}).")
 
                     try:
                         import psutil
@@ -690,24 +708,28 @@ def process_ocr(job_data):
 
                     nparr = np.frombuffer(img_bytes, np.uint8)
                     img_original = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
                     img_decoded, ocr_upscale = downscale_for_ocr(img_original, max_dim=1024)
 
                     if ocr_upscale != 1.0:
                         logger.info(f"[OCR] Downscaled image for OCR (upscale factor: {ocr_upscale:.2f}x)")
 
-                    del nparr  # free compressed buffer immediately
+                    del nparr
                     if img_decoded is not None:
-                        logger.info("[OCR] Calling PaddleOCR...")
-                        raw_results = paddle_ocr_reader.predict(img_decoded)
-                        logger.info("[OCR] PaddleOCR returned.")
-                        results = parse_paddle_ocr_results(raw_results)
+                        logger.info(f"[OCR] Calling {engine_name}...")
+                        if paddle_ocr_reader is not None:
+                            raw_results = paddle_ocr_reader.predict(img_decoded)
+                            results = parse_paddle_ocr_results(raw_results)
+                        else:
+                            assert rapid_ocr_engine is not None
+                            raw_results = rapid_ocr_engine(img_decoded)
+                            results = parse_rapid_ocr_results(raw_results)
+                        logger.info(f"[OCR] {engine_name} returned.")
                         del raw_results
                         gc.collect()
                     else:
-                        logger.error("[OCR] OpenCV failed to decode image for PaddleOCR")
+                        logger.error(f"[OCR] OpenCV failed to decode image for {engine_name}")
                 except Exception as ocr_err:
-                    logger.error(f"[OCR] PaddleOCR failed with exception: {ocr_err}.")
+                    logger.error(f"[OCR] {engine_name} failed with exception: {ocr_err}.")
                     raise ocr_err
 
             if paddle_ocr_detector is not None:
@@ -829,7 +851,7 @@ def process_ocr(job_data):
 
                 if not assigned_frags:
                     # If Cloud VLM is active, we STILL want to crop and VLM-OCR empty bubbles to be safe!
-                    if not use_paddle_ocr:
+                    if not use_local_ocr:
                         candidate_regions.append(
                             {
                                 "type": "bubble",
@@ -970,7 +992,7 @@ def process_ocr(job_data):
                     )
 
             # 6. Now, recognize candidates
-            if not use_paddle_ocr:
+            if not use_local_ocr:
                 # CLOUD OCR MODE (VLM Batching)
                 if candidate_regions:
                     logger.info(f"[OCR] VLM OCR Mode active (batched) for {len(candidate_regions)} regions.")
@@ -1442,9 +1464,8 @@ def process_ocr(job_data):
         # Record the recognition model that actually read the page. Reading the env var here logged
         # PP-OCRv6 onto regions that PP-OCRv5 had transcribed, making a wrong-model bug invisible in
         # the stored provenance.
-        rec_model = resolved_local_model.rec if resolved_local_model else "unknown"
-        model_identifier = f"PaddleOCR({rec_model})"
-        # Name every distinct model that read part of this page, not just the last one to finish.
+        model_identifier = local_model_identifier
+        # Name every distinct model that read part of the page, not just the last one to finish.
         # A page read by a single model - the normal case - produces the same string as before.
         for vlm_model in dict.fromkeys(vlm_models_used):
             model_identifier += f" + {vlm_model}"

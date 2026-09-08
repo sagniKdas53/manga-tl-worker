@@ -25,13 +25,18 @@ def seed_models():
     disable_local_ocr = os.environ.get("DISABLE_LOCAL_OCR", "").strip().lower() in ("true", "1", "yes")
     if not disable_local_ocr:
         try:
-            from worker.model_manager import model_manager
+            from worker.model_manager import get_local_ocr_backend, model_manager
 
-            logger.info("[Worker] Seeding PaddleOCR default Japanese models...")
-            model_manager.get_paddle_ocr_reader("ja")
-            logger.info("[Worker] PaddleOCR default Japanese models seeded successfully.")
+            backend = get_local_ocr_backend()
+            logger.info(f"[Worker] Seeding {backend} default Japanese models...")
+            if backend == "rapidocr":
+                if model_manager.get_rapid_ocr_reader("ja") is None:
+                    raise RuntimeError("RapidOCR reader failed to initialize")
+            else:
+                model_manager.get_paddle_ocr_reader("ja")
+            logger.info(f"[Worker] {backend} default Japanese models seeded successfully.")
         except Exception as e:
-            logger.error(f"[Worker] Critical Error: PaddleOCR seeding failed: {e}")
+            logger.error(f"[Worker] Critical Error: local OCR seeding failed: {e}")
             raise e
 
 

@@ -80,7 +80,7 @@ COPY --chown=worker:worker app.py .
 
 # The two cache roots have to exist and be owned before the bind mounts land on them, or
 # Docker creates the intermediate directories as root and the worker cannot write.
-RUN mkdir -p /home/worker/.cache/huggingface /home/worker/.paddlex /app/rendered_cache \
+RUN mkdir -p /home/worker/.cache/huggingface /home/worker/.cache/rapidocr /home/worker/.paddlex /app/rendered_cache \
     && chown -R worker:worker /home/worker /app
 
 ENV HOME=/home/worker

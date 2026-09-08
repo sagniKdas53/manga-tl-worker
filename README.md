@@ -10,7 +10,7 @@ The worker runs a loop to consume tasks from Valkey/Redis and coordinates with M
 
 Primary responsibilities:
 
-1. **Layout analysis and OCR**: Runs local OCR using PaddleOCR for text detection/recognition and a YOLO bubble segmentation model for speech bubble coordinates and polygons.
+1. **Layout analysis and OCR**: Runs local OCR (PaddleOCR on amd64, RapidOCR/ONNX Runtime on Linux ARM64) for text detection/recognition and a YOLO bubble segmentation model for speech bubble coordinates and polygons.
 2. **Spatial OCR region merging**: Groups individual text lines into logical speech bubbles before panel mapping. Configurable via `OCR_MERGE_THRESHOLD`.
 3. **AI translation pass**: Translates text using:
    - **VLM vision-language pass**: Contextual visual dialogue mapping via OpenRouter or NVIDIA NIM APIs.
@@ -58,7 +58,17 @@ The parent stack `docker-compose.yml` references this image, so `docker compose 
 
 Version tags are generated from Conventional Commits on `main`.
 
-> **linux/amd64 only.** `requirements.txt` pins `paddlepaddle==3.3.1`, which publishes no `linux_aarch64` wheel to PyPI. Sourcing PaddleOCR on aarch64 requires building from Baidu custom wheels.
+> **Linux ARM64 POC.** The worker now selects PaddleOCR/PaddlePaddle on amd64 and RapidOCR
+> with ONNX Runtime on Linux ARM64. `LOCAL_OCR_BACKEND=auto` is the default: it preserves
+> PaddleOCR on x86 deployments and selects RapidOCR on aarch64. Set
+> `RAPIDOCR_MODEL_ROOT=/home/worker/.cache/rapidocr` only when overriding the default cache.
+>
+> The ARM path uses PP-OCRv6 medium models for Japanese, Chinese, and English, and PP-OCRv5
+> mobile recognition for Korean. The dedicated
+> [ARM64 POC workflow](.github/workflows/ci-arm64-poc.yml) builds and smoke-tests the image
+> under aarch64 emulation. The production publish workflow also emits amd64 and arm64
+> manifests; benchmark the ARM path on representative manga pages before making it the only
+> deployment target.
 
 ---
 
@@ -89,6 +99,11 @@ Per the repository standard, all worker development uses `uv` and the root virtu
 uv venv --python 3.13 .venv
 uv pip install -r worker/requirements.txt --python ./.venv/bin/python
 ```
+
+`LOCAL_OCR_BACKEND` picks the local OCR engine — default `auto` (PaddleOCR on amd64,
+RapidOCR on Linux ARM64). Forcing the non-default engine requires its package installed
+(`uv pip install rapidocr`, or `paddleocr paddlepaddle`); the worker rejects an override
+whose package is missing with a clear error.
 
 ### 3. Run the worker
 

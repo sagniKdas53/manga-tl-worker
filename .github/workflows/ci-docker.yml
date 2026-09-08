@@ -100,12 +100,9 @@ jobs:
           # Carries org.opencontainers.image.source, which is what links the GHCR package back
           # to this repository.
           labels: ${{ steps.meta-ghcr.outputs.labels }}
-          # amd64 only, unlike the backend image, and this is not an oversight. requirements.txt
-          # pins paddlepaddle==3.3.1, which publishes no linux_aarch64 wheel to PyPI — only
-          # manylinux1_x86_64, macosx_11_0_arm64 and win_amd64 — so an arm64 build dies at
-          # `pip install`. Revisit only via Baidu's own aarch64 wheel index, not by adding a
-          # platform here.
-          platforms: linux/amd64
+          # requirements.txt selects PaddleOCR/PaddlePaddle on amd64 and RapidOCR/ONNX
+          # Runtime on Linux ARM64. Keep both manifests under the same image tag.
+          platforms: linux/amd64,linux/arm64
           # Every push otherwise minted an `unknown/unknown` attestation manifest that no tag
           # references and nothing reclaims. Drop this line to get SLSA provenance back.
           provenance: false
