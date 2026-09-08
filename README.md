@@ -65,11 +65,17 @@ Version tags are cut automatically from [Conventional Commits](https://www.conve
 a `feat:` on `main` bumps the minor, a `fix:` bumps the patch, and `BREAKING CHANGE:` bumps the
 major. A merge with no conventional prefix does not cut a release.
 
-> **linux/amd64 only.** `requirements.txt` pins `paddlepaddle==3.3.1`, which publishes no
-> `linux_aarch64` wheel to PyPI — only `manylinux1_x86_64`, `macosx_11_0_arm64` and
-> `win_amd64` — so an arm64 build fails at `pip install`. The backend image is amd64 + arm64,
-> but the stack as a whole needs an amd64 host because of this. Changing that means sourcing
-> paddle from Baidu's own aarch64 wheel index, not adding a platform to the build.
+> **Linux ARM64 POC.** The worker now selects PaddleOCR/PaddlePaddle on amd64 and RapidOCR
+> with ONNX Runtime on Linux ARM64. `LOCAL_OCR_BACKEND=auto` is the default: it preserves
+> PaddleOCR on x86 deployments and selects RapidOCR on aarch64. Set
+> `RAPIDOCR_MODEL_ROOT=/home/worker/.cache/rapidocr` only when overriding the default cache.
+>
+> The ARM path uses PP-OCRv6 medium models for Japanese, Chinese, and English, and PP-OCRv5
+> mobile recognition for Korean. The dedicated
+> [ARM64 POC workflow](.github/workflows/ci-arm64-poc.yml) builds and smoke-tests the image
+> under aarch64 emulation. The production publish workflow also emits amd64 and arm64
+> manifests; benchmark the ARM path on representative manga pages before making it the only
+> deployment target.
 
 ---
 
@@ -97,6 +103,10 @@ source .venv/bin/activate
 # Install requirements
 cd worker
 pip install -r requirements.txt
+
+# Optional backend override:
+# LOCAL_OCR_BACKEND=auto   # PaddleOCR on amd64, RapidOCR on ARM64 (default)
+# LOCAL_OCR_BACKEND=rapidocr
 ```
 
 ### 3. Run the worker
