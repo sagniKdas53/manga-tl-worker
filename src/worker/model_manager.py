@@ -54,9 +54,11 @@ def _rapidocr_route(source_language: str | None) -> tuple[str, str, str, str]:
         "zh-tw": "chinese_cht",
         "en": "en",
     }.get(language, "en")
-    det_language = language if language in {"ja", "jp", "zh", "zh-cn", "zh-tw", "en"} else "en"
     model_type = os.environ.get("RAPIDOCR_MODEL_TYPE", "medium").strip().lower() or "medium"
-    return ("PP-OCRv6", model_type, det_language, rec_language)
+    # PP-OCRv6 publishes one multilingual detector (multi_PP-OCRv6_det_*), while the
+    # recognition model selects the requested script. PP-OCRv5's Korean route uses its
+    # ch_PP-OCRv5 detector instead.
+    return ("PP-OCRv6", model_type, "multi", rec_language)
 
 
 LANG_TO_PADDLE: dict = {
