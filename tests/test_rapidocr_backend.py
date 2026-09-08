@@ -132,4 +132,5 @@ def test_rapidocr_reader_routes_korean_to_ppocrv5(monkeypatch, tmp_path):
     assert params["Rec.ocr_version"] is FakeOcrVersion.PPOCRV5
     assert params["Det.model_type"] is FakeModelType.MOBILE
     assert params["Rec.model_type"] is FakeModelType.MOBILE
+    assert params["Det.lang_type"] == "ch"
     assert params["Rec.lang_type"] == "korean"
