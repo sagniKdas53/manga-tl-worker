@@ -80,6 +80,47 @@ def parse_paddle_ocr_results(raw_results):
     return results
 
 
+def parse_rapid_ocr_results(raw_result):
+    """Normalize RapidOCR output to the worker's (polygon, text, confidence) tuples.
+
+    RapidOCR returns a TextDetOutput when recognition is disabled and a RapidOCROutput for
+    full OCR. Both expose boxes and scores, while only the latter exposes text strings.
+    """
+    if raw_result is None:
+        return []
+
+    def field(name, default=None):
+        if isinstance(raw_result, dict):
+            return raw_result.get(name, default)
+        return getattr(raw_result, name, default)
+
+    boxes = field("boxes")
+    if boxes is None:
+        return []
+
+    texts = field("txts")
+    scores = field("scores")
+    results = []
+
+    for index, bbox in enumerate(boxes):
+        if hasattr(bbox, "tolist"):
+            bbox = bbox.tolist()
+
+        try:
+            text = texts[index] if texts is not None else ""
+        except (IndexError, TypeError):
+            text = ""
+
+        try:
+            score = scores[index] if scores is not None else 1.0
+        except (IndexError, TypeError):
+            score = 1.0
+
+        results.append((bbox, text or "", float(score)))
+
+    return results
+
+
 def _record_cloud_ocr_cost(res_json, provider, model):
     """Record a cloud OCR call against the current job.
 
