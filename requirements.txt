@@ -10,7 +10,7 @@ rapidocr==3.9.2; sys_platform == "linux" and (platform_machine == "aarch64" or p
 shapely==2.1.2
 paddleocr==3.7.0; sys_platform != "linux" or (platform_machine != "aarch64" and platform_machine != "arm64")
 paddlepaddle==3.3.1; sys_platform != "linux" or (platform_machine != "aarch64" and platform_machine != "arm64")
-numpy==2.3.5
+numpy==2.5.3
 requests==2.34.2
 # RapidOCR declares the non-headless opencv-python distribution; use one OpenCV
 # flavor per architecture so pip does not install two packages that share the cv2 namespace.
