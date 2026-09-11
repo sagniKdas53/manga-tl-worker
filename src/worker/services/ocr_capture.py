@@ -144,6 +144,66 @@ def capture_ocr_grouping(
     )
 
 
+def capture_observed_ocr_grouping(
+    *,
+    source_id: str,
+    raw_quads: list[Any],
+    scale_transform: dict[str, Any],
+    detector_masks: list[Any],
+    recognition: list[dict[str, Any]],
+    regions: list[dict[str, Any]],
+    grouping: GroupingConfig,
+    observed_groups: list[list[int]],
+    paths: dict[str, str] | None = None,
+) -> OcrCapture:
+    """Record groups observed at runtime without rerunning or changing the grouping decision."""
+    if len(raw_quads) != len(regions) or len(recognition) != len(regions):
+        raise ValueError("raw_quads, recognition, and regions must have equal lengths")
+    flat_indices = [index for group in observed_groups for index in group]
+    if sorted(flat_indices) != list(range(len(regions))):
+        raise ValueError("observed_groups must partition every region exactly once")
+    fragment_ids = [
+        _fragment_id(source_id, index, quad, region)
+        for index, (quad, region) in enumerate(zip(raw_quads, regions, strict=True))
+    ]
+    owners = []
+    for group in observed_groups:
+        member_regions = [regions[index] for index in group]
+        owner_fragments = [fragment_ids[index] for index in group]
+        owners.append(
+            {
+                "id": _owner_id(owner_fragments),
+                "fragment_ids": owner_fragments,
+                "bbox": {
+                    "x": min(region["x"] for region in member_regions),
+                    "y": min(region["y"] for region in member_regions),
+                    "width": max(region["x"] + region["width"] for region in member_regions)
+                    - min(region["x"] for region in member_regions),
+                    "height": max(region["y"] + region["height"] for region in member_regions)
+                    - min(region["y"] for region in member_regions),
+                },
+            }
+        )
+    return OcrCapture(
+        format="ocr-grouping-capture-v1",
+        source={"id": source_id, "digest": _digest([source_id, raw_quads, regions])},
+        raw_quads=_json_value(raw_quads),
+        scale_transform=_json_value(scale_transform),
+        detector_masks=_json_value(detector_masks),
+        recognition=_json_value(recognition),
+        regions=_json_value(regions),
+        grouping=asdict(grouping),
+        grouping_edges=[
+            {"from": fragment_ids[left], "to": fragment_ids[right], "reason": "observed-group-component"}
+            for group in observed_groups
+            for offset, left in enumerate(group)
+            for right in group[offset + 1 :]
+        ],
+        final_owners=owners,
+        paths=paths or {"ocr": "live", "grouping": "live", "detector_masks": "live"},
+    )
+
+
 def replay_twice(capture: OcrCapture) -> tuple[ReplayResult, ReplayResult, bool]:
     """Replay a capture twice and report equality of stable IDs, geometry, edges, and owners."""
     first, second = capture.replay(), capture.replay()

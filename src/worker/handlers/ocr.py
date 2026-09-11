@@ -7,6 +7,7 @@ import logging
 import math
 import os
 from functools import cmp_to_key
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -36,10 +37,11 @@ from worker.config import (
 from worker.model_manager import get_local_ocr_backend, model_manager, resolve_local_ocr_model
 from worker.services.bubble_detector import detect_bubbles_yolo
 from worker.services.bubble_geometry import bubble_grouping_context, simplify_mask_polygon
-from worker.services.fragment_grouping import GroupingConfig
+from worker.services.fragment_grouping import GroupingConfig, group_fragments
 from worker.services.layout import bubble_compare
 from worker.services.merge_regions import merge_ocr_regions
 from worker.services.ocr import parse_paddle_ocr_results, parse_rapid_ocr_results
+from worker.services.ocr_capture import capture_observed_ocr_grouping
 from worker.services.translation import (
     LANG_MAP,
     try_cloud_ai_vision_batch,
@@ -617,6 +619,11 @@ def process_ocr(job_data):
 
     try:
         results = []
+        capture_dir = os.environ.get("OCR_CAPTURE_DIR", "").strip()
+        capture_raw_quads = []
+        capture_recognition = []
+        capture_groups = []
+        capture_detector_masks = []
         ocr_upscale = 1.0
         img_decoded = None
         img_original = None
@@ -798,6 +805,10 @@ def process_ocr(job_data):
                         "height": height,
                     }
                 )
+                if capture_dir:
+                    capture_raw_quads.append([[x, y] for x, y in zip(xs, ys, strict=True)])
+                    capture_recognition.append({"text": text, "confidence": float(confidence)})
+                    raw_fragments[-1]["_capture_index"] = len(capture_raw_quads) - 1
 
             # 2. Pre-generate binary masks for bubbles to compute exact pixel overlap
             bubble_masks = []
@@ -806,6 +817,8 @@ def process_ocr(job_data):
                 mask = np.zeros((img_h, img_w), dtype=np.uint8)
                 cv2.fillPoly(mask, [poly], 255)  # type: ignore
                 bubble_masks.append(mask)
+                if capture_dir:
+                    capture_detector_masks.append({"format": "polygon", "points": bubble["mask_polygon"]})
 
             # 3. Assign each raw fragment to exactly one bubble by mask overlap
             for frag in raw_fragments:
@@ -874,11 +887,20 @@ def process_ocr(job_data):
                 # and joining them fuses two speakers into one translation unit and one flat fill,
                 # which nothing downstream can undo. The mask is in scope here, so the grouping
                 # gets the balloon's geometry as well as the text distance.
+                grouping = grouping_config(reading_direction)
+                context = bubble_grouping_context(bubble_mask, bubble["mask_polygon"])
                 merged_bubble_regions = merge_ocr_regions(
                     assigned_frags,
-                    grouping=grouping_config(reading_direction),
-                    context=bubble_grouping_context(bubble_mask, bubble["mask_polygon"]),
+                    grouping=grouping,
+                    context=context,
                 )
+                if capture_dir:
+                    capture_groups.extend(
+                        [
+                            [assigned_frags[index]["_capture_index"] for index in group]
+                            for group in group_fragments(assigned_frags, grouping, context)
+                        ]
+                    )
 
                 for r_sub in merged_bubble_regions:
                     if len(merged_bubble_regions) == 1:
@@ -939,7 +961,15 @@ def process_ocr(job_data):
                 # No bubble, so no mask and no clearance veto -- this path stays on distance alone,
                 # and gets the orientation vote, which is the only lever that reaches a page where
                 # YOLO found nothing at all.
-                merged_unmatched = merge_ocr_regions(unmatched_frags, grouping=grouping_config(reading_direction))
+                grouping = grouping_config(reading_direction)
+                merged_unmatched = merge_ocr_regions(unmatched_frags, grouping=grouping)
+                if capture_dir:
+                    capture_groups.extend(
+                        [
+                            [unmatched_frags[index]["_capture_index"] for index in group]
+                            for group in group_fragments(unmatched_frags, grouping)
+                        ]
+                    )
 
                 for idx, r_sub in enumerate(merged_unmatched):
                     rx, ry, rw, rh = (
@@ -1413,8 +1443,14 @@ def process_ocr(job_data):
                         "safeTextH": bh,
                     }
                 )
+                if capture_dir:
+                    capture_raw_quads.append([[pt[0] * ocr_upscale, pt[1] * ocr_upscale] for pt in bbox])
+                    capture_recognition.append({"text": text, "confidence": float(confidence)})
 
-            regions = merge_ocr_regions(regions, grouping=grouping_config(reading_direction))
+            grouping = grouping_config(reading_direction)
+            if capture_dir:
+                capture_groups = group_fragments(regions, grouping)
+            regions = merge_ocr_regions(regions, grouping=grouping)
 
         panel_regions_map = {}
         unmapped_regions = []
@@ -1471,6 +1507,45 @@ def process_ocr(job_data):
             model_identifier += f" + {vlm_model}"
 
         page_id = job_data.get("pageId")
+        if capture_dir:
+            try:
+                capture_regions = (
+                    [
+                        {key: value for key, value in region.items() if key != "_capture_index"}
+                        for region in raw_fragments
+                    ]
+                    if is_yolo_active
+                    else [
+                        {
+                            "text": text,
+                            "detectedLanguage": detect_language(text),
+                            "confidence": float(confidence),
+                            "x": int(min(pt[0] * ocr_upscale for pt in bbox)),
+                            "y": int(min(pt[1] * ocr_upscale for pt in bbox)),
+                            "width": int(
+                                max(pt[0] * ocr_upscale for pt in bbox) - min(pt[0] * ocr_upscale for pt in bbox)
+                            ),
+                            "height": int(
+                                max(pt[1] * ocr_upscale for pt in bbox) - min(pt[1] * ocr_upscale for pt in bbox)
+                            ),
+                        }
+                        for bbox, text, confidence in results
+                    ]
+                )
+                capture = capture_observed_ocr_grouping(
+                    source_id=f"{image_id}:{page_id or 'unknown-page'}",
+                    raw_quads=capture_raw_quads,
+                    scale_transform={"ocr_to_source": {"scale_x": ocr_upscale, "scale_y": ocr_upscale}},
+                    detector_masks=capture_detector_masks,
+                    recognition=capture_recognition,
+                    regions=capture_regions,
+                    grouping=grouping_config(reading_direction),
+                    observed_groups=capture_groups,
+                )
+                capture.write(Path(capture_dir) / f"{page_id or image_id}.json")
+            except Exception:
+                logger.exception("[OCR] Evidence capture failed; continuing with the unchanged OCR callback")
+
         callback_payload = {
             "jobId": job_data.get("jobId"),
             "imageId": image_id,

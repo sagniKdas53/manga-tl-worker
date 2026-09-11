@@ -208,6 +208,19 @@ def should_typeset_region(region):
         confidence = 1.0
     bubble_id = region.get("bubbleId") or region.get("bubble_id") or ""
     enclosed = bool(bubble_id) and not str(bubble_id).startswith("direct_text")
+    if not enclosed:
+        # A direct region has no verified speech container, so only source-script dialogue can
+        # justify painting a new plate over artwork. OCR digits, Latin fragments, and mixed-script
+        # guesses such as sample47's `大GG` are visual marks, not English dialogue to typeset.
+        source_script = re.fullmatch(
+            r"[\s\u3040-\u30FF\u3400-\u9FFF\uF900-\uFAFF\uAC00-\uD7AF\uFF66-\uFF9F々〆ヶー！？?!…。、・「」『』（）]+",
+            str(region.get("text", "")),
+        )
+        if not source_script:
+            logger.debug(
+                f"[Typeset Filter] Leaving unenclosed non-source-script region as drawn: '{region.get('text', '')}'"
+            )
+            return False
     if not enclosed and confidence < JUNK_REGION_MIN_CONFIDENCE:
         logger.debug(
             f"[Typeset Filter] Leaving unenclosed low-confidence region as drawn "

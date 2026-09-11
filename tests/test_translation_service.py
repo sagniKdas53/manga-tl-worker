@@ -86,6 +86,15 @@ def test_unenclosed_low_confidence_text_is_not_typeset():
     )
 
 
+def test_unenclosed_non_source_script_marks_are_not_typeset():
+    """sample47's OCR digits and mixed-script SFX must not create cleanup plates over art."""
+    from worker.services.translation import should_typeset_region
+
+    assert not should_typeset_region({"text": "0", "bubbleId": "direct_text_1", "confidence": 0.95})
+    assert not should_typeset_region({"text": "大GG", "bubbleId": "direct_text_2", "confidence": 0.65})
+    assert should_typeset_region({"text": "もう家に帰して！", "bubbleId": "direct_text_3", "confidence": 0.95})
+
+
 def test_both_halves_are_required_before_dropping_a_region():
     """The half that protects real dialogue.
 
