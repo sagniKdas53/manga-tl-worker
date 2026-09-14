@@ -1,10 +1,11 @@
+import hashlib
 import json
 import os
 from pathlib import Path
 
 import pytest
 
-from worker.page_scene import PageSceneValidationError, validate_page_scene
+from worker.page_scene import CONTRACT_SCHEMA_SHA256, PageSceneValidationError, validate_page_scene
 from worker.schemas import PageSceneRenderRequest
 
 FIXTURES = Path(os.environ.get("PAGE_SCENE_FIXTURES", Path(__file__).parents[2] / "contracts" / "fixtures" / "page-scene-v1"))
@@ -12,6 +13,11 @@ FIXTURES = Path(os.environ.get("PAGE_SCENE_FIXTURES", Path(__file__).parents[2] 
 
 def load(name):
     return json.loads((FIXTURES / name).read_text())
+
+
+def test_worker_contract_model_is_pinned_to_authoritative_schema():
+    schema = Path(__file__).parents[2] / "contracts" / "page-scene-v1.schema.json"
+    assert hashlib.sha256(schema.read_bytes()).hexdigest() == CONTRACT_SCHEMA_SHA256
 
 
 def patch(document, operation):

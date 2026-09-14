@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import Any
 
 CONTRACT_VERSION = "page-scene/v1"
+# SHA-256 of `contracts/page-scene-v1.schema.json`; no parent-path runtime import.
+CONTRACT_SCHEMA_SHA256 = "f8662a9be0501ef9d9d044eabb332fd60be3bf61e84a18b8b47d12e64ae804ad"
 
 
 class PageSceneValidationError(ValueError):
