@@ -16,7 +16,7 @@ def load(name):
 
 
 def test_worker_contract_model_is_pinned_to_authoritative_schema():
-    schema = Path(__file__).parents[2] / "contracts" / "page-scene-v1.schema.json"
+    schema = Path(os.environ.get("PAGE_SCENE_SCHEMA", Path(__file__).parents[2] / "contracts" / "page-scene-v1.schema.json"))
     assert hashlib.sha256(schema.read_bytes()).hexdigest() == CONTRACT_SCHEMA_SHA256
 
 
