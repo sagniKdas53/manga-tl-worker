@@ -100,6 +100,8 @@ def test_process_qa_llm_success(mock_qa_config, mock_post, mock_get, mock_try_cl
                 "translatedText": "Hello",
                 "translationScore": 0.95,
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
     }

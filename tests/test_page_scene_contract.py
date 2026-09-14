@@ -8,7 +8,9 @@ import pytest
 from worker.page_scene import CONTRACT_SCHEMA_SHA256, PageSceneValidationError, validate_page_scene
 from worker.schemas import PageSceneRenderRequest
 
-FIXTURES = Path(os.environ.get("PAGE_SCENE_FIXTURES", Path(__file__).parents[2] / "contracts" / "fixtures" / "page-scene-v1"))
+FIXTURES = Path(
+    os.environ.get("PAGE_SCENE_FIXTURES", Path(__file__).parents[2] / "contracts" / "fixtures" / "page-scene-v1")
+)
 
 
 def load(name):
@@ -16,7 +18,9 @@ def load(name):
 
 
 def test_worker_contract_model_is_pinned_to_authoritative_schema():
-    schema = Path(os.environ.get("PAGE_SCENE_SCHEMA", Path(__file__).parents[2] / "contracts" / "page-scene-v1.schema.json"))
+    schema = Path(
+        os.environ.get("PAGE_SCENE_SCHEMA", Path(__file__).parents[2] / "contracts" / "page-scene-v1.schema.json")
+    )
     assert hashlib.sha256(schema.read_bytes()).hexdigest() == CONTRACT_SCHEMA_SHA256
 
 
@@ -36,7 +40,12 @@ def patch(document, operation):
 
 def test_shared_valid_scenes_validate():
     for name in ("logical-valid.json", "resolved-valid.json", "overlap-preserve-valid.json"):
-        assert PageSceneRenderRequest(contract_version="page-scene/v1", page_scene=load(name)).page_scene["contract_version"] == "page-scene/v1"
+        assert (
+            PageSceneRenderRequest(contract_version="page-scene/v1", page_scene=load(name)).page_scene[
+                "contract_version"
+            ]
+            == "page-scene/v1"
+        )
         assert validate_page_scene(load(name)).document["contract_version"] == "page-scene/v1"
 
 

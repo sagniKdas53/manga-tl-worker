@@ -12,13 +12,13 @@ from worker.config import (
     redis_client,
 )
 from worker.services.layout import chunk_regions_by_conversation
+from worker.services.region_policy import select_region_action
 from worker.services.translation import (
     TRANSLATION_JSON_SCHEMA,
     build_context_string,
     is_valid_translation,
     parse_and_validate_batch,
     should_translate_region,
-    should_typeset_region,
     translate_batch_llm,
     translate_text,
 )
@@ -75,50 +75,41 @@ def process_translation(job_data):
         logger.error(f"{req_prefix}Error fetching image details: {e}")
         raise
 
-    # OCR Quality Filter & Separation
+    # Policy selection is deliberately before every provider/quality decision. A classified
+    # region still remains in the OCR record, but non-replacement policy cannot be smuggled into
+    # either a target chunk or the page-wide raw prompt manifest.
     resolved_translations = {}
     unmatched_regions = []
-    # Why a region ended with no translation, keyed by region id. Two very different things end
-    # up as `translationFailed` and only one of them is worth another job attempt:
-    #
-    #   "rejected"    -- a model answered and the answer was not a translation of the input.
-    #                    Trying again asks the same question of the same models and gets the same
-    #                    answer; this is the untranslatable-content case AUDIT-B13 is about.
-    #   "unavailable" -- nothing came back at all. `process_chunk` swallows every exception and
-    #                    returns None, so a provider timeout, a 429, a 5xx or a malformed response
-    #                    all land here. A later attempt genuinely can succeed.
-    #
-    # The last word for a region wins; a region that succeeds on a later pass has its entry
-    # ignored, because the check at the end only looks at regions that are still unresolved.
+    policy_skipped = {}
+    # Why a selected region ended with no translation, keyed by region id. Policy skips are not
+    # failures: source-preserving actions deliberately make no provider request.
     failure_reasons = {}
 
     def note_failure(region_id, answer):
         failure_reasons[region_id] = "rejected" if answer else "unavailable"
 
-    typeset_skipped = []
     for r in ocr_regions:
-        if not should_typeset_region(r):
-            typeset_skipped.append(r)
-            # R3: leave the artwork alone. An empty translation draws nothing at all -- the render
-            # loop skips the element before it paints the backdrop -- so the sound effect stays as
-            # the artist drew it instead of being covered by a slab holding an invented sentence.
-            resolved_translations[r["id"]] = {"translatedText": ""}
+        policy = select_region_action(r.get("regionType") or r.get("region_type"), r.get("user_override"))
+        r["policyAction"] = policy.action
+        r["policyReason"] = policy.reason
+        if policy.action != "replace":
+            policy_skipped[r["id"]] = policy
         elif not should_translate_region(r):
-            # Bypass translation for garbage, keep original text
+            # Keep legacy quality filtering distinct from policy. It is not sent to a provider,
+            # and it cannot be mistaken for an intentional source-preserving policy decision.
             resolved_translations[r["id"]] = {"translatedText": r["text"]}
         else:
             unmatched_regions.append(r)
 
-    # A region dropped here never reaches the model and never gets English drawn for it, so the
-    # count is worth stating out loud: the iuno pair went 8 regions in, 6 sent, and the two that
-    # vanished were dialogue in detected balloons. A silent narrowing of the batch is exactly the
-    # shape of that bug, and it is invisible unless someone diffs the two numbers.
-    if typeset_skipped:
-        logger.warning(
-            f"{req_prefix}Typeset filter dropped {len(typeset_skipped)}/{len(ocr_regions)} "
-            f"regions before translation: "
-            + ", ".join(f"{(r.get('regionType') or 'speech')}:{(r.get('text') or '')[:12]!r}" for r in typeset_skipped)
+    if policy_skipped:
+        logger.info(
+            f"{req_prefix}Policy skipped {len(policy_skipped)}/{len(ocr_regions)} regions before translation: "
+            + ", ".join(
+                f"{policy.kind}:{policy.action}:{region_id[:8]}" for region_id, policy in policy_skipped.items()
+            )
         )
+
+    translation_chunk_count = 0
 
     # Translate unmatched regions
     if unmatched_regions:
@@ -138,26 +129,27 @@ def process_translation(job_data):
 
         context_str = build_context_string(image_info)
 
-        # Compile all page regions/bubbles into a single page manifest to pass as translation context
-        page_manifest_entries = []
-        for r in ocr_regions:
-            page_manifest_entries.append(
-                {
-                    "id": r["id"],
-                    "regionType": r.get("regionType") or r.get("region_type") or "speech",
-                    "readingOrder": r.get("bubbleReadingOrder") or 0,
-                    "conversationGroup": r.get("conversationId") or None,
-                    "text": r["text"],
-                }
-            )
+        # Prompt context may repeat only selected targets. OCR records remain in the backend and
+        # policy callback metadata, never as raw skipped entries in a provider request.
+        page_manifest_entries = [
+            {
+                "id": r["id"],
+                "regionType": r.get("regionType") or r.get("region_type") or "speech",
+                "readingOrder": r.get("bubbleReadingOrder") or 0,
+                "conversationGroup": r.get("conversationId") or None,
+                "text": r["text"],
+            }
+            for r in unmatched_regions
+        ]
         page_manifest_str = json.dumps(page_manifest_entries, ensure_ascii=False, indent=2)
         manifest_context = (
-            f"Full Page Region Manifest (for conversational flow and context):\n{page_manifest_str}\n---\n"
+            f"Selected Translation Target Manifest (for conversational flow and context):\n{page_manifest_str}\n---\n"
         )
         context_str = manifest_context + context_str
 
         # Chunk regions respecting conversation grouping
         unmatched_chunks = chunk_regions_by_conversation(unmatched_regions, conversations, max_batch_size)
+        translation_chunk_count = len(unmatched_chunks)
 
         def process_chunk(idx, chunk):
             logger.info(
@@ -337,9 +329,10 @@ def process_translation(job_data):
     resolved_model = last_call.get("model") or job_data.get("tlModel") or TL_CONFIG.llm_model
     model_identifier = f"{resolved_provider}/{resolved_model}"
 
-    # Format the final callback response
+    # Only selected targets reach the legacy translation callback. Emitting an empty skipped
+    # region here would make the legacy backend create a blank layer element for preserved pixels.
     translations = []
-    for r in ocr_regions:
+    for r in unmatched_regions:
         rid = r["id"]
         text = r["text"]
         lang = r["detectedLanguage"]
@@ -392,6 +385,13 @@ def process_translation(job_data):
         "allFailed": all_failed,
         "failedCount": failed_count,
         "totalCount": len(translations),
+        "policy": {
+            "selectedTargetIds": [r["id"] for r in unmatched_regions],
+            "skipped": [
+                {"regionId": region_id, **policy.callback_fields()} for region_id, policy in policy_skipped.items()
+            ],
+            "translationChunkCount": translation_chunk_count,
+        },
     }
 
     from worker.utils.rate_limit import build_cost_payload, format_cost

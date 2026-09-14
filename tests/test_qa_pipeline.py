@@ -34,6 +34,8 @@ def test_process_qa_llm_gemini(mock_qa_config, mock_post, mock_get, mock_try_clo
                 "translatedText": "Hello",
                 "translationScore": 0.95,
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
     }
@@ -92,6 +94,8 @@ def test_process_qa_llm_nvidia(mock_qa_config, mock_post, mock_get, mock_try_clo
                 "translatedText": "Hello",
                 "translationScore": 0.95,
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
     }
@@ -287,6 +291,8 @@ def test_process_qa_hybrid_flow(
                 "bboxH": 50,
                 "translatedText": "Hello",
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
     }

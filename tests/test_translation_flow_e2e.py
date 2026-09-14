@@ -125,6 +125,8 @@ def test_core_translation_flow_e2e(
                 "width": 100,
                 "height": 100,
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
         "conversations": [],
@@ -169,6 +171,8 @@ def test_core_translation_flow_e2e(
                 "bboxH": 50,
                 "translatedText": "Hello",
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
     }
