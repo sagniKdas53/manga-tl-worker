@@ -1453,7 +1453,11 @@ def process_render(job_data):
         else:
             qa_mode_resolved = "none"
 
-    if not render_image_core(
+    if "logicalScene" in job_data:
+        from worker.page_scene_renderer import render_page_scene
+
+        render_page_scene(job_data)
+    elif not render_image_core(
         image_id,
         page_id=page_id,
         chapter_id=job_data.get("chapterId"),
