@@ -11,11 +11,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from worker.services.fragment_grouping import GroupingConfig, group_fragments
+from worker.services.owner_assignment import assign_captured_owners
 
 
 def _json_value(value: Any) -> Any:
@@ -65,6 +66,7 @@ class OcrCapture:
     grouping_edges: list[dict[str, Any]]
     final_owners: list[dict[str, Any]]
     paths: dict[str, str]
+    owner_decisions: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return _json_value(asdict(self))
@@ -114,7 +116,7 @@ def capture_ocr_grouping(
     if len(raw_quads) != len(regions) or len(recognition) != len(regions):
         raise ValueError("raw_quads, recognition, and regions must have equal lengths")
     initial = OcrCapture(
-        format="ocr-grouping-capture-v1",
+        format="ocr-grouping-capture-v2",
         source={"id": source_id, "digest": _digest([source_id, raw_quads, regions])},
         raw_quads=_json_value(raw_quads),
         scale_transform=_json_value(scale_transform),
@@ -132,6 +134,15 @@ def capture_ocr_grouping(
         _fragment_id(source_id, index, quad, region)
         for index, (quad, region) in enumerate(zip(initial.raw_quads, initial.regions, strict=True))
     ]
+    owner_decisions = assign_captured_owners(
+        fragment_ids=fragment_ids,
+        raw_quads=initial.raw_quads,
+        recognition=initial.recognition,
+        regions=initial.regions,
+        candidate_groups=groups,
+        detector_masks=initial.detector_masks,
+        scale_transform=initial.scale_transform,
+    )
     return OcrCapture(
         **{
             **asdict(initial),
@@ -140,6 +151,7 @@ def capture_ocr_grouping(
                 {"id": owner, "fragment_ids": [fragment_ids[index] for index in group]}
                 for owner, group in zip(replay.owner_ids, groups, strict=True)
             ],
+            "owner_decisions": [decision.to_dict() for decision in owner_decisions],
         }
     )
 
@@ -184,8 +196,17 @@ def capture_observed_ocr_grouping(
                 },
             }
         )
+    owner_decisions = assign_captured_owners(
+        fragment_ids=fragment_ids,
+        raw_quads=raw_quads,
+        recognition=recognition,
+        regions=regions,
+        candidate_groups=observed_groups,
+        detector_masks=detector_masks,
+        scale_transform=scale_transform,
+    )
     return OcrCapture(
-        format="ocr-grouping-capture-v1",
+        format="ocr-grouping-capture-v2",
         source={"id": source_id, "digest": _digest([source_id, raw_quads, regions])},
         raw_quads=_json_value(raw_quads),
         scale_transform=_json_value(scale_transform),
@@ -201,6 +222,7 @@ def capture_observed_ocr_grouping(
         ],
         final_owners=owners,
         paths=paths or {"ocr": "live", "grouping": "live", "detector_masks": "live"},
+        owner_decisions=[decision.to_dict() for decision in owner_decisions],
     )
 
 

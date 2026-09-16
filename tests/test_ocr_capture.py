@@ -53,3 +53,7 @@ def test_observed_capture_preserves_runtime_groups_without_replay_assumptions():
     assert len(capture.grouping_edges) == 1
     assert capture.final_owners[0]["bbox"] == {"x": 10, "y": 10, "width": 20, "height": 25}
     assert capture.final_owners[0]["fragment_ids"]
+    assert capture.format == "ocr-grouping-capture-v2"
+    assert capture.owner_decisions[0]["state"] == "unknown"
+    assert capture.owner_decisions[0]["owner_id"] is None
+    assert capture.owner_decisions[0]["reason"] == "missing-validated-container"

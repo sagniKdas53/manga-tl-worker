@@ -141,6 +141,50 @@ def test_merge_preserves_shared_mask_polygon_and_safe_area():
     assert result[0]["safeTextW"] == 70
     assert result[0]["safeTextH"] == 80
     assert result[0]["detectionConfidence"] == 0.7
+    assert result[0]["rawFragmentMembership"] == [
+        {"index": 0, "fragment_id": None},
+        {"index": 1, "fragment_id": None},
+    ]
+    assert result[0]["containerResolution"] == "resolved-shared-container"
+
+
+def test_merge_refuses_to_grant_a_fused_component_a_hulled_container():
+    left_polygon = [[0, 0], [55, 0], [55, 100], [0, 100]]
+    right_polygon = [[45, 0], [100, 0], [100, 100], [45, 100]]
+    regions = [
+        {
+            "text": "left",
+            "detectedLanguage": "en",
+            "confidence": 0.9,
+            "x": 10,
+            "y": 20,
+            "width": 50,
+            "height": 30,
+            "fragmentId": "fragment-left",
+            "maskPolygon": json.dumps(left_polygon),
+        },
+        {
+            "text": "right",
+            "detectedLanguage": "en",
+            "confidence": 0.8,
+            "x": 40,
+            "y": 20,
+            "width": 50,
+            "height": 30,
+            "fragmentId": "fragment-right",
+            "maskPolygon": json.dumps(right_polygon),
+        },
+    ]
+
+    result = merge_ocr_regions(regions, reading_direction="ltr")
+
+    assert len(result) == 1
+    assert result[0]["maskPolygon"] is None
+    assert result[0]["containerResolution"] == "review-incompatible-containers"
+    assert result[0]["rawFragmentMembership"] == [
+        {"index": 0, "fragment_id": "fragment-left"},
+        {"index": 1, "fragment_id": "fragment-right"},
+    ]
 
 
 def test_merge_adjacent_vertical_fragments_without_merging_distant_bubbles():

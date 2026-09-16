@@ -328,3 +328,42 @@ def test_config_is_immutable():
     cfg = GroupingConfig()
     with pytest.raises(dataclasses.FrozenInstanceError):
         cfg.threshold_ratio = 1.0  # type: ignore[misc]
+
+
+def test_component_member_limit_breaks_an_a_b_c_bridge_without_touching_legacy_defaults():
+    bridge = _cols(3)
+    legacy = group_fragments(bridge, GroupingConfig(threshold_ratio=1.0))
+    bounded = group_fragments(bridge, GroupingConfig(threshold_ratio=1.0, component_max_members=2))
+
+    assert legacy == [[0, 1, 2]]
+    assert bounded == [[0], [1], [2]]
+
+
+def test_owner_veto_separates_close_independent_labels_after_full_component_resolution():
+    close_independent = _cols(2)
+    seen_components = []
+
+    def unresolved_owner(component, regions):
+        seen_components.append((component, regions))
+        return "different-validated-containers"
+
+    result = group_fragments(
+        close_independent,
+        GroupingConfig(threshold_ratio=1.0),
+        GroupingContext(owner_veto=unresolved_owner),
+    )
+
+    assert seen_components == [([0, 1], close_independent)]
+    assert result == [[0], [1]]
+
+
+def test_owner_veto_keeps_a_labelled_true_unit_joined():
+    true_unit = _cols(2)
+
+    result = group_fragments(
+        true_unit,
+        GroupingConfig(threshold_ratio=1.0, component_max_members=2),
+        GroupingContext(owner_veto=lambda component, regions: None),
+    )
+
+    assert result == [[0, 1]]

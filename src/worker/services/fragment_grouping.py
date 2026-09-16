@@ -42,6 +42,9 @@ class GroupingConfig:
             outline. `None` disables it, which is the shipped behaviour.
         waist_max_solidity: Only apply the veto to masks below this solidity. A convex mask has no
             waist, and forcing the measurement on one produces noise, not signal.
+        component_max_members: Maximum members allowed in one connected component. ``None`` keeps
+            frozen legacy behaviour; a bounded component is deliberately split to unresolved
+            singleton candidates rather than silently retaining a bridge merge.
     """
 
     threshold_ratio: float = DEFAULT_THRESHOLD_RATIO
@@ -49,6 +52,7 @@ class GroupingConfig:
     orientation: str = "reading_direction"
     waist_gate: float | None = None
     waist_max_solidity: float = DEFAULT_WAIST_MAX_SOLIDITY
+    component_max_members: int | None = None
 
 
 @dataclass(frozen=True)
@@ -63,10 +67,14 @@ class GroupingContext:
         clearance: ((x, y), (x, y)) -> minimum distance to the mask outline along that segment,
             in pixels. Zero means the segment leaves the mask entirely.
         solidity: mask area / convex hull area. 1.0 means convex, i.e. no waist to find.
+        owner_veto: Called after the full graph component is known. Return an explicit reason to
+            split it into unresolved singleton candidates, or ``None`` to keep it. It cannot
+            create a merge and is off by default.
     """
 
     clearance: Callable[[tuple[float, float], tuple[float, float]], float] | None = None
     solidity: float = 1.0
+    owner_veto: Callable[[list[int], list], str | None] | None = None
 
 
 def group_fragments(
@@ -110,7 +118,34 @@ def group_fragments(
             adj[i].append(j)
             adj[j].append(i)
 
-    return _connected_components(adj, n)
+    return _bound_components(_connected_components(adj, n), regions, config, context)
+
+
+def _bound_components(
+    components: list[list[int]],
+    regions: list,
+    config: GroupingConfig,
+    context: GroupingContext | None,
+) -> list[list[int]]:
+    """Apply opt-in full-component limits and ownership vetoes after graph traversal.
+
+    Pairwise edges cannot detect an A–B–C bridge. A veto receives the entire transitive
+    component so an unknown owner decision cannot be converted back into a merge by a middle
+    fragment. Splitting to singletons is intentionally conservative; F03 owns contour-local
+    recovery and F04 owns the live owner-decision adapter.
+    """
+    bounded: list[list[int]] = []
+    for component in components:
+        reason = None
+        if config.component_max_members is not None and len(component) > config.component_max_members:
+            reason = "component-max-members"
+        elif context is not None and context.owner_veto is not None:
+            reason = context.owner_veto(component, regions)
+        if reason is None:
+            bounded.append(component)
+        else:
+            bounded.extend([[index] for index in component])
+    return bounded
 
 
 # A box must be this much longer than it is tall (or vice versa) to vote on orientation. Below it
