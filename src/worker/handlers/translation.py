@@ -75,14 +75,16 @@ def process_translation(job_data):
         logger.error(f"{req_prefix}Error fetching image details: {e}")
         raise
 
-    # Policy selection is deliberately before every provider/quality decision. A classified
-    # region still remains in the OCR record, but non-replacement policy cannot be smuggled into
-    # either a target chunk or the page-wide raw prompt manifest.
+    # Region policy remains provenance for the canonical scene.  It does not suppress the
+    # established OCR → translation → visual-QA pipeline: ordinary unreviewed dialogue and
+    # candidate SFX must reach QA so QA can reject/hide only the elements it identifies.
+    #
+    # Explicit source-preserving user choices remain authoritative.  They alone are omitted
+    # from provider work and the callback because the legacy backend would otherwise create a
+    # visible layer element for pixels the user chose to preserve/explain.
     resolved_translations = {}
     unmatched_regions = []
     policy_skipped = {}
-    # Why a selected region ended with no translation, keyed by region id. Policy skips are not
-    # failures: source-preserving actions deliberately make no provider request.
     failure_reasons = {}
 
     def note_failure(region_id, answer):
@@ -92,18 +94,18 @@ def process_translation(job_data):
         policy = select_region_action(r.get("regionType") or r.get("region_type"), r.get("user_override"))
         r["policyAction"] = policy.action
         r["policyReason"] = policy.reason
-        if policy.action != "replace":
+        if policy.user_override in {"preserve", "explain"}:
             policy_skipped[r["id"]] = policy
         elif not should_translate_region(r):
-            # Keep legacy quality filtering distinct from policy. It is not sent to a provider,
-            # and it cannot be mistaken for an intentional source-preserving policy decision.
+            # This quality filter is distinct from policy: it retains the source text and avoids
+            # provider work for an unusable OCR target.
             resolved_translations[r["id"]] = {"translatedText": r["text"]}
         else:
             unmatched_regions.append(r)
 
     if policy_skipped:
         logger.info(
-            f"{req_prefix}Policy skipped {len(policy_skipped)}/{len(ocr_regions)} regions before translation: "
+            f"{req_prefix}Explicitly source-preserved {len(policy_skipped)}/{len(ocr_regions)} regions before translation: "
             + ", ".join(
                 f"{policy.kind}:{policy.action}:{region_id[:8]}" for region_id, policy in policy_skipped.items()
             )
@@ -329,8 +331,9 @@ def process_translation(job_data):
     resolved_model = last_call.get("model") or job_data.get("tlModel") or TL_CONFIG.llm_model
     model_identifier = f"{resolved_provider}/{resolved_model}"
 
-    # Only selected targets reach the legacy translation callback. Emitting an empty skipped
-    # region here would make the legacy backend create a blank layer element for preserved pixels.
+    # Only explicitly source-preserving regions are absent from the legacy callback. Unreviewed
+    # candidates deliberately remain: the coordinator creates their layer elements, then visual
+    # QA can reject SFX/gibberish and re-render the page without them.
     translations = []
     for r in unmatched_regions:
         rid = r["id"]

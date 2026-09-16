@@ -160,19 +160,24 @@ def _sanitize_qa_results(results, ocr_regions, label="LLM"):
 
 
 def _translation_qa_regions(ocr_regions):
-    """Return only replacement-authorized regions for per-region translation QA.
+    """Return successful translation-layer elements for per-region QA.
 
-    A page-wide visual pass still receives the original/rendered page pixels.  It must not,
-    however, receive policy-preserved or review-region IDs as translation verdict targets.
+    Unreviewed policy is a canonical-scene cleanup authorization state, not a reason to
+    bypass the live translation/visual-QA pipeline.  QA must receive those elements so it
+    can reject SFX or bad OCR and the backend can hide only the rejected element. Explicit
+    ``preserve`` and ``explain`` overrides remain source-preserving even if stale translation
+    data exists.
     """
     return [
         region
         for region in ocr_regions
-        if select_region_action(
+        if region.get("translatedText")
+        and not region.get("translationFailed")
+        and select_region_action(
             region.get("regionType") or region.get("region_type"),
             region.get("user_override"),
-        ).action
-        == "replace"
+        ).user_override
+        not in {"preserve", "explain"}
     ]
 
 
@@ -530,7 +535,8 @@ You MUST return a JSON object containing a "results" key with an array of object
         logger.error(f"[QA] Error combining images: {e}")
         raise
 
-    # The VLM sees the complete page image but receives only replacement-authorized IDs.
+    # The VLM sees the complete page and every successful translation-layer element. It decides
+    # which candidate SFX/gibberish must be hidden after visual inspection.
     regions_metadata_vlm = []
     for r in qa_regions:
         regions_metadata_vlm.append(
@@ -767,8 +773,9 @@ def _process_qa_llm(job_data):
         logger.error(f"[QA] Error fetching image details: {e}")
         raise
 
+    # Per-region QA follows actual translation-layer elements, not canonical-scene cleanup
+    # authorization. It can therefore reject/hide SFX after inspecting the translation.
     qa_regions = _translation_qa_regions(ocr_regions)
-    # Build metadata only for replacement-authorized translation QA targets.
     regions_metadata = []
     for r in qa_regions:
         regions_metadata.append(

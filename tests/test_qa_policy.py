@@ -4,21 +4,35 @@ from unittest.mock import MagicMock, patch
 from worker.handlers.qa import _process_qa_llm, _translation_qa_regions
 
 
-def test_translation_qa_regions_selects_only_effective_replace():
+def test_translation_qa_regions_selects_successful_unreviewed_elements():
     regions = [
-        {"id": "review-sfx", "regionType": "sfx"},
-        {"id": "preserved", "regionType": "speech", "user_override": "preserve"},
-        {"id": "replace-dialogue", "regionType": "speech", "user_override": "replace"},
+        {"id": "review-sfx", "regionType": "sfx", "translatedText": "Heartbeat"},
+        {
+            "id": "preserved",
+            "regionType": "speech",
+            "user_override": "preserve",
+            "translatedText": "Do not show",
+        },
+        {"id": "review-dialogue", "regionType": "speech", "translatedText": "Hello"},
+        {
+            "id": "failed-dialogue",
+            "regionType": "speech",
+            "translatedText": "Missing",
+            "translationFailed": True,
+        },
     ]
 
-    assert [region["id"] for region in _translation_qa_regions(regions)] == ["replace-dialogue"]
+    assert [region["id"] for region in _translation_qa_regions(regions)] == [
+        "review-sfx",
+        "review-dialogue",
+    ]
 
 
 @patch("worker.handlers.qa.QA_CONFIG")
 @patch("worker.handlers.qa.try_cloud_ai")
 @patch("worker.handlers.qa.requests.get")
 @patch("worker.handlers.qa.requests.post")
-def test_policy_skipped_regions_never_enter_per_region_translation_qa(
+def test_unreviewed_sfx_enters_translation_qa_for_rejection(
     mock_post,
     mock_get,
     mock_try_cloud_ai,
@@ -30,14 +44,13 @@ def test_policy_skipped_regions_never_enter_per_region_translation_qa(
                 "id": "review-sfx",
                 "text": "ドキ",
                 "regionType": "sfx",
-                "translatedText": "",
+                "translatedText": "Heartbeat",
                 "confidence": 0.9,
             },
             {
-                "id": "replace-dialogue",
+                "id": "review-dialogue",
                 "text": "こんにちは",
                 "regionType": "speech",
-                "user_override": "replace",
                 "translatedText": "Hello",
                 "confidence": 0.9,
             },
@@ -51,8 +64,8 @@ def test_policy_skipped_regions_never_enter_per_region_translation_qa(
     mock_try_cloud_ai.return_value = json.dumps(
         {
             "results": [
-                {"regionId": "review-sfx", "qaStatus": "reject_sfx", "qaScore": 1, "qaFeedback": "wrong target"},
-                {"regionId": "replace-dialogue", "qaStatus": "passed", "qaScore": 1, "qaFeedback": "good"},
+                {"regionId": "review-sfx", "qaStatus": "reject_sfx", "qaScore": 1, "qaFeedback": "SFX"},
+                {"regionId": "review-dialogue", "qaStatus": "passed", "qaScore": 1, "qaFeedback": "Dialogue"},
             ]
         }
     )
@@ -60,9 +73,8 @@ def test_policy_skipped_regions_never_enter_per_region_translation_qa(
     _process_qa_llm({"imageId": "image-1"})
 
     prompt = mock_try_cloud_ai.call_args.args[3]
-    assert "review-sfx" not in prompt
-    assert "ドキ" not in prompt
-    assert "replace-dialogue" in prompt
+    assert "review-sfx" in prompt
+    assert "ドキ" in prompt
+    assert "review-dialogue" in prompt
     callback = mock_post.call_args.kwargs["json"]
-    assert [result["regionId"] for result in callback["qaResults"]] == ["replace-dialogue"]
-    assert image_info["ocrRegions"][0]["text"] == "ドキ", "page-wide visual QA retains source pixels"
+    assert [result["regionId"] for result in callback["qaResults"]] == ["review-sfx", "review-dialogue"]
