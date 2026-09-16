@@ -42,6 +42,7 @@ from worker.services.layout import bubble_compare
 from worker.services.merge_regions import merge_ocr_regions
 from worker.services.ocr import parse_paddle_ocr_results, parse_rapid_ocr_results
 from worker.services.ocr_capture import capture_observed_ocr_grouping
+from worker.services.ownership_features import capture_fragment_features
 from worker.services.translation import (
     LANG_MAP,
     try_cloud_ai_vision_batch,
@@ -803,6 +804,7 @@ def process_ocr(job_data):
                         "y": y,
                         "width": width,
                         "height": height,
+                        "sourceQuad": [[x, y] for x, y in zip(xs, ys, strict=True)],
                     }
                 )
                 if capture_dir:
@@ -810,6 +812,16 @@ def process_ocr(job_data):
                     capture_recognition.append({"text": text, "confidence": float(confidence)})
                     raw_fragments[-1]["_capture_index"] = len(capture_raw_quads) - 1
 
+            source_id = f"{image_id}:{job_data.get('pageId') or 'unknown-page'}"
+            raw_features = capture_fragment_features(
+                source_id=source_id,
+                raw_quads=[fragment["sourceQuad"] for fragment in raw_fragments],
+                recognition=[{"text": fragment["text"], "confidence": fragment["confidence"]} for fragment in raw_fragments],
+                regions=raw_fragments,
+            )
+            for fragment, feature in zip(raw_fragments, raw_features, strict=True):
+                fragment["fragmentId"] = feature["id"]
+                fragment["ownershipProvenance"] = feature
             # 2. Pre-generate binary masks for bubbles to compute exact pixel overlap
             bubble_masks = []
             for bubble in detected_bubbles:
@@ -952,6 +964,7 @@ def process_ocr(job_data):
                             "bubbleWidth": sp_w,
                             "bubbleHeight": sp_h,
                             "bubble": bubble,
+                            "ownershipProvenance": r_sub.get("ownershipProvenance"),
                         }
                     )
 
@@ -1018,6 +1031,7 @@ def process_ocr(job_data):
                             "text": r_sub["text"],
                             "confidence": r_sub["confidence"],
                             "detectedLanguage": r_sub["detectedLanguage"],
+                            "ownershipProvenance": r_sub.get("ownershipProvenance"),
                         }
                     )
 
@@ -1270,6 +1284,7 @@ def process_ocr(job_data):
                                         "text": final_text,
                                         "detectedLanguage": detect_language(final_text),
                                         "confidence": model_conf,
+                                        "ownershipProvenance": r.get("ownershipProvenance"),
                                         "rotation": 0.0,
                                         "x": r["x"],
                                         "y": r["y"],
@@ -1298,6 +1313,7 @@ def process_ocr(job_data):
                                         "text": final_text,
                                         "detectedLanguage": detect_language(final_text),
                                         "confidence": model_conf,
+                                        "ownershipProvenance": r.get("ownershipProvenance"),
                                         "rotation": 0.0,
                                         "x": r["x"],
                                         "y": r["y"],
@@ -1337,6 +1353,7 @@ def process_ocr(job_data):
                                     "text": final_text,
                                     "detectedLanguage": (detect_language(final_text) if final_text else "ja"),
                                     "confidence": r["confidence"],
+                                    "ownershipProvenance": r.get("ownershipProvenance"),
                                     "rotation": 0.0,
                                     "x": r["x"],
                                     "y": r["y"],
@@ -1366,6 +1383,7 @@ def process_ocr(job_data):
                                         detect_language(final_text) if final_text else r["detectedLanguage"]
                                     ),
                                     "confidence": r["confidence"],
+                                    "ownershipProvenance": r.get("ownershipProvenance"),
                                     "rotation": 0.0,
                                     "x": r["x"],
                                     "y": r["y"],
@@ -1446,6 +1464,20 @@ def process_ocr(job_data):
                 if capture_dir:
                     capture_raw_quads.append([[pt[0] * ocr_upscale, pt[1] * ocr_upscale] for pt in bbox])
                     capture_recognition.append({"text": text, "confidence": float(confidence)})
+            source_id = f"{image_id}:{job_data.get('pageId') or 'unknown-page'}"
+            fallback_quads = [
+                [[point[0] * ocr_upscale, point[1] * ocr_upscale] for point in bbox]
+                for bbox, _, _ in results
+            ]
+            fallback_features = capture_fragment_features(
+                source_id=source_id,
+                raw_quads=fallback_quads,
+                recognition=[{"text": text, "confidence": float(confidence)} for _, text, confidence in results],
+                regions=regions,
+            )
+            for region, feature in zip(regions, fallback_features, strict=True):
+                region["fragmentId"] = feature["id"]
+                region["ownershipProvenance"] = feature
 
             grouping = grouping_config(reading_direction)
             if capture_dir:

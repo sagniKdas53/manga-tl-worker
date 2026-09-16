@@ -28,6 +28,9 @@ def test_capture_round_trip_replays_stable_geometry_and_owners(tmp_path):
     assert loaded.raw_quads and loaded.scale_transform and loaded.detector_masks
     assert loaded.recognition and loaded.grouping_edges and loaded.final_owners
     assert loaded.paths["detector_masks"] == "cached"
+    assert loaded.fragment_features[0]["id"] == first.fragment_ids[0]
+    assert loaded.fragment_features[0]["geometry"]["majorAxisDegrees"] == 0.0
+    assert loaded.fragment_features[0]["sourceStyle"] is None
 
 
 def test_observed_capture_preserves_runtime_groups_without_replay_assumptions():

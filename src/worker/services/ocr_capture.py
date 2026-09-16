@@ -17,6 +17,7 @@ from typing import Any
 
 from worker.services.fragment_grouping import GroupingConfig, group_fragments
 from worker.services.owner_assignment import assign_captured_owners
+from worker.services.ownership_features import capture_fragment_features
 
 
 def _json_value(value: Any) -> Any:
@@ -67,6 +68,7 @@ class OcrCapture:
     final_owners: list[dict[str, Any]]
     paths: dict[str, str]
     owner_decisions: list[dict[str, Any]] = field(default_factory=list)
+    fragment_features: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return _json_value(asdict(self))
@@ -152,6 +154,12 @@ def capture_ocr_grouping(
                 for owner, group in zip(replay.owner_ids, groups, strict=True)
             ],
             "owner_decisions": [decision.to_dict() for decision in owner_decisions],
+            "fragment_features": capture_fragment_features(
+                source_id=source_id,
+                raw_quads=initial.raw_quads,
+                recognition=initial.recognition,
+                regions=initial.regions,
+            ),
         }
     )
 
@@ -223,6 +231,12 @@ def capture_observed_ocr_grouping(
         final_owners=owners,
         paths=paths or {"ocr": "live", "grouping": "live", "detector_masks": "live"},
         owner_decisions=[decision.to_dict() for decision in owner_decisions],
+        fragment_features=capture_fragment_features(
+            source_id=source_id,
+            raw_quads=raw_quads,
+            recognition=recognition,
+            regions=regions,
+        ),
     )
 
 

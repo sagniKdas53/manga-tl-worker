@@ -120,12 +120,13 @@ def merge_ocr_regions(
             if t:
                 texts_to_join.append(t)
 
-        if not texts_to_join:
-            joined_text = ""
-        else:
-            # Check if any part contains CJK characters to decide on spacer-less join
-            has_cjk = any(cjk_pattern.search(t) for t in texts_to_join)
-            joined_text = "".join(texts_to_join) if has_cjk else " ".join(texts_to_join)
+        raw_membership = [{"index": index, "fragment_id": regions[index].get("fragmentId")} for index in comp]
+        for member, index in zip(raw_membership, comp, strict=True):
+            provenance = regions[index].get("ownershipProvenance")
+            if provenance is not None:
+                member["provenance"] = provenance
+        has_cjk = any(cjk_pattern.search(t) for t in texts_to_join)
+        joined_text = "".join(texts_to_join) if has_cjk else " ".join(texts_to_join)
 
         # Calculate union bounding box
         x_min = min(regions[idx]["x"] for idx in comp)
@@ -195,6 +196,7 @@ def merge_ocr_regions(
                 "safeTextW": sx_max - sx_min,
                 "safeTextH": sy_max - sy_min,
                 "rawFragmentMembership": raw_membership,
+                "ownershipProvenance": {"fragments": raw_membership, "containerResolution": container_resolution},
                 "containerResolution": container_resolution,
             }
         )
