@@ -45,6 +45,7 @@ from worker.services.ocr import parse_paddle_ocr_results, parse_rapid_ocr_result
 from worker.services.ocr_capture import capture_observed_ocr_grouping
 from worker.services.owner_assignment import assign_captured_owners
 from worker.services.ownership_features import capture_fragment_features
+from worker.services.panel_detection import detect_text_containers
 from worker.services.translation import (
     LANG_MAP,
     try_cloud_ai_vision_batch,
@@ -856,6 +857,7 @@ def process_ocr(job_data):
 
             img_h, img_w = img.shape[:2] if img is not None else (0, 0)
             detected_bubbles = None
+            text_containers = detect_text_containers(img) if img is not None else []
             if img is not None:
                 detected_bubbles = detect_bubbles_yolo(img)
 
@@ -1058,22 +1060,23 @@ def process_ocr(job_data):
                             "containerResolution": container_resolution,
                         }
                     )
-
+            direct_text_containers = [*panels, *text_containers]
             # 5. Add unmatched fragments as merged standalone regions (direct text / SFX)
             unmatched_frags = [f for f in raw_fragments if f.get("bubble_idx", -1) == -1]
-            if unmatched_frags:
-                grouping = grouping_config(reading_direction)
-                unmatched_groups = []
-                merged_unmatched = []
-                for panel_fragments in partition_unmatched_fragments_by_panel(unmatched_frags, panels).values():
-                    local_groups = group_fragments(panel_fragments, grouping)
-                    attach_live_owner_decisions(panel_fragments, local_groups, [])
-                    unmatched_groups.extend(local_groups)
-                    merged_unmatched.extend(merge_ocr_regions(panel_fragments, grouping=grouping))
-                    if capture_dir:
-                        capture_groups.extend(
-                            [[panel_fragments[index]["_capture_index"] for index in group] for group in local_groups]
-                        )
+            grouping = grouping_config(reading_direction)
+            unmatched_groups = []
+            merged_unmatched = []
+            for panel_fragments in partition_unmatched_fragments_by_panel(
+                unmatched_frags, direct_text_containers
+            ).values():
+                local_groups = group_fragments(panel_fragments, grouping)
+                attach_live_owner_decisions(panel_fragments, local_groups, [])
+                unmatched_groups.extend(local_groups)
+                merged_unmatched.extend(merge_ocr_regions(panel_fragments, grouping=grouping))
+                if capture_dir:
+                    capture_groups.extend(
+                        [[panel_fragments[index]["_capture_index"] for index in group] for group in local_groups]
+                    )
 
                 for idx, r_sub in enumerate(merged_unmatched):
                     rx, ry, rw, rh = (

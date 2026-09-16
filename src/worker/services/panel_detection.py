@@ -82,3 +82,27 @@ def detect_panels(image_bytes, reading_direction="rtl"):
             final_panels.append(p)
 
     return final_panels
+
+
+def detect_text_containers(image):
+    """Return dark, closed rectangular text containers inside a source page."""
+    if image is None:
+        return []
+
+    height, width = image.shape[:2]
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    _, dark = cv2.threshold(gray, 80, 255, cv2.THRESH_BINARY_INV)
+    contours, _ = cv2.findContours(dark, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    minimum_area = width * height * 0.003
+    containers = []
+    for contour in contours:
+        x, y, container_width, container_height = cv2.boundingRect(contour)
+        area = container_width * container_height
+        if area < minimum_area or container_width < 80 or container_height < 50:
+            continue
+        perimeter = cv2.arcLength(contour, True)
+        vertices = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
+        if len(vertices) != 4 or cv2.contourArea(contour) / area < 0.6:
+            continue
+        containers.append({"x": x, "y": y, "width": container_width, "height": container_height})
+    return containers
