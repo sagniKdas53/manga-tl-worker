@@ -18,6 +18,7 @@ from worker.utils.image import download_image
 def _data_url(mime_type: str, payload: bytes) -> str:
     return f"data:{mime_type};base64,{base64.b64encode(payload).decode('ascii')}"
 
+
 def _render_input_digest(scene_digest: str, source_sha256: str, asset_sha256s: list[str]) -> str:
     canonical = json.dumps(
         {
@@ -60,11 +61,18 @@ def render_page_scene(job_data: dict[str, Any]) -> None:
         if not isinstance(patch_url, str):
             raise ValueError(f"missing immutable cleanup asset {patch_id}")
         bounds = cleanup["bounds"]
-        cleanup_assets.append({
-            "cleanupId": cleanup["cleanup_id"], "href": patch_url,
-            "x": bounds["x"], "y": bounds["y"], "width": bounds["width"], "height": bounds["height"],
-            "zIndex": 0, "visible": True,
-        })
+        cleanup_assets.append(
+            {
+                "cleanupId": cleanup["cleanup_id"],
+                "href": patch_url,
+                "x": bounds["x"],
+                "y": bounds["y"],
+                "width": bounds["width"],
+                "height": bounds["height"],
+                "zIndex": 0,
+                "visible": True,
+            }
+        )
 
     text_objects = []
     font_ids = set()
@@ -74,13 +82,30 @@ def render_page_scene(job_data: dict[str, Any]) -> None:
         style = item["style"]
         font_ids.add(style["font_id"])
         transform = item["transform"]
-        text_objects.append({
-            "objectId": item["object_id"], "text": item["text"],
-            "transform": {"x": transform["x"], "y": transform["y"], "width": transform["width"], "height": transform["height"], "rotationDegrees": transform["rotation_degrees"]},
-            "writingMode": item["writing_mode"], "alignment": item["alignment"],
-            "style": {"fontFamily": style["font_id"], "fill": style["fill"], "stroke": style["stroke"], "weight": style["weight"], "padding": style["padding"]},
-            "visible": item["visible"], "zIndex": item["z_index"],
-        })
+        text_objects.append(
+            {
+                "objectId": item["object_id"],
+                "text": item["text"],
+                "transform": {
+                    "x": transform["x"],
+                    "y": transform["y"],
+                    "width": transform["width"],
+                    "height": transform["height"],
+                    "rotationDegrees": transform["rotation_degrees"],
+                },
+                "writingMode": item["writing_mode"],
+                "alignment": item["alignment"],
+                "style": {
+                    "fontFamily": style["font_id"],
+                    "fill": style["fill"],
+                    "stroke": style["stroke"],
+                    "weight": style["weight"],
+                    "padding": style["padding"],
+                },
+                "visible": item["visible"],
+                "zIndex": item["z_index"],
+            }
+        )
     if not renderer_url:
         raise ValueError("PAGE_RENDERER_URL is required for page-scene render jobs")
     payload = {
@@ -104,9 +129,14 @@ def render_page_scene(job_data: dict[str, Any]) -> None:
     result = requests.post(renderer_url.rstrip("/") + "/render", json=payload, timeout=120)
     result.raise_for_status()
     rendered = result.json()
-    if rendered.get("logicalSceneSha256") != scene.logical_scene_sha256 or rendered.get("pageRevision") != job_data["pageRevision"]:
+    if (
+        rendered.get("logicalSceneSha256") != scene.logical_scene_sha256
+        or rendered.get("pageRevision") != job_data["pageRevision"]
+    ):
         raise ValueError("renderer returned a mismatched immutable identity")
     png = base64.b64decode(rendered["pngBase64"], validate=True)
     if hashlib.sha256(png).hexdigest() != rendered.get("pngSha256"):
         raise ValueError("renderer PNG digest mismatch")
-    minio_client.put_object("manga-library", f"rendered/{image_id}.png", __import__("io").BytesIO(png), len(png), content_type="image/png")
+    minio_client.put_object(
+        "manga-library", f"rendered/{image_id}.png", __import__("io").BytesIO(png), len(png), content_type="image/png"
+    )

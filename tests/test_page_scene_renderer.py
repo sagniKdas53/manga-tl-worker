@@ -8,7 +8,32 @@ from worker.page_scene_renderer import render_page_scene
 
 def scene():
     sha = "a" * 64
-    return {"contract_version":"page-scene/v1","scene_kind":"logical","page":{"page_id":"p","revision":3,"source":{"sha256":sha,"width":1,"height":1,"mime_type":"image/png"}},"provenance":{"app_commit":"b"*64,"worker_commit":"c"*64,"renderer_commit":"d"*64,"models":[],"configuration_sha256":"e"*64,"fonts":[],"runtime":{"os":"linux","architecture":"amd64","execution_provider":"cpu"},"timings_ms":{},"warnings":[]},"fragments":[],"owners":[],"policies":[],"assets":[],"cleanup_artifacts":[],"objects":[]}
+    return {
+        "contract_version": "page-scene/v1",
+        "scene_kind": "logical",
+        "page": {
+            "page_id": "p",
+            "revision": 3,
+            "source": {"sha256": sha, "width": 1, "height": 1, "mime_type": "image/png"},
+        },
+        "provenance": {
+            "app_commit": "b" * 64,
+            "worker_commit": "c" * 64,
+            "renderer_commit": "d" * 64,
+            "models": [],
+            "configuration_sha256": "e" * 64,
+            "fonts": [],
+            "runtime": {"os": "linux", "architecture": "amd64", "execution_provider": "cpu"},
+            "timings_ms": {},
+            "warnings": [],
+        },
+        "fragments": [],
+        "owners": [],
+        "policies": [],
+        "assets": [],
+        "cleanup_artifacts": [],
+        "objects": [],
+    }
 
 
 @patch("worker.page_scene_renderer.minio_client")
@@ -18,18 +43,27 @@ def test_browser_adapter_uses_only_queued_scene_and_checks_source(mock_requests,
     source = b"source"
     document = scene()
     document["page"]["source"]["sha256"] = hashlib.sha256(source).hexdigest()
-    digest = hashlib.sha256(__import__("json").dumps(document, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    digest = hashlib.sha256(
+        __import__("json").dumps(document, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     mock_requests.get.return_value.json.return_value = {"presignedUrl": "source"}
     mock_requests.get.return_value.raise_for_status.return_value = None
     mock_download.return_value = source
     png = b"png"
-    mock_requests.post.return_value.json.return_value = {"logicalSceneSha256": digest, "pageRevision": 3, "pngSha256": hashlib.sha256(png).hexdigest(), "pngBase64": base64.b64encode(png).decode()}
+    mock_requests.post.return_value.json.return_value = {
+        "logicalSceneSha256": digest,
+        "pageRevision": 3,
+        "pngSha256": hashlib.sha256(png).hexdigest(),
+        "pngBase64": base64.b64encode(png).decode(),
+    }
     mock_requests.post.return_value.raise_for_status.return_value = None
 
     previous_url = os.environ.get("PAGE_RENDERER_URL")
     os.environ["PAGE_RENDERER_URL"] = "http://renderer"
     try:
-        render_page_scene({"imageId":"image","pageRevision":3,"logicalSceneSha256":digest,"logicalScene":document})
+        render_page_scene(
+            {"imageId": "image", "pageRevision": 3, "logicalSceneSha256": digest, "logicalScene": document}
+        )
     finally:
         if previous_url is None:
             os.environ.pop("PAGE_RENDERER_URL")
