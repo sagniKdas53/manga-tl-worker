@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import os
+from collections import defaultdict
 from functools import cmp_to_key
 from pathlib import Path
 
@@ -71,6 +72,35 @@ def grouping_config(reading_direction):
         waist_gate=OCR_WAIST_GATE if OCR_WAIST_GATE > 0 else None,
         waist_max_solidity=OCR_WAIST_MAX_SOLIDITY,
     )
+
+
+def partition_unmatched_fragments_by_panel(fragments, panels):
+    """Return unmatched fragments in their smallest containing source panel.
+
+    Direct-text proximity is meaningful only inside one visual container. Choosing the
+    smallest containing panel keeps nested UI cards distinct from their enclosing game screen;
+    no matching panel is deliberately isolated from every other unmatched fragment.
+    """
+    partitions = defaultdict(list)
+    for fragment in fragments:
+        center_x = fragment["x"] + fragment["width"] / 2
+        center_y = fragment["y"] + fragment["height"] / 2
+        matches = []
+        for index, panel in enumerate(panels):
+            panel_x = panel.get("x", panel.get("bboxX"))
+            panel_y = panel.get("y", panel.get("bboxY"))
+            panel_width = panel.get("width", panel.get("bboxW"))
+            panel_height = panel.get("height", panel.get("bboxH"))
+            if None not in (panel_x, panel_y, panel_width, panel_height) and (
+                panel_x <= center_x <= panel_x + panel_width and panel_y <= center_y <= panel_y + panel_height
+            ):
+                matches.append((index, panel_x, panel_y, panel_width, panel_height))
+        if matches:
+            index, _panel_x, _panel_y, panel_width, panel_height = min(matches, key=lambda item: item[3] * item[4])
+            partitions[index].append(fragment)
+        else:
+            partitions[None].append(fragment)
+    return partitions
 
 
 def attach_live_owner_decisions(regions, candidate_groups, detector_masks):
@@ -1032,19 +1062,18 @@ def process_ocr(job_data):
             # 5. Add unmatched fragments as merged standalone regions (direct text / SFX)
             unmatched_frags = [f for f in raw_fragments if f.get("bubble_idx", -1) == -1]
             if unmatched_frags:
-                # No bubble, so no mask and no clearance veto -- this path stays on distance alone,
-                # and gets the orientation vote, which is the only lever that reaches a page where
-                # YOLO found nothing at all.
                 grouping = grouping_config(reading_direction)
-                unmatched_groups = group_fragments(unmatched_frags, grouping)
-                # Unmatched text has no validated detector container, so F01 records unknown
-                # multi-fragment ownership but does not turn the observation into a split here.
-                attach_live_owner_decisions(unmatched_frags, unmatched_groups, [])
-                merged_unmatched = merge_ocr_regions(unmatched_frags, grouping=grouping)
-                if capture_dir:
-                    capture_groups.extend(
-                        [[unmatched_frags[index]["_capture_index"] for index in group] for group in unmatched_groups]
-                    )
+                unmatched_groups = []
+                merged_unmatched = []
+                for panel_fragments in partition_unmatched_fragments_by_panel(unmatched_frags, panels).values():
+                    local_groups = group_fragments(panel_fragments, grouping)
+                    attach_live_owner_decisions(panel_fragments, local_groups, [])
+                    unmatched_groups.extend(local_groups)
+                    merged_unmatched.extend(merge_ocr_regions(panel_fragments, grouping=grouping))
+                    if capture_dir:
+                        capture_groups.extend(
+                            [[panel_fragments[index]["_capture_index"] for index in group] for group in local_groups]
+                        )
 
                 for idx, r_sub in enumerate(merged_unmatched):
                     rx, ry, rw, rh = (

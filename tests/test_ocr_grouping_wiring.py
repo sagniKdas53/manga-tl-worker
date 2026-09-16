@@ -12,7 +12,12 @@ corpus/runs/2026-08-09/region-grouping/.
 import numpy as np
 import pytest
 
-from worker.handlers.ocr import attach_live_owner_decisions, grouping_config, owner_aware_grouping_context
+from worker.handlers.ocr import (
+    attach_live_owner_decisions,
+    grouping_config,
+    owner_aware_grouping_context,
+    partition_unmatched_fragments_by_panel,
+)
 from worker.services.bubble_geometry import bubble_grouping_context, mask_solidity
 from worker.services.fragment_grouping import GroupingConfig, group_fragments
 from worker.services.merge_regions import merge_ocr_regions
@@ -28,6 +33,21 @@ def _frag(x, y, w, h, text="あ"):
         "width": w,
         "height": h,
     }
+
+
+def test_unmatched_fragments_are_partitioned_by_smallest_containing_panel():
+    fragments = [_frag(25, 25, 20, 20), _frag(125, 25, 20, 20), _frag(225, 25, 20, 20)]
+    panels = [
+        {"x": 0, "y": 0, "width": 300, "height": 100},
+        {"x": 0, "y": 0, "width": 100, "height": 100},
+        {"x": 100, "y": 0, "width": 100, "height": 100},
+    ]
+
+    partitions = partition_unmatched_fragments_by_panel(fragments, panels)
+
+    assert partitions[1] == [fragments[0]]
+    assert partitions[2] == [fragments[1]]
+    assert partitions[0] == [fragments[2]]
 
 
 def test_handler_config_enables_every_measured_phase():
