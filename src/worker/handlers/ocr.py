@@ -37,11 +37,12 @@ from worker.config import (
 from worker.model_manager import get_local_ocr_backend, model_manager, resolve_local_ocr_model
 from worker.services.bubble_detector import detect_bubbles_yolo
 from worker.services.bubble_geometry import bubble_grouping_context, simplify_mask_polygon
-from worker.services.fragment_grouping import GroupingConfig, group_fragments
+from worker.services.fragment_grouping import GroupingConfig, GroupingContext, group_fragments
 from worker.services.layout import bubble_compare
 from worker.services.merge_regions import merge_ocr_regions
 from worker.services.ocr import parse_paddle_ocr_results, parse_rapid_ocr_results
 from worker.services.ocr_capture import capture_observed_ocr_grouping
+from worker.services.owner_assignment import assign_captured_owners
 from worker.services.ownership_features import capture_fragment_features
 from worker.services.translation import (
     LANG_MAP,
@@ -69,6 +70,50 @@ def grouping_config(reading_direction):
         orientation=OCR_ORIENTATION,
         waist_gate=OCR_WAIST_GATE if OCR_WAIST_GATE > 0 else None,
         waist_max_solidity=OCR_WAIST_MAX_SOLIDITY,
+    )
+
+
+def attach_live_owner_decisions(regions, candidate_groups, detector_masks):
+    """Persist F01's decision with every member of each normal-runtime component."""
+
+    raw_quads = [
+        region.get("sourceQuad") or (region.get("ownershipProvenance") or {}).get("sourceQuad") for region in regions
+    ]
+    decisions = assign_captured_owners(
+        fragment_ids=[region["fragmentId"] for region in regions],
+        raw_quads=raw_quads,
+        recognition=[{"text": region["text"], "confidence": region["confidence"]} for region in regions],
+        regions=regions,
+        candidate_groups=candidate_groups,
+        detector_masks=detector_masks,
+        scale_transform={"ocr_to_source": {"scale_x": 1.0, "scale_y": 1.0}},
+    )
+    for decision, component in zip(decisions, candidate_groups, strict=True):
+        decision_value = decision.to_dict()
+        for index in component:
+            provenance = regions[index].get("ownershipProvenance")
+            if isinstance(provenance, dict):
+                regions[index]["ownershipProvenance"] = provenance | {"ownerDecision": decision_value}
+    return decisions
+
+
+def owner_aware_grouping_context(base_context, detector_masks):
+    """Attach one F01 decision to each live component and veto unproven joins.
+
+    The runtime fragments already carry stable source-space quads and IDs. The bubble detector
+    supplies the only candidate container for this grouping call. A rejected decision can only
+    split a component; it never promotes a merge or cleanup authority.
+    """
+
+    def owner_veto(component, regions):
+        candidate_groups = [component] + [[index] for index in range(len(regions)) if index not in component]
+        decision = attach_live_owner_decisions(regions, candidate_groups, detector_masks)[0].to_dict()
+        return None if decision["state"] == "assigned" else decision["reason"]
+
+    return GroupingContext(
+        clearance=base_context.clearance if base_context is not None else None,
+        solidity=base_context.solidity if base_context is not None else 1.0,
+        owner_veto=owner_veto,
     )
 
 
@@ -816,7 +861,9 @@ def process_ocr(job_data):
             raw_features = capture_fragment_features(
                 source_id=source_id,
                 raw_quads=[fragment["sourceQuad"] for fragment in raw_fragments],
-                recognition=[{"text": fragment["text"], "confidence": fragment["confidence"]} for fragment in raw_fragments],
+                recognition=[
+                    {"text": fragment["text"], "confidence": fragment["confidence"]} for fragment in raw_fragments
+                ],
                 regions=raw_fragments,
             )
             for fragment, feature in zip(raw_fragments, raw_features, strict=True):
@@ -894,13 +941,13 @@ def process_ocr(job_data):
                         )
                     continue
 
-                # Run proximity merging inside the bubble to separate multiple semantic bubbles.
-                # This is where BUG-2 lives: one YOLO blob routinely holds two touching balloons,
-                # and joining them fuses two speakers into one translation unit and one flat fill,
-                # which nothing downstream can undo. The mask is in scope here, so the grouping
-                # gets the balloon's geometry as well as the text distance.
+                # Run proximity grouping inside the detector container. F01 receives the full
+                # component plus the current bubble's source polygon and can only veto a join.
                 grouping = grouping_config(reading_direction)
-                context = bubble_grouping_context(bubble_mask, bubble["mask_polygon"])
+                context = owner_aware_grouping_context(
+                    bubble_grouping_context(bubble_mask, bubble["mask_polygon"]),
+                    [{"format": "polygon", "id": f"bubble-{b_idx}", "points": bubble["mask_polygon"]}],
+                )
                 merged_bubble_regions = merge_ocr_regions(
                     assigned_frags,
                     grouping=grouping,
@@ -919,8 +966,10 @@ def process_ocr(job_data):
                         poly_pts = bubble["mask_polygon"]
                         sp_x, sp_y, sp_w, sp_h = bx, by, bw, bh
                         sx, sy, sw, sh = bubble["safe_rect"]
+                        container_resolution = "resolved-bubble-container"
                     else:
-                        # 1. Get split polygon for this merged region
+                        # A local crop has to produce a local contour. Falling back to the full
+                        # fused detector polygon would grant its mask to an unresolved fragment.
                         r_box = [
                             r_sub["x"],
                             r_sub["y"],
@@ -928,25 +977,36 @@ def process_ocr(job_data):
                             r_sub["height"],
                         ]
                         poly_pts = get_split_polygon(bubble_mask, r_box, img_w, img_h, margin=20)
-                        if not poly_pts:
-                            poly_pts = bubble["mask_polygon"]
+                        if poly_pts:
+                            sp_x, sp_y, sp_w, sp_h = cv2.boundingRect(np.array(poly_pts, dtype=np.int32))
+                            split_mask = np.zeros((img_h, img_w), dtype=np.uint8)
+                            cv2.fillPoly(split_mask, [np.array(poly_pts, dtype=np.int32)], 255)  # type: ignore
+                            erosion_px = YOLO_MASK_EROSION
+                            kernel_erode = cv2.getStructuringElement(
+                                cv2.MORPH_ELLIPSE,
+                                (2 * erosion_px + 1, 2 * erosion_px + 1),
+                            )
+                            eroded_split_mask = cv2.erode(split_mask, kernel_erode, iterations=1)
+                            if cv2.countNonZero(eroded_split_mask) == 0:
+                                eroded_split_mask = split_mask
+                            sx, sy, sw, sh = cv2.boundingRect(eroded_split_mask)
+                            container_resolution = "resolved-local-split"
+                        else:
+                            poly_pts = None
+                            sp_x, sp_y, sp_w, sp_h = (
+                                r_sub["x"],
+                                r_sub["y"],
+                                r_sub["width"],
+                                r_sub["height"],
+                            )
+                            sx, sy, sw, sh = sp_x, sp_y, sp_w, sp_h
+                            container_resolution = "review-local-split-failed"
 
-                        # 2. Bounding box of the split polygon
-                        sp_x, sp_y, sp_w, sp_h = cv2.boundingRect(np.array(poly_pts, dtype=np.int32))
-
-                        # 3. Bounding box of the eroded mask (safe area)
-                        split_mask = np.zeros((img_h, img_w), dtype=np.uint8)
-                        cv2.fillPoly(split_mask, [np.array(poly_pts, dtype=np.int32)], 255)  # type: ignore
-                        erosion_px = YOLO_MASK_EROSION
-                        kernel_erode = cv2.getStructuringElement(
-                            cv2.MORPH_ELLIPSE,
-                            (2 * erosion_px + 1, 2 * erosion_px + 1),
-                        )
-                        eroded_split_mask = cv2.erode(split_mask, kernel_erode, iterations=1)
-                        if cv2.countNonZero(eroded_split_mask) == 0:
-                            eroded_split_mask = split_mask
-                        sx, sy, sw, sh = cv2.boundingRect(eroded_split_mask)
-
+                    provenance = r_sub.get("ownershipProvenance")
+                    if isinstance(provenance, dict):
+                        provenance = provenance | {"containerResolution": container_resolution}
+                    else:
+                        provenance = {"containerResolution": container_resolution}
                     candidate_regions.append(
                         {
                             "type": "bubble",
@@ -964,7 +1024,8 @@ def process_ocr(job_data):
                             "bubbleWidth": sp_w,
                             "bubbleHeight": sp_h,
                             "bubble": bubble,
-                            "ownershipProvenance": r_sub.get("ownershipProvenance"),
+                            "ownershipProvenance": provenance,
+                            "containerResolution": container_resolution,
                         }
                     )
 
@@ -975,13 +1036,14 @@ def process_ocr(job_data):
                 # and gets the orientation vote, which is the only lever that reaches a page where
                 # YOLO found nothing at all.
                 grouping = grouping_config(reading_direction)
+                unmatched_groups = group_fragments(unmatched_frags, grouping)
+                # Unmatched text has no validated detector container, so F01 records unknown
+                # multi-fragment ownership but does not turn the observation into a split here.
+                attach_live_owner_decisions(unmatched_frags, unmatched_groups, [])
                 merged_unmatched = merge_ocr_regions(unmatched_frags, grouping=grouping)
                 if capture_dir:
                     capture_groups.extend(
-                        [
-                            [unmatched_frags[index]["_capture_index"] for index in group]
-                            for group in group_fragments(unmatched_frags, grouping)
-                        ]
+                        [[unmatched_frags[index]["_capture_index"] for index in group] for group in unmatched_groups]
                     )
 
                 for idx, r_sub in enumerate(merged_unmatched):
@@ -1275,9 +1337,12 @@ def process_ocr(job_data):
                                     f"[OCR] VLM result for region_{cr_idx} rejected by validation: '{final_text}'"
                                 )
                                 continue
-                            bg_color, r["poly_pts"] = cover_fill_for_region(
-                                img, r["poly_pts"], r["x"], r["y"], r["width"], r["height"]
-                            )
+                            if r.get("containerResolution", "").startswith("review"):
+                                bg_color = None
+                            else:
+                                bg_color, r["poly_pts"] = cover_fill_for_region(
+                                    img, r["poly_pts"], r["x"], r["y"], r["width"], r["height"]
+                                )
                             if r["type"] == "bubble":
                                 regions.append(
                                     {
@@ -1299,7 +1364,8 @@ def process_ocr(job_data):
                                         "bubbleHeight": r.get("bubbleHeight", r["height"]),
                                         "bubbleId": f"bubble_{r['bubble_idx']}",
                                         "detectionConfidence": r["bubble"]["confidence"],
-                                        "maskPolygon": json.dumps(r["poly_pts"]),
+                                        "maskPolygon": json.dumps(r["poly_pts"]) if r["poly_pts"] is not None else None,
+                                        "containerResolution": r.get("containerResolution"),
                                         "safeTextX": r["safe_rect"][0],
                                         "safeTextY": r["safe_rect"][1],
                                         "safeTextW": r["safe_rect"][2],
@@ -1344,9 +1410,12 @@ def process_ocr(job_data):
                 for r in candidate_regions:
                     final_text = r["text"]
                     if final_text:
-                        bg_color, r["poly_pts"] = cover_fill_for_region(
-                            img, r["poly_pts"], r["x"], r["y"], r["width"], r["height"]
-                        )
+                        if r.get("containerResolution", "").startswith("review"):
+                            bg_color = None
+                        else:
+                            bg_color, r["poly_pts"] = cover_fill_for_region(
+                                img, r["poly_pts"], r["x"], r["y"], r["width"], r["height"]
+                            )
                         if r["type"] == "bubble":
                             regions.append(
                                 {
@@ -1368,7 +1437,8 @@ def process_ocr(job_data):
                                     "bubbleHeight": r.get("bubbleHeight", r["height"]),
                                     "bubbleId": f"bubble_{r['bubble_idx']}",
                                     "detectionConfidence": r["bubble"]["confidence"],
-                                    "maskPolygon": json.dumps(r["poly_pts"]),
+                                    "maskPolygon": json.dumps(r["poly_pts"]) if r["poly_pts"] is not None else None,
+                                    "containerResolution": r.get("containerResolution"),
                                     "safeTextX": r["safe_rect"][0],
                                     "safeTextY": r["safe_rect"][1],
                                     "safeTextW": r["safe_rect"][2],
@@ -1466,8 +1536,7 @@ def process_ocr(job_data):
                     capture_recognition.append({"text": text, "confidence": float(confidence)})
             source_id = f"{image_id}:{job_data.get('pageId') or 'unknown-page'}"
             fallback_quads = [
-                [[point[0] * ocr_upscale, point[1] * ocr_upscale] for point in bbox]
-                for bbox, _, _ in results
+                [[point[0] * ocr_upscale, point[1] * ocr_upscale] for point in bbox] for bbox, _, _ in results
             ]
             fallback_features = capture_fragment_features(
                 source_id=source_id,
@@ -1480,8 +1549,12 @@ def process_ocr(job_data):
                 region["ownershipProvenance"] = feature
 
             grouping = grouping_config(reading_direction)
+            fallback_groups = group_fragments(regions, grouping)
+            # The fallback contour is not a detector-validated owner container. Keep any
+            # multi-fragment decision explicit and unresolved while preserving its current group.
+            attach_live_owner_decisions(regions, fallback_groups, [])
             if capture_dir:
-                capture_groups = group_fragments(regions, grouping)
+                capture_groups = fallback_groups
             regions = merge_ocr_regions(regions, grouping=grouping)
 
         panel_regions_map = {}

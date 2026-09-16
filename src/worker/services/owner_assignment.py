@@ -57,9 +57,9 @@ def assign_captured_owners(
 ) -> list[OwnerDecision]:
     """Assign only evidence-backed text owners for captured OCR grouping candidates.
 
-    A multi-fragment owner requires one validated detector container, compatible declared source
-    style, coherent oriented-line geometry, and a finite OCR-to-source scale.  Missing or
-    contradictory evidence produces an ``unknown`` decision rather than a speculative merge.
+    A multi-fragment owner requires one validated detector container, coherent oriented-line
+    geometry, and a finite OCR-to-source scale. Available declared source style can veto
+    contradictory fragments; absent style remains an explicit unknown feature, not a split.
     """
     count = len(fragment_ids)
     if len(raw_quads) != count or len(recognition) != count or len(regions) != count:
@@ -116,10 +116,13 @@ def assign_captured_owners(
 
         styles = [member.style for member in evidence]
         diagnostics["source_styles"] = styles
-        if any(style is None for style in styles):
-            decisions.append(_unknown(fragment_group_ids, "missing-source-style", diagnostics))
-            continue
-        if len(set(styles)) != 1:
+        declared_styles = {style for style in styles if style is not None}
+        diagnostics["style_evidence"] = (
+            "matching-declared"
+            if len(declared_styles) == 1 and all(style is not None for style in styles)
+            else "unknown"
+        )
+        if len(declared_styles) > 1:
             decisions.append(_unknown(fragment_group_ids, "different-source-styles", diagnostics))
             continue
 

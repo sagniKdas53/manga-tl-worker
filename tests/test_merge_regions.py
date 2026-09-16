@@ -187,6 +187,122 @@ def test_merge_refuses_to_grant_a_fused_component_a_hulled_container():
     ]
 
 
+def test_merge_keeps_separate_dark_containers_review_only():
+    left_polygon = [[0, 0], [55, 0], [55, 100], [0, 100]]
+    right_polygon = [[45, 0], [100, 0], [100, 100], [45, 100]]
+    regions = [
+        {
+            "text": "left",
+            "detectedLanguage": "en",
+            "confidence": 0.9,
+            "x": 10,
+            "y": 20,
+            "width": 50,
+            "height": 30,
+            "fragmentId": "fragment-dark-left",
+            "backgroundColor": "#171717",
+            "maskPolygon": json.dumps(left_polygon),
+        },
+        {
+            "text": "right",
+            "detectedLanguage": "en",
+            "confidence": 0.8,
+            "x": 40,
+            "y": 20,
+            "width": 50,
+            "height": 30,
+            "fragmentId": "fragment-dark-right",
+            "backgroundColor": "#171717",
+            "maskPolygon": json.dumps(right_polygon),
+        },
+    ]
+
+    result = merge_ocr_regions(regions, reading_direction="ltr")
+
+    assert len(result) == 1
+    assert result[0]["maskPolygon"] is None
+    assert result[0]["containerResolution"] == "review-incompatible-containers"
+    assert [member["fragment_id"] for member in result[0]["rawFragmentMembership"]] == [
+        "fragment-dark-left",
+        "fragment-dark-right",
+    ]
+
+
+def test_merge_requires_a_container_for_every_component_member():
+    polygon = [[0, 0], [100, 0], [100, 100], [0, 100]]
+    regions = [
+        {
+            "text": "contained",
+            "detectedLanguage": "en",
+            "confidence": 0.9,
+            "x": 10,
+            "y": 20,
+            "width": 50,
+            "height": 30,
+            "fragmentId": "fragment-contained",
+            "maskPolygon": json.dumps(polygon),
+        },
+        {
+            "text": "uncontained",
+            "detectedLanguage": "en",
+            "confidence": 0.8,
+            "x": 40,
+            "y": 20,
+            "width": 50,
+            "height": 30,
+            "fragmentId": "fragment-uncontained",
+        },
+    ]
+
+    result = merge_ocr_regions(regions, reading_direction="ltr")
+
+    assert len(result) == 1
+    assert result[0]["maskPolygon"] is None
+    assert result[0]["containerResolution"] == "review-missing-container"
+    assert [member["fragment_id"] for member in result[0]["rawFragmentMembership"]] == [
+        "fragment-contained",
+        "fragment-uncontained",
+    ]
+
+
+def test_merge_never_crosses_known_panel_boundaries():
+    polygon = [[0, 0], [120, 0], [120, 100], [0, 100]]
+    regions = [
+        {
+            "text": "left panel",
+            "detectedLanguage": "en",
+            "confidence": 0.9,
+            "x": 10,
+            "y": 20,
+            "width": 50,
+            "height": 30,
+            "fragmentId": "fragment-panel-left",
+            "panelId": "panel-left",
+            "maskPolygon": json.dumps(polygon),
+        },
+        {
+            "text": "right panel",
+            "detectedLanguage": "en",
+            "confidence": 0.8,
+            "x": 40,
+            "y": 20,
+            "width": 50,
+            "height": 30,
+            "fragmentId": "fragment-panel-right",
+            "panelId": "panel-right",
+            "maskPolygon": json.dumps(polygon),
+        },
+    ]
+
+    result = merge_ocr_regions(regions, reading_direction="ltr")
+
+    assert [region["text"] for region in result] == ["left panel", "right panel"]
+    assert [region["rawFragmentMembership"] for region in result] == [
+        [{"index": 0, "fragment_id": "fragment-panel-left"}],
+        [{"index": 1, "fragment_id": "fragment-panel-right"}],
+    ]
+
+
 def test_merge_adjacent_vertical_fragments_without_merging_distant_bubbles():
     regions = [
         {

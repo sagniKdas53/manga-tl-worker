@@ -37,13 +37,30 @@ def resolve_component_container(regions, comp):
     authority over the gutter and both bubbles. Components with incompatible or absent polygons
     therefore retain their local raw membership and enter review without any replacement mask.
     """
-    polygons = [polygon for polygon in (_parse_polygon(regions[idx].get("maskPolygon")) for idx in comp) if polygon]
-    if not polygons:
+    polygons = [_parse_polygon(regions[idx].get("maskPolygon")) for idx in comp]
+    if any(polygon is None for polygon in polygons):
         return None, "review-missing-container"
     first = polygons[0]
-    if all(poly == first for poly in polygons[1:]):
+    if all(polygon == first for polygon in polygons[1:]):
         return json.dumps(first), "resolved-shared-container"
     return None, "review-incompatible-containers"
+
+
+def _split_cross_panel_components(components, regions):
+    """Veto a candidate that spans known distinct panels.
+
+    A shared panel is not owner evidence, but distinct panels are incompatible source geometry.
+    Preserve raw local regions rather than concatenate text across a gutter or panel boundary.
+    """
+
+    bounded = []
+    for component in components:
+        panel_ids = {regions[index].get("panelId") for index in component if regions[index].get("panelId") is not None}
+        if len(panel_ids) > 1:
+            bounded.extend([[index] for index in component])
+        else:
+            bounded.append(component)
+    return bounded
 
 
 def merge_ocr_regions(
@@ -87,7 +104,7 @@ def merge_ocr_regions(
     threshold_ratio = grouping.threshold_ratio
 
     n = len(regions)
-    components = group_fragments(regions, grouping, context)
+    components = _split_cross_panel_components(group_fragments(regions, grouping, context), regions)
 
     # Merge each component into a single region
     merged_regions = []

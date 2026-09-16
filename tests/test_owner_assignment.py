@@ -41,16 +41,39 @@ def test_same_panel_and_conversation_do_not_assign_an_owner_without_a_container(
     assert decision.reason == "missing-validated-container"
 
 
-def test_overlapping_boxes_do_not_assign_an_owner_without_source_style():
+def test_overlapping_boxes_do_not_assign_an_owner_without_a_container():
     decision = _decision(
         groups=[[0, 1]],
         quads=[_quad(20, 30), _quad(25, 35)],
         recognition=[{}, {}],
+        masks=[],
     )[0]
 
     assert decision.state == "unknown"
     assert decision.owner_id is None
-    assert decision.reason == "missing-source-style"
+    assert decision.reason == "missing-validated-container"
+
+
+def test_missing_source_style_remains_an_unknown_feature_not_a_split():
+    decision = _decision(groups=[[0, 1]], recognition=[{}, {}])[0]
+
+    assert decision.state == "assigned"
+    assert decision.owner_id is not None
+    assert decision.reason == "validated-container-continuous-lines"
+    assert decision.diagnostics["source_styles"] == [None, None]
+    assert decision.diagnostics["style_evidence"] == "unknown"
+
+
+def test_conflicting_declared_source_styles_veto_a_candidate_group():
+    decision = _decision(
+        groups=[[0, 1]],
+        recognition=[{"sourceStyle": {"fill": "black"}}, {"sourceStyle": {"fill": "white"}}],
+    )[0]
+
+    assert decision.state == "unknown"
+    assert decision.owner_id is None
+    assert decision.reason == "different-source-styles"
+    assert decision.diagnostics["style_evidence"] == "unknown"
 
 
 def test_distinct_validated_containers_veto_a_candidate_group():

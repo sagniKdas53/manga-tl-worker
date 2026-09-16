@@ -22,6 +22,7 @@ from worker.services.fragment_grouping import (
     group_fragments,
     resolve_vertical,
 )
+from worker.services.owner_assignment import assign_captured_owners
 
 
 def _legacy_components(regions, reading_direction, threshold_ratio):
@@ -339,31 +340,86 @@ def test_component_member_limit_breaks_an_a_b_c_bridge_without_touching_legacy_d
     assert bounded == [[0], [1], [2]]
 
 
-def test_owner_veto_separates_close_independent_labels_after_full_component_resolution():
-    close_independent = _cols(2)
-    seen_components = []
+def _quad(region):
+    x, y = region["x"], region["y"]
+    return [[x, y], [x + region["width"], y], [x + region["width"], y + region["height"]], [x, y + region["height"]]]
 
-    def unresolved_owner(component, regions):
-        seen_components.append((component, regions))
-        return "different-validated-containers"
 
-    result = group_fragments(
-        close_independent,
+def _owner_decision_veto(regions, masks, recognition):
+    """Evaluate each graph component through the real F01 decision boundary."""
+
+    quads = [_quad(region) for region in regions]
+
+    def veto(component, _grouping_regions):
+        decision = assign_captured_owners(
+            fragment_ids=[f"fragment-{index}" for index in component],
+            raw_quads=[quads[index] for index in component],
+            recognition=[recognition[index] for index in component],
+            regions=[regions[index] for index in component],
+            candidate_groups=[list(range(len(component)))],
+            detector_masks=masks,
+            scale_transform={"ocr_to_source": {"scale_x": 1.0, "scale_y": 1.0}},
+        )[0]
+        return None if decision.state == "assigned" else decision.reason
+
+    return veto
+
+
+def test_actual_owner_decision_separates_an_a_b_c_bridge():
+    bridge = _cols(3)
+    masks = [
+        {"id": "left", "format": "polygon", "points": [[90, 90], [145, 90], [145, 310], [90, 310]]},
+        {"id": "middle", "format": "polygon", "points": [[150, 90], [205, 90], [205, 310], [150, 310]]},
+        {"id": "right", "format": "polygon", "points": [[210, 90], [265, 90], [265, 310], [210, 310]]},
+    ]
+    veto = _owner_decision_veto(bridge, masks, [{}, {}, {}])
+
+    legacy = group_fragments(bridge, GroupingConfig(threshold_ratio=1.0))
+    bounded = group_fragments(
+        bridge,
         GroupingConfig(threshold_ratio=1.0),
-        GroupingContext(owner_veto=unresolved_owner),
+        GroupingContext(owner_veto=veto),
     )
 
-    assert seen_components == [([0, 1], close_independent)]
-    assert result == [[0], [1]]
+    assert legacy == [[0, 1, 2]]
+    assert veto(legacy[0], bridge) == "different-validated-containers"
+    assert bounded == [[0], [1], [2]]
 
 
-def test_owner_veto_keeps_a_labelled_true_unit_joined():
+def test_actual_owner_decision_separates_close_independent_labels():
+    close_independent = _cols(2)
+    masks = [
+        {"id": "left", "format": "polygon", "points": [[90, 90], [145, 90], [145, 310], [90, 310]]},
+        {"id": "right", "format": "polygon", "points": [[150, 90], [205, 90], [205, 310], [150, 310]]},
+    ]
+    veto = _owner_decision_veto(close_independent, masks, [{}, {}])
+
+    legacy = group_fragments(close_independent, GroupingConfig(threshold_ratio=1.0))
+    bounded = group_fragments(
+        close_independent,
+        GroupingConfig(threshold_ratio=1.0),
+        GroupingContext(owner_veto=veto),
+    )
+
+    assert legacy == [[0, 1]]
+    assert veto(legacy[0], close_independent) == "different-validated-containers"
+    assert bounded == [[0], [1]]
+
+
+def test_actual_owner_decision_keeps_a_labelled_true_unit_joined():
     true_unit = _cols(2)
+    mask = {"id": "dialogue", "format": "polygon", "points": [[90, 90], [205, 90], [205, 310], [90, 310]]}
+    veto = _owner_decision_veto(
+        true_unit,
+        [mask],
+        [{"sourceStyle": {"fill": "black"}}, {"sourceStyle": {"fill": "black"}}],
+    )
 
     result = group_fragments(
         true_unit,
         GroupingConfig(threshold_ratio=1.0, component_max_members=2),
-        GroupingContext(owner_veto=lambda component, regions: None),
+        GroupingContext(owner_veto=veto),
     )
 
+    assert veto([0, 1], true_unit) is None
     assert result == [[0, 1]]

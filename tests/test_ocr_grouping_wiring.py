@@ -12,9 +12,9 @@ corpus/runs/2026-08-09/region-grouping/.
 import numpy as np
 import pytest
 
-from worker.handlers.ocr import grouping_config
+from worker.handlers.ocr import grouping_config, owner_aware_grouping_context
 from worker.services.bubble_geometry import bubble_grouping_context, mask_solidity
-from worker.services.fragment_grouping import group_fragments
+from worker.services.fragment_grouping import GroupingConfig, group_fragments
 from worker.services.merge_regions import merge_ocr_regions
 
 
@@ -141,3 +141,45 @@ def test_context_is_none_when_the_bubble_has_no_polygon():
 def test_solidity_defaults_to_convex_when_it_cannot_be_measured(polygon, expected):
     """1.0 disables the veto, so every unmeasurable case must land there rather than at 0."""
     assert mask_solidity(polygon) == pytest.approx(expected, abs=0.01)
+
+
+def _provenanced_fragment(index, x, y):
+    fragment = _frag(x, y, 60, 20, f"line-{index}")
+    fragment["fragmentId"] = f"fragment-{index}"
+    fragment["sourceQuad"] = [[x, y], [x + 60, y], [x + 60, y + 20], [x, y + 20]]
+    fragment["ownershipProvenance"] = {"id": f"fragment-{index}", "sourceQuad": fragment["sourceQuad"]}
+    return fragment
+
+
+def test_live_owner_context_assigns_a_continuous_shared_container_without_capture_mode():
+    fragments = [_provenanced_fragment(0, 10, 10), _provenanced_fragment(1, 10, 35)]
+    context = owner_aware_grouping_context(
+        None,
+        [{"format": "polygon", "id": "bubble-0", "points": [[0, 0], [100, 0], [100, 100], [0, 100]]}],
+    )
+
+    groups = group_fragments(
+        fragments,
+        GroupingConfig(threshold_ratio=1.0, reading_direction="ltr", orientation="vote"),
+        context,
+    )
+
+    assert groups == [[0, 1]]
+    decisions = [fragment["ownershipProvenance"]["ownerDecision"] for fragment in fragments]
+    assert all(decision["state"] == "assigned" for decision in decisions)
+    assert decisions[0]["owner_id"] == decisions[1]["owner_id"]
+
+
+def test_live_owner_context_keeps_an_uncontained_component_unresolved():
+    fragments = [_provenanced_fragment(0, 10, 10), _provenanced_fragment(1, 10, 35)]
+
+    groups = group_fragments(
+        fragments,
+        GroupingConfig(threshold_ratio=1.0, reading_direction="ltr", orientation="vote"),
+        owner_aware_grouping_context(None, []),
+    )
+
+    assert groups == [[0], [1]]
+    decisions = [fragment["ownershipProvenance"]["ownerDecision"] for fragment in fragments]
+    assert all(decision["state"] == "unknown" for decision in decisions)
+    assert {decision["reason"] for decision in decisions} == {"missing-validated-container"}
