@@ -12,7 +12,7 @@ corpus/runs/2026-08-09/region-grouping/.
 import numpy as np
 import pytest
 
-from worker.handlers.ocr import grouping_config, owner_aware_grouping_context
+from worker.handlers.ocr import attach_live_owner_decisions, grouping_config, owner_aware_grouping_context
 from worker.services.bubble_geometry import bubble_grouping_context, mask_solidity
 from worker.services.fragment_grouping import GroupingConfig, group_fragments
 from worker.services.merge_regions import merge_ocr_regions
@@ -168,6 +168,20 @@ def test_live_owner_context_assigns_a_continuous_shared_container_without_captur
     decisions = [fragment["ownershipProvenance"]["ownerDecision"] for fragment in fragments]
     assert all(decision["state"] == "assigned" for decision in decisions)
     assert decisions[0]["owner_id"] == decisions[1]["owner_id"]
+
+
+def test_live_owner_context_attaches_one_continuous_line_at_a_bubble_edge():
+    fragments = [_provenanced_fragment(0, 10, 10), _provenanced_fragment(1, 10, 55)]
+    decisions = attach_live_owner_decisions(
+        fragments,
+        [[0, 1]],
+        [{"format": "polygon", "id": "bubble-0", "points": [[0, 0], [100, 0], [100, 65], [0, 65]]}],
+    )
+
+    assert decisions[0].reason == "geometry-attached-continuous-lines"
+    assert {fragment["ownershipProvenance"]["ownerDecision"]["reason"] for fragment in fragments} == {
+        "geometry-attached-continuous-lines"
+    }
 
 
 def test_live_owner_context_keeps_an_uncontained_component_unresolved():

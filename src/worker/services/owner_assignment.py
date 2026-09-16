@@ -107,10 +107,8 @@ def assign_captured_owners(
         evidence = [member for member in members if member is not None]
         container_ids = [_containing_container(member.quad, containers) for member in evidence]
         diagnostics["container_ids"] = container_ids
-        if None in container_ids:
-            decisions.append(_unknown(fragment_group_ids, "missing-validated-container", diagnostics))
-            continue
-        if len(set(container_ids)) != 1:
+        known_container_ids = {identifier for identifier in container_ids if identifier is not None}
+        if len(known_container_ids) > 1:
             decisions.append(_unknown(fragment_group_ids, "different-validated-containers", diagnostics))
             continue
 
@@ -132,12 +130,30 @@ def assign_captured_owners(
             decisions.append(_unknown(fragment_group_ids, str(continuity["reason"]), diagnostics))
             continue
 
+        known_container_ids = {identifier for identifier in container_ids if identifier is not None}
+        if not known_container_ids:
+            decisions.append(_unknown(fragment_group_ids, "missing-validated-container", diagnostics))
+            continue
+
+        # YOLO masks commonly stop at a balloon's ink edge, while PaddleOCR's oriented quad
+        # covers an adjacent glyph/anti-aliased edge. Allow exactly one such neighbour to inherit
+        # the one proven container only after the candidate grouping has supplied proximity and
+        # reading-order continuity. Never bridge two detector containers or a larger component.
+        if None in container_ids:
+            if len(members) != 2 or container_ids.count(None) != 1:
+                decisions.append(_unknown(fragment_group_ids, "incomplete-validated-container", diagnostics))
+                continue
+            diagnostics["geometry_attached_container"] = next(iter(known_container_ids))
+            reason = "geometry-attached-continuous-lines"
+        else:
+            reason = "validated-container-continuous-lines"
+
         decisions.append(
             OwnerDecision(
                 fragment_ids=fragment_group_ids,
                 owner_id=_owner_id(fragment_group_ids),
                 state="assigned",
-                reason="validated-container-continuous-lines",
+                reason=reason,
                 diagnostics=diagnostics,
             )
         )

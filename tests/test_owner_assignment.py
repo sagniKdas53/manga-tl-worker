@@ -41,6 +41,19 @@ def test_same_panel_and_conversation_do_not_assign_an_owner_without_a_container(
     assert decision.reason == "missing-validated-container"
 
 
+def test_assigns_one_adjacent_line_just_outside_its_validated_bubble():
+    decision = _decision(
+        groups=[[0, 1]],
+        quads=[_quad(280, 30, width=20, height=80), _quad(305, 30, width=20, height=80)],
+        recognition=[{}, {}],
+    )[0]
+
+    assert decision.state == "assigned"
+    assert decision.reason == "geometry-attached-continuous-lines"
+    assert decision.diagnostics["container_ids"] == ["bubble-a", None]
+    assert decision.diagnostics["geometry_attached_container"] == "bubble-a"
+
+
 def test_overlapping_boxes_do_not_assign_an_owner_without_a_container():
     decision = _decision(
         groups=[[0, 1]],
