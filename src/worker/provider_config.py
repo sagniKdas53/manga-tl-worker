@@ -130,15 +130,27 @@ class ProviderConfigLoader:
 
         try:
             with open(self.config_path, encoding="utf-8") as f:
-                self.raw_data = json.load(f)
+                document = json.load(f)
         except Exception as e:
             logger.error(f"Failed to parse providers.json at '{self.config_path}': {e}")
             return
 
+        self._loaded_mtime = self._config_mtime()
+        self.apply_document(document)
+
+    def apply_document(self, document: dict[str, Any]) -> None:
+        """Replace the loaded configuration with ``document``, a providers.json object.
+
+        The file load and the catalog refresh (``worker.services.catalog_refresh``) both end here:
+        the refresh hands back the same document with current prices and free lists. It does not
+        touch the file's mtime, so an edit to providers.json still wins on the next
+        ``reload_if_changed()`` — the refresh then rebases onto the edited file on its next run.
+        """
+        self.raw_data = document
+
         # Reload has to drop providers that were deleted from the file, not just overwrite the ones
         # that remain — the loop below only ever adds.
         self.providers = {}
-        self._loaded_mtime = self._config_mtime()
         self.version = self.raw_data.get("version", 1)
         self.defaults = self.raw_data.get("defaults", {})
 
