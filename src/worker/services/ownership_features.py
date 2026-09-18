@@ -15,7 +15,11 @@ def stable_fragment_id(source_id: str, index: int, quad: Any, region: Mapping[st
 
 
 def capture_fragment_features(
-    *, source_id: str, raw_quads: Sequence[Any], recognition: Sequence[Mapping[str, Any]], regions: Sequence[Mapping[str, Any]]
+    *,
+    source_id: str,
+    raw_quads: Sequence[Any],
+    recognition: Sequence[Mapping[str, Any]],
+    regions: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     """Return deterministic provenance; absent style is represented as ``None``, never inferred."""
     if len(raw_quads) != len(recognition) or len(raw_quads) != len(regions):
@@ -26,7 +30,9 @@ def capture_fragment_features(
     ]
 
 
-def _feature(source_id: str, index: int, raw_quad: Any, recognition: Mapping[str, Any], region: Mapping[str, Any]) -> dict[str, Any]:
+def _feature(
+    source_id: str, index: int, raw_quad: Any, recognition: Mapping[str, Any], region: Mapping[str, Any]
+) -> dict[str, Any]:
     points = _quad(raw_quad)
     feature = {
         "id": stable_fragment_id(source_id, index, raw_quad, region),
@@ -56,7 +62,12 @@ def _quad(value: Any) -> tuple[tuple[float, float], ...] | None:
         if not isinstance(point, Sequence) or isinstance(point, str | bytes) or len(point) != 2:
             return None
         x, y = point
-        if not isinstance(x, int | float) or not isinstance(y, int | float) or not math.isfinite(x) or not math.isfinite(y):
+        if (
+            not isinstance(x, int | float)
+            or not isinstance(y, int | float)
+            or not math.isfinite(x)
+            or not math.isfinite(y)
+        ):
             return None
         points.append((float(x), float(y)))
     return tuple(points)

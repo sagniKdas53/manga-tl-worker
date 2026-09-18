@@ -34,6 +34,7 @@ class JobSubmitRequest(BaseModel):
     queue_name: str
     job_data: JobData
 
+
 class PageSceneRenderRequest(BaseModel):
     """New-format worker input. A legacy project payload fails before renderer dispatch."""
 
