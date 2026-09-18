@@ -1,9 +1,16 @@
-"""Immutable page-scene/v1 transport to the pinned browser renderer."""
+"""Immutable page-scene/v1 transport to the pinned browser renderer.
+
+The renderer accepts only embedded (`data:`) images — it never fetches a URL — so every cleanup
+patch the scene references is downloaded here by its presigned URL, checked against the digest the
+scene records for that asset, and embedded. A patch whose bytes do not match the scene is a wrong
+patch, not a transport hiccup, and fails the job.
+"""
 
 from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import os
 from typing import Any
@@ -32,7 +39,16 @@ def _render_input_digest(scene_digest: str, source_sha256: str, asset_sha256s: l
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def render_page_scene(job_data: dict[str, Any]) -> None:
+def _fetch_asset(url: str, record: dict[str, Any], asset_id: str) -> bytes:
+    response = requests.get(url, timeout=60)
+    response.raise_for_status()
+    payload = response.content
+    if hashlib.sha256(payload).hexdigest() != record["sha256"] or len(payload) != record["byte_length"]:
+        raise ValueError(f"cleanup asset {asset_id} does not match the digest recorded in the scene")
+    return payload
+
+
+def render_page_scene(job_data: dict[str, Any]) -> dict[str, Any]:
     """Render the queued immutable scene; never read mutable geometry or call Pillow typography."""
     scene = validate_page_scene(job_data.get("logicalScene"))
     if scene.document["scene_kind"] != "logical":
@@ -52,24 +68,25 @@ def render_page_scene(job_data: dict[str, Any]) -> None:
     if hashlib.sha256(source_bytes).hexdigest() != source["sha256"]:
         raise ValueError("immutable scene source digest mismatch")
 
-    asset_urls = job_data.get("renderAssetUrls", {})
+    asset_urls = job_data.get("renderAssetUrls") or {}
     assets = {asset["asset_id"]: asset for asset in scene.document["assets"]}
     cleanup_assets = []
-    for cleanup in scene.document["cleanup_artifacts"]:
+    for index, cleanup in enumerate(scene.document["cleanup_artifacts"]):
         patch_id = cleanup["patch_asset_id"]
         patch_url = asset_urls.get(patch_id)
         if not isinstance(patch_url, str):
             raise ValueError(f"missing immutable cleanup asset {patch_id}")
+        patch_bytes = _fetch_asset(patch_url, assets[patch_id], patch_id)
         bounds = cleanup["bounds"]
         cleanup_assets.append(
             {
                 "cleanupId": cleanup["cleanup_id"],
-                "href": patch_url,
+                "href": _data_url(assets[patch_id]["mime_type"], patch_bytes),
                 "x": bounds["x"],
                 "y": bounds["y"],
                 "width": bounds["width"],
                 "height": bounds["height"],
-                "zIndex": 0,
+                "zIndex": index,
                 "visible": True,
             }
         )
@@ -126,8 +143,19 @@ def render_page_scene(job_data: dict[str, Any]) -> None:
             "textObjects": text_objects,
         },
     }
-    result = requests.post(renderer_url.rstrip("/") + "/render", json=payload, timeout=120)
-    result.raise_for_status()
+    try:
+        result = requests.post(renderer_url.rstrip("/") + "/render", json=payload, timeout=180)
+    except requests.RequestException as err:
+        # The worker no longer hard-depends on the renderer at startup (Compose), so an absent or
+        # crashed renderer surfaces here, per job, with the reason in the job table.
+        raise RuntimeError(f"page renderer at {renderer_url} is unreachable: {err}") from err
+    if result.status_code >= 400:
+        detail = ""
+        try:
+            detail = result.json().get("error") or ""
+        except ValueError:
+            detail = result.text[:300]
+        raise RuntimeError(f"page renderer rejected the scene ({result.status_code}): {detail}")
     rendered = result.json()
     if (
         rendered.get("logicalSceneSha256") != scene.logical_scene_sha256
@@ -138,5 +166,11 @@ def render_page_scene(job_data: dict[str, Any]) -> None:
     if hashlib.sha256(png).hexdigest() != rendered.get("pngSha256"):
         raise ValueError("renderer PNG digest mismatch")
     minio_client.put_object(
-        "manga-library", f"rendered/{image_id}.png", __import__("io").BytesIO(png), len(png), content_type="image/png"
+        "manga-library", f"rendered/{image_id}.png", io.BytesIO(png), len(png), content_type="image/png"
     )
+    return {
+        "pageRevision": rendered["pageRevision"],
+        "logicalSceneSha256": rendered["logicalSceneSha256"],
+        "pngSha256": rendered["pngSha256"],
+        "diagnostics": rendered.get("diagnostics") or [],
+    }

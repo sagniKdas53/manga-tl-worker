@@ -258,7 +258,7 @@ def test_process_qa_vlm_nvidia(mock_qa_config, mock_post, mock_get, mock_minio, 
 
 @patch("worker.handlers.qa.try_cloud_ai_vision")
 @patch("worker.handlers.qa.try_cloud_ai")
-@patch("worker.handlers.render.render_image_core")
+@patch("worker.page_scene_renderer.render_page_scene")
 @patch("worker.handlers.qa.download_image")
 @patch("worker.handlers.qa.minio_client")
 @patch("worker.handlers.qa.requests.get")
@@ -317,13 +317,16 @@ def test_process_qa_hybrid_flow(
         }
     )
 
-    # Mock prepare status
+    # Mock prepare status. R1: the prepare endpoint answers with the immutable render payload
+    # that hybrid QA hands to the browser renderer for its VLM check.
+    render_payload = {"imageId": "image-uuid-1", "pageRevision": 2, "logicalScene": {}, "renderAssetUrls": {}}
     mock_post_res = MagicMock()
     mock_post_res.status_code = 200
+    mock_post_res.json.return_value = render_payload
     mock_post.return_value = mock_post_res
 
     # Mock render
-    mock_render.return_value = True
+    mock_render.return_value = {"pageRevision": 2, "logicalSceneSha256": "a" * 64, "pngSha256": "b" * 64}
 
     # Mock image download & MinIO download for VLM
     mock_download.return_value = get_dummy_image_bytes()
@@ -349,8 +352,8 @@ def test_process_qa_hybrid_flow(
 
     # Verify LLM was called
     mock_try_llm.assert_called_once()
-    # Verify render was called
-    mock_render.assert_called_once_with("image-uuid-1")
+    # Verify the interim render went through the browser renderer with the prepare payload
+    mock_render.assert_called_once_with(render_payload)
     # Verify VLM was called
     mock_try_vlm.assert_called_once()
 

@@ -463,13 +463,16 @@ You MUST return a JSON object containing a "results" key with an array of object
         logger.error(f"[QA] Failed to post Hybrid QA preparation: {e}")
         raise
 
-    # Trigger render inline
-    from worker.handlers.render import render_image_core
-
-    render_ok = render_image_core(image_id)
-    if not render_ok:
-        logger.error("[QA] Rendering failed during Hybrid QA. Aborting.")
+    # The prepare endpoint applied the first pass's fixes, snapshotted the page and returned the
+    # immutable render payload; draw it through the browser renderer so the VLM judges the same
+    # pixels the export will carry (tracker R1). 204 means the image has no page — nothing to render.
+    if prep_res.status_code == 204:
+        logger.warning("[QA] Hybrid QA: image has no page; skipping the VLM pass.")
         return
+    prep_res.raise_for_status()
+    from worker.page_scene_renderer import render_page_scene
+
+    render_page_scene(prep_res.json())
 
     # Now run VLM check on updated render
     try:

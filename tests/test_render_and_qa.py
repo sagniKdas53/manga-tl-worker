@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 from PIL import Image
 
 from worker.handlers.qa import process_qa
-from worker.handlers.render import process_render
 
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_CACHE_DIR = os.path.join(TEST_DIR, "test_rendered_cache")
@@ -19,64 +18,9 @@ def get_dummy_image_bytes():
     return out.getvalue()
 
 
-@patch("worker.handlers.render.download_image")
-@patch("worker.handlers.render.minio_client")
-@patch("worker.handlers.render.requests.get")
-@patch("worker.handlers.render.requests.post")
-@patch("worker.config.QA_MODE", "vlm")  # Set QA_MODE to trigger rendering
-@patch("worker.config.RENDER_CACHE_DIR", TEST_CACHE_DIR)
-def test_process_render_success(mock_post, mock_get, mock_minio, mock_download):
-    # Setup mocks
-    mock_download.return_value = get_dummy_image_bytes()
-
-    mock_image_info = {
-        "id": "image-uuid-1",
-        "filename": "page1.png",
-        "storagePath": "originals/page1.png",
-        "layerElements": [
-            {
-                "text": "Hello rendered text",
-                "x": 10.0,
-                "y": 20.0,
-                "maxWidth": 100,
-                "maxHeight": 50,
-                "visible": True,
-                "backgroundColor": "#ffffff",
-                "textColor": "#000000",
-                "size": 14.0,
-                "fontWeight": "bold",
-                "fontStyle": "normal",
-                "boxShape": "rectangular",
-                "font": "Comic Neue",
-            }
-        ],
-    }
-
-    mock_get_res = MagicMock()
-    mock_get_res.status_code = 200
-    mock_get_res.json.return_value = mock_image_info
-    mock_get.return_value = mock_get_res
-
-    mock_post_res = MagicMock()
-    mock_post_res.status_code = 200
-    mock_post.return_value = mock_post_res
-
-    # Invoke process_render
-    job_data = {"imageId": "image-uuid-1", "pageNumber": 1, "chapterNumber": 1.0}
-    process_render(job_data)
-
-    # Assertions
-    mock_download.assert_called_once()
-    mock_minio.put_object.assert_called_once()
-    args, kwargs = mock_minio.put_object.call_args
-    assert args[0] == "manga-library"
-    assert args[1] == "rendered/image-uuid-1.png"
-    assert kwargs.get("content_type") == "image/png"
-
-    mock_post.assert_called_once()
-    post_args, post_kwargs = mock_post.call_args
-    assert "render" in post_args[0]
-    assert post_kwargs["json"]["imageId"] == "image-uuid-1"
+# The Pillow render test that lived here is gone with the Pillow path (tracker R1). The render
+# handler's contract — scene in, browser renderer, callback with the immutable identity, and a
+# loud failure for a job without a scene — is covered in tests/test_page_scene_renderer.py.
 
 
 @patch("worker.handlers.qa.try_cloud_ai")
