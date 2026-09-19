@@ -77,7 +77,24 @@ jobs:
       - name: Type check (pyright)
         run: pyright .
 
+      # tests/test_page_scene_contract.py pins the worker's scene model to the page-scene/v1
+      # schema and fixtures that live in the parent repo (manga-tl/contracts). As a submodule the
+      # worker finds them at ../contracts; this standalone checkout has no parent, so fetch just
+      # that directory from the manga-tl branch of the same name, or main once it has merged.
+      - name: Fetch the page-scene contract from manga-tl
+        run: |
+          ref="${{ github.head_ref || github.ref_name }}"
+          clone() {
+            git clone --quiet --depth 1 --filter=blob:none --sparse "$@" \
+              https://github.com/sagniKdas53/manga-tl.git "$RUNNER_TEMP/manga-tl"
+          }
+          clone --branch "$ref" || clone
+          git -C "$RUNNER_TEMP/manga-tl" sparse-checkout set contracts
+          ls "$RUNNER_TEMP/manga-tl/contracts"
+
       - name: Run test suite
         env:
           PYTHONPATH: src
+          PAGE_SCENE_SCHEMA: ${{ runner.temp }}/manga-tl/contracts/page-scene-v1.schema.json
+          PAGE_SCENE_FIXTURES: ${{ runner.temp }}/manga-tl/contracts/fixtures/page-scene-v1
         run: pytest tests/ --cov=. --cov-report=xml
