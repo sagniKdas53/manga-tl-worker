@@ -161,6 +161,12 @@ def make_loader(tmp_path, document):
     return ProviderConfigLoader(str(path))
 
 
+def model_ids(loader: ProviderConfigLoader, provider: str, purpose: str) -> list[str]:
+    models = loader.providers[provider].models[purpose]
+    assert models is not None, f"{provider}/{purpose} has no model list"
+    return [m.id for m in models]
+
+
 def test_run_once_applies_publishes_and_stores(tmp_path, document, openrouter, nvidia, monkeypatch):
     monkeypatch.setenv("NVIDIA_API_KEY", "nv-key")
     loader = make_loader(tmp_path, document)
@@ -169,7 +175,7 @@ def test_run_once_applies_publishes_and_stores(tmp_path, document, openrouter, n
         changes = CatalogRefresher(loader, redis).run_once()
 
     assert "openrouter/tl: added free model free/text:free" in changes
-    tl_ids = [m.id for m in loader.providers["openrouter"].models["tl"]]
+    tl_ids = model_ids(loader, "openrouter", "tl")
     assert "free/text:free" in tl_ids and "gone/free:free" not in tl_ids
 
     stored = {call.args[0]: json.loads(call.args[1]) for call in redis.set.call_args_list}
@@ -205,13 +211,13 @@ def test_restore_reapplies_the_last_refresh_only_for_the_same_file(tmp_path, doc
         {"sourceMtime": loader._loaded_mtime, "refreshedAt": "2026-09-18T00:00:00+00:00", "document": refreshed}
     )
     assert CatalogRefresher(loader, redis).restore()
-    assert "free/text:free" in [m.id for m in loader.providers["openrouter"].models["tl"]]
+    assert "free/text:free" in model_ids(loader, "openrouter", "tl")
 
     (tmp_path / "edited").mkdir()
     edited = make_loader(tmp_path / "edited", document)
     redis.get.return_value = json.dumps({"sourceMtime": -1.0, "document": refreshed})
     assert not CatalogRefresher(edited, redis).restore()
-    assert "free/text:free" not in [m.id for m in edited.providers["openrouter"].models["tl"]]
+    assert "free/text:free" not in model_ids(edited, "openrouter", "tl")
 
 
 def test_a_hand_edit_wins_over_the_restored_document(tmp_path, document):
