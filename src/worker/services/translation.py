@@ -99,6 +99,35 @@ GOOD: "ELF!"
 PROMPT_VERSION = "batch-v3"
 
 
+# A model that declines to translate answers in the target language, in the first person, about
+# the *task* -- never with the line of dialogue it was given. Tracker R2 (d): a refusal is not a
+# translation, so it must fail validation like any other bad output; the region then goes through
+# the retry and fallback passes and, if nothing translates it, is reported `translationFailed`,
+# which the backend turns into a hidden element and the scene into `review`.
+#
+# Narrower than scripts/quality/reference_compare.py's REFUSAL on purpose: that one counts
+# refusals after the fact, this one throws translations away, and manga dialogue is full of
+# "I can't..." and "Sorry...". What separates a refusal is the object: it cannot *help / assist /
+# translate / provide*, or it names the content or a policy. The three strings typeset onto
+# sample222 in the g5 run were "[Explicit sexual content involving ... -- redacted.]".
+REFUSAL_PATTERN = re.compile(
+    r"\[[^\]]*\bredacted\b[^\]]*\]"
+    r"|^\s*\[?\s*(?:explicit|exploitative|graphic) (?:sexual |adult )?(?:content|material|advertisement)\b"
+    r"|\b(?:i can(?:'|no)?t|i cannot|i(?:'m| am) (?:unable|not able) to)\s+"
+    r"(?:help|assist|translate|provide|produce|comply|fulfil|fulfill|generate|process)\b"
+    r"|\bas an ai\b"
+    r"|\b(?:content|usage|safety) polic(?:y|ies)\b"
+    r"|\bviolates? (?:the |our |my )?(?:guidelines|terms)\b"
+    r"|\b(?:this|the) (?:content|request|text|material|image) (?:involves|contains|depicts|violates|appears to)\b",
+    re.IGNORECASE,
+)
+
+
+def is_refusal(translated):
+    """True when the text is the model talking about the request instead of translating it."""
+    return bool(translated) and REFUSAL_PATTERN.search(translated.strip()) is not None
+
+
 def is_valid_translation(source, translated, request_id=None):
     req_prefix = f"[{request_id}] " if request_id else ""
     if not translated:
@@ -107,6 +136,10 @@ def is_valid_translation(source, translated, request_id=None):
 
     translated_stripped = translated.strip()
     source_stripped = source.strip()
+
+    if is_refusal(translated_stripped):
+        logger.warning(f"{req_prefix}Validation failed reason=refusal source={source} translation={translated}")
+        return False
 
     # Check forbidden phrases / boilerplate
     forbidden_substrings = ["translate the following text", "text:", "output:", "json"]

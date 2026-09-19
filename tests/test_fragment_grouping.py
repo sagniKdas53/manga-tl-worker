@@ -21,6 +21,7 @@ from worker.services.fragment_grouping import (
     GroupingContext,
     group_fragments,
     resolve_vertical,
+    union_area,
 )
 from worker.services.owner_assignment import assign_captured_owners
 
@@ -423,3 +424,43 @@ def test_actual_owner_decision_keeps_a_labelled_true_unit_joined():
 
     assert veto([0, 1], true_unit) is None
     assert result == [[0, 1]]
+
+
+# --- tracker R2: no component may become a region larger than a quarter of the page ---------------
+
+
+def _column(x, y, w=30, h=200):
+    return {"x": x, "y": y, "width": w, "height": h, "text": "t", "confidence": 0.9, "detectedLanguage": "ja"}
+
+
+def test_area_gate_is_inert_without_page_area_or_fraction():
+    # Two blocks of vertical columns 60px apart on a 400x400 page: the legacy budget chains them.
+    regions = [_column(10, 10), _column(45, 10), _column(80, 10), _column(140, 10), _column(175, 10), _column(210, 10)]
+    cfg = GroupingConfig(threshold_ratio=2.5)
+    assert group_fragments(regions, cfg) == [[0, 1, 2, 3, 4, 5]]
+    assert group_fragments(regions, cfg, GroupingContext(page_area=400 * 400)) == [[0, 1, 2, 3, 4, 5]]
+    gated = GroupingConfig(threshold_ratio=2.5, component_max_area_fraction=0.25)
+    assert group_fragments(regions, gated) == [[0, 1, 2, 3, 4, 5]]
+
+
+def test_oversized_component_is_regrouped_at_a_tighter_budget_not_to_singletons():
+    # Same page; the six-column union is 230x200 = 28.75% of 400x400. Halving the budget once
+    # (2.5 -> 1.25 chars = 37px) still bridges the 35px intra-block gaps and cuts the 60px gutter.
+    regions = [_column(10, 10), _column(45, 10), _column(80, 10), _column(140, 10), _column(175, 10), _column(210, 10)]
+    gated = GroupingConfig(threshold_ratio=2.5, component_max_area_fraction=0.25)
+    assert group_fragments(regions, gated, GroupingContext(page_area=400 * 400)) == [[0, 1, 2], [3, 4, 5]]
+
+
+def test_oversized_component_that_overlaps_falls_back_to_singletons_at_the_floor():
+    # Two boxes that physically overlap can never be separated by a proximity budget.
+    regions = [
+        {"x": 0, "y": 0, "width": 300, "height": 300, "text": "a", "confidence": 0.9, "detectedLanguage": "ja"},
+        {"x": 250, "y": 250, "width": 100, "height": 100, "text": "b", "confidence": 0.9, "detectedLanguage": "ja"},
+    ]
+    gated = GroupingConfig(threshold_ratio=0.35, component_max_area_fraction=0.25)
+    assert group_fragments(regions, gated, GroupingContext(page_area=400 * 400)) == [[0], [1]]
+
+
+def test_union_area_is_the_box_the_component_would_become():
+    regions = [_column(10, 10, 30, 200), _column(100, 50, 30, 200)]
+    assert union_area([0, 1], regions) == 120 * 240

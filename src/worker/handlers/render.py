@@ -61,6 +61,7 @@ def process_render(job_data):
         "logicalSceneSha256": result["logicalSceneSha256"],
         "renderedPngSha256": result["pngSha256"],
         "diagnostics": result.get("diagnostics") or [],
+        "layout": result.get("layout") or [],
     }
     try:
         res = requests.post(f"{CALLBACK_URL}/render", json=callback_payload, headers=backend_headers())

@@ -92,6 +92,7 @@ def test_render_dispatcher_routes_immutable_scene_to_browser_then_callback(
         "logicalSceneSha256": "a" * 64,
         "pngSha256": "b" * 64,
         "diagnostics": [{"code": "text-overflow", "objectId": "text-1"}],
+        "layout": [{"object_id": "text-1", "font_size": 28.5, "lines": ["Hello", "there"]}],
     }
     process_render({"jobId": "job", "imageId": "image", "pageId": "page", "logicalScene": {}})
 
@@ -105,6 +106,7 @@ def test_render_dispatcher_routes_immutable_scene_to_browser_then_callback(
         "logicalSceneSha256": "a" * 64,
         "renderedPngSha256": "b" * 64,
         "diagnostics": [{"code": "text-overflow", "objectId": "text-1"}],
+        "layout": [{"object_id": "text-1", "font_size": 28.5, "lines": ["Hello", "there"]}],
     }
 
 

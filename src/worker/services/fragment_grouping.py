@@ -13,7 +13,7 @@ production until a call site opts in.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 # Fallback when no threshold is supplied. Kept here beside the code that uses it; the environment
 # lookup itself stays in merge_ocr_regions so this module has no ambient inputs.
@@ -45,6 +45,12 @@ class GroupingConfig:
         component_max_members: Maximum members allowed in one connected component. ``None`` keeps
             frozen legacy behaviour; a bounded component is deliberately split to unresolved
             singleton candidates rather than silently retaining a bridge merge.
+        component_max_area_fraction: Largest share of the page one component's union box may
+            cover (tracker R2: 0.25). ``None`` keeps frozen legacy behaviour. Needs
+            ``GroupingContext.page_area``; inert without it. An oversized component is regrouped
+            at half the proximity budget, repeatedly, until every piece fits or the budget reaches
+            ``MIN_THRESHOLD_RATIO``, and what still does not fit becomes singletons. This is what
+            turned sample83's free-standing columns into one 1011×1617 region on a 1412×2000 page.
     """
 
     threshold_ratio: float = DEFAULT_THRESHOLD_RATIO
@@ -53,6 +59,7 @@ class GroupingConfig:
     waist_gate: float | None = None
     waist_max_solidity: float = DEFAULT_WAIST_MAX_SOLIDITY
     component_max_members: int | None = None
+    component_max_area_fraction: float | None = None
 
 
 @dataclass(frozen=True)
@@ -70,11 +77,18 @@ class GroupingContext:
         owner_veto: Called after the full graph component is known. Return an explicit reason to
             split it into unresolved singleton candidates, or ``None`` to keep it. It cannot
             create a merge and is off by default.
+        page_area: Source page area in pixels², for ``component_max_area_fraction``.
     """
 
     clearance: Callable[[tuple[float, float], tuple[float, float]], float] | None = None
     solidity: float = 1.0
     owner_veto: Callable[[list[int], list], str | None] | None = None
+    page_area: float | None = None
+
+
+# Floor for the halving in `_split_oversized`. Below a twentieth of a character the budget joins
+# nothing that is not already overlapping, so going further only burns recursion.
+MIN_THRESHOLD_RATIO = 0.05
 
 
 def group_fragments(
@@ -141,11 +155,64 @@ def _bound_components(
             reason = "component-max-members"
         elif context is not None and context.owner_veto is not None:
             reason = context.owner_veto(component, regions)
-        if reason is None:
-            bounded.append(component)
-        else:
+        if reason is not None:
             bounded.extend([[index] for index in component])
+        elif _oversized(component, regions, config, context):
+            bounded.extend(_split_oversized(component, regions, config, context))
+        else:
+            bounded.append(component)
     return bounded
+
+
+def union_area(component: list[int], regions: list) -> float:
+    """Area of the union bounding box of a component -- the region it would become."""
+    x1 = min(regions[i]["x"] for i in component)
+    y1 = min(regions[i]["y"] for i in component)
+    x2 = max(regions[i]["x"] + regions[i]["width"] for i in component)
+    y2 = max(regions[i]["y"] + regions[i]["height"] for i in component)
+    return float(max(0, x2 - x1) * max(0, y2 - y1))
+
+
+def _oversized(
+    component: list[int],
+    regions: list,
+    config: GroupingConfig,
+    context: GroupingContext | None,
+) -> bool:
+    if len(component) < 2 or config.component_max_area_fraction is None:
+        return False
+    if context is None or context.page_area is None or context.page_area <= 0:
+        return False
+    return union_area(component, regions) > config.component_max_area_fraction * context.page_area
+
+
+def _split_oversized(
+    component: list[int],
+    regions: list,
+    config: GroupingConfig,
+    context: GroupingContext | None,
+) -> list[list[int]]:
+    """Regroup an oversized component at half its proximity budget, recursively.
+
+    Splitting straight to singletons would hand a page of vertical columns to translation one
+    line at a time. Halving the budget keeps the columns that really are one block together and
+    cuts the chain that bridged blocks across the gutter. Anything still oversized at the floor
+    is split to singletons, the same conservative answer `component_max_members` gives.
+    """
+    tighter = replace(config, threshold_ratio=config.threshold_ratio / 2.0)
+    if tighter.threshold_ratio < MIN_THRESHOLD_RATIO:
+        return [[index] for index in component]
+    members = [regions[index] for index in component]
+    # Owner vetoes were already applied to the whole component; recursing with them could only
+    # veto again, and the clearance field indexes page coordinates so it stays valid on a subset.
+    sub_context = replace(context, owner_veto=None) if context is not None else None
+    # `group_fragments` re-enters `_bound_components`, so a piece that is still oversized is
+    # halved again in there; the recursion bottoms out at the floor above.
+    pieces = group_fragments(members, tighter, sub_context)
+    if len(pieces) == 1:
+        # Guard only: the same members have the same union box, so the nested pass splits them.
+        return _split_oversized(component, regions, tighter, context)
+    return [[component[local] for local in piece] for piece in pieces]
 
 
 # A box must be this much longer than it is tall (or vice versa) to vote on orientation. Below it

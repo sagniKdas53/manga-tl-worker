@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 from worker.services.translation import (
+    is_refusal,
     is_valid_translation,
     should_translate_region,
     try_deepl,
@@ -126,3 +127,32 @@ def test_the_sfx_prompt_no_longer_contradicts_the_romaji_rule():
         assert "NEVER include romanized text" in prompt
 
     assert MANGA_TRANSLATION_SYSTEM_PROMPT.count("- Do not explain.") == 1
+
+
+def test_a_refusal_is_not_a_valid_translation():
+    """Tracker R2 (d). These three were typeset onto sample222 in the g5 run (Luna). A refusal
+    must fail validation so the retry/fallback passes run and, failing those, the region is
+    reported translationFailed -> hidden element -> `review`, never a text object on the page."""
+    for refusal in [
+        "[Explicit sexual content involving a high-school student—redacted.]",
+        "[Exploitative sexual advertisement involving a high-school student—redacted.]",
+        "I can't help with translating this content.",
+        "I cannot translate this.",
+        "Sorry, I am unable to assist with that request.",
+        "As an AI language model I cannot produce this.",
+        "This content violates the content policy.",
+    ]:
+        assert is_refusal(refusal), refusal
+        assert not is_valid_translation("ダメだよ、そんなの…", refusal), refusal
+
+    # Dialogue that merely sounds apologetic or negative is still dialogue.
+    for line in [
+        "Sorry... I can't go with you today.",
+        "I cannot believe you did that!",
+        "Unable to move, she just stared.",
+        "It's explicit in the contract.",
+        "No way, I'm not doing that.",
+        "I won't do this anymore!",
+        "I can't continue like this...",
+    ]:
+        assert is_valid_translation("ごめん、今日は行けない", line), line

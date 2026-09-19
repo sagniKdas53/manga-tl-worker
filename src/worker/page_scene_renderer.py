@@ -173,4 +173,7 @@ def render_page_scene(job_data: dict[str, Any]) -> dict[str, Any]:
         "logicalSceneSha256": rendered["logicalSceneSha256"],
         "pngSha256": rendered["pngSha256"],
         "diagnostics": rendered.get("diagnostics") or [],
+        # Resolved font px + line breaks per text object (tracker R2 (c)); the backend writes
+        # the size back onto the element and keeps the whole layout in the render ledger.
+        "layout": rendered.get("layout") or [],
     }
