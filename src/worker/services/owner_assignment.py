@@ -21,6 +21,15 @@ _MIN_ORIENTATION_ASPECT = 1.2
 _MAX_ANGLE_DELTA_DEGREES = 15.0
 _MIN_LATERAL_OVERLAP = 0.25
 _MAX_LINE_GAP_MULTIPLIER = 2.0
+# AUDIT-R20: a balloon is an ellipse and a text column is a rectangle, so the outermost column
+# (ja/zh) or the top and bottom line (ko) of any multi-line balloon has corners past the curve.
+# Requiring all four corners inside split every such balloon into one region per column on the
+# R2 short list. Measured over the 42 fragments the three pages put in a balloon, every one that
+# belongs is >= 0.875 inside its container; the only lower value (0.62) is a rotated quad that
+# fails line continuity anyway. Three quarters keeps a margin under the real minimum and still
+# rejects a quad that is half outside.
+_MIN_QUAD_INSIDE_FRACTION = 0.75
+_QUAD_SAMPLE_GRID = 16
 
 
 @dataclass(frozen=True)
@@ -57,8 +66,9 @@ def assign_captured_owners(
 ) -> list[OwnerDecision]:
     """Assign only evidence-backed text owners for captured OCR grouping candidates.
 
-    A multi-fragment owner requires one validated detector container, coherent oriented-line
-    geometry, and a finite OCR-to-source scale. Available declared source style can veto
+    A multi-fragment owner requires one validated detector container (holding at least
+    `_MIN_QUAD_INSIDE_FRACTION` of every member's quad), coherent oriented-line geometry, and a
+    finite OCR-to-source scale. Available declared source style can veto
     contradictory fragments; absent style remains an explicit unknown feature, not a split.
     """
     count = len(fragment_ids)
@@ -105,8 +115,10 @@ def assign_captured_owners(
             continue
 
         evidence = [member for member in members if member is not None]
-        container_ids = [_containing_container(member.quad, containers) for member in evidence]
+        containment = [_containing_container(member.quad, containers) for member in evidence]
+        container_ids = [identifier for identifier, _ in containment]
         diagnostics["container_ids"] = container_ids
+        diagnostics["container_coverage"] = [round(fraction, 3) for _, fraction in containment]
         known_container_ids = {identifier for identifier in container_ids if identifier is not None}
         if len(known_container_ids) > 1:
             decisions.append(_unknown(fragment_group_ids, "different-validated-containers", diagnostics))
@@ -275,11 +287,39 @@ def _validated_containers(detector_masks: Sequence[Any]) -> list[tuple[str, tupl
 
 def _containing_container(
     quad: tuple[tuple[float, float], ...], containers: Sequence[tuple[str, tuple[tuple[float, float], ...]]]
-) -> str | None:
-    matches = [
-        identifier for identifier, polygon in containers if all(_point_in_polygon(point, polygon) for point in quad)
-    ]
-    return matches[0] if len(matches) == 1 else None
+) -> tuple[str | None, float]:
+    """The one container holding at least `_MIN_QUAD_INSIDE_FRACTION` of the quad, and the best fraction seen.
+
+    Two containers claiming the same quad is an ambiguity, not a match.
+    """
+    best = 0.0
+    matches: list[str] = []
+    for identifier, polygon in containers:
+        fraction = _quad_inside_fraction(quad, polygon)
+        best = max(best, fraction)
+        if fraction >= _MIN_QUAD_INSIDE_FRACTION:
+            matches.append(identifier)
+    return (matches[0] if len(matches) == 1 else None), best
+
+
+def _quad_inside_fraction(quad: Sequence[tuple[float, float]], polygon: Sequence[tuple[float, float]]) -> float:
+    """Fraction of the quad's area inside the polygon, from a bilinear grid over the quad.
+
+    The polygon is a detector mask and can be concave, so this is sampled rather than clipped;
+    a 16x16 grid resolves 0.4 % of the quad, well under the floor it is compared with.
+    """
+    (ax, ay), (bx, by), (cx, cy), (dx, dy) = quad
+    inside = 0
+    grid = _QUAD_SAMPLE_GRID
+    for row in range(grid):
+        v = (row + 0.5) / grid
+        for column in range(grid):
+            u = (column + 0.5) / grid
+            x = (1 - v) * ((1 - u) * ax + u * bx) + v * ((1 - u) * dx + u * cx)
+            y = (1 - v) * ((1 - u) * ay + u * by) + v * ((1 - u) * dy + u * cy)
+            if _point_in_polygon((x, y), polygon):
+                inside += 1
+    return inside / (grid * grid)
 
 
 def _point_in_polygon(point: tuple[float, float], polygon: Sequence[tuple[float, float]]) -> bool:

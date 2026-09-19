@@ -1,5 +1,8 @@
+import math
+
 import pytest
 
+from worker.services.owner_assignment import _point_in_polygon as _inside
 from worker.services.owner_assignment import assign_captured_owners
 
 _CONTAINER = {"id": "bubble-a", "format": "polygon", "points": [[0, 0], [300, 0], [300, 300], [0, 300]]}
@@ -52,6 +55,45 @@ def test_assigns_one_adjacent_line_just_outside_its_validated_bubble():
     assert decision.reason == "geometry-attached-continuous-lines"
     assert decision.diagnostics["container_ids"] == ["bubble-a", None]
     assert decision.diagnostics["geometry_attached_container"] == "bubble-a"
+
+
+def _ellipse(cx, cy, rx, ry, points=64):
+    return [
+        [cx + rx * math.cos(2 * math.pi * index / points), cy + ry * math.sin(2 * math.pi * index / points)]
+        for index in range(points)
+    ]
+
+
+def test_assigns_columns_whose_corners_poke_past_an_elliptical_balloon():
+    """AUDIT-R20: the outer columns of a balloon are rectangles in an ellipse; their corners are outside."""
+    balloon = {"id": "balloon", "format": "polygon", "points": _ellipse(150, 150, 100, 140)}
+    columns = [_quad(60 + 30 * index, 60, width=26, height=180) for index in range(5)]
+    # The geometry the test is about: at least one column has a corner outside the curve.
+    assert not all(_inside((corner[0], corner[1]), balloon["points"]) for column in columns for corner in column)
+
+    decision = _decision(groups=[[0, 1, 2, 3, 4]], quads=columns, recognition=[{}] * 5, masks=[balloon])[0]
+
+    assert decision.state == "assigned"
+    assert decision.reason == "validated-container-continuous-lines"
+    assert decision.diagnostics["container_ids"] == ["balloon"] * 5
+    assert min(decision.diagnostics["container_coverage"]) >= 0.75
+
+
+def test_a_column_mostly_outside_the_balloon_is_still_not_contained():
+    balloon = {"id": "balloon", "format": "polygon", "points": _ellipse(150, 150, 100, 140)}
+    # Three adjacent columns; the last straddles the right edge with under half of it inside.
+    columns = [
+        _quad(170, 60, width=26, height=180),
+        _quad(200, 60, width=26, height=180),
+        _quad(230, 60, width=26, height=180),
+    ]
+
+    decision = _decision(groups=[[0, 1, 2]], quads=columns, recognition=[{}] * 3, masks=[balloon])[0]
+
+    assert decision.state == "unknown"
+    assert decision.reason == "incomplete-validated-container"
+    assert decision.diagnostics["container_ids"] == ["balloon", "balloon", None]
+    assert decision.diagnostics["container_coverage"][2] < 0.75
 
 
 def test_overlapping_boxes_do_not_assign_an_owner_without_a_container():
