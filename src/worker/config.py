@@ -451,6 +451,13 @@ OCR_WAIST_MAX_SOLIDITY = float(os.environ.get("OCR_WAIST_MAX_SOLIDITY", "0.90"))
 # where there are 17).
 OCR_ORIENTATION = os.environ.get("OCR_ORIENTATION", "vote").strip().lower()
 
+# Largest share of the page one merged region may cover (tracker R2 gate: no patch larger than a
+# quarter of the page). A component whose union box exceeds it is regrouped at a tighter budget;
+# see fragment_grouping._split_oversized. sample83's three free-standing columns chained into one
+# 1011x1617 region on a 1412x2000 page (57.9 %) and that region became the flat plate over most
+# of the art. Set to 0 to disable.
+OCR_COMPONENT_MAX_AREA_FRACTION = float(os.environ.get("OCR_COMPONENT_MAX_AREA_FRACTION", "0.25"))
+
 
 def is_usable_model(model):
     """A model id counts as usable only if it is a real, non-sentinel value."""

@@ -50,7 +50,17 @@ def test_process_qa_llm_mode(mock_cloud, mock_redis, mock_requests):
     mock_redis.llen.return_value = 0
     mock_res = MagicMock()
     mock_res.status_code = 200
-    mock_res.json.return_value = {"ocrRegions": [{"id": "1", "text": "hello", "translatedText": "hi"}]}
+    mock_res.json.return_value = {
+        "ocrRegions": [
+            {
+                "id": "1",
+                "text": "hello",
+                "translatedText": "hi",
+                "regionType": "speech",
+                "user_override": "replace",
+            }
+        ]
+    }
     mock_requests.get.return_value = mock_res
 
     mock_cloud.return_value = (
@@ -175,7 +185,17 @@ def test_process_qa_reject_sfx(mock_cloud, mock_redis, mock_requests):
     mock_redis.llen.return_value = 0
     mock_res = MagicMock()
     mock_res.status_code = 200
-    mock_res.json.return_value = {"ocrRegions": [{"id": "1", "text": "boom", "translatedText": "boom"}]}
+    mock_res.json.return_value = {
+        "ocrRegions": [
+            {
+                "id": "1",
+                "text": "boom",
+                "translatedText": "boom",
+                "regionType": "speech",
+                "user_override": "replace",
+            }
+        ]
+    }
     mock_requests.get.return_value = mock_res
 
     mock_cloud.return_value = '{"results": [{"regionId": "1", "qaStatus": "reject_sfx", "qaScore": 1.0, "qaFeedback": "It is a sound effect"}]}'

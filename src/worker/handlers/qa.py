@@ -18,6 +18,7 @@ from worker.config import (
     redis_client,
 )
 from worker.provider_config import get_config_loader
+from worker.services.region_policy import select_region_action
 from worker.services.translation import (
     try_cloud_ai,
     try_cloud_ai_vision,
@@ -156,6 +157,28 @@ def _sanitize_qa_results(results, ocr_regions, label="LLM"):
         )
 
     return kept
+
+
+def _translation_qa_regions(ocr_regions):
+    """Return successful translation-layer elements for per-region QA.
+
+    Unreviewed policy is a canonical-scene cleanup authorization state, not a reason to
+    bypass the live translation/visual-QA pipeline.  QA must receive those elements so it
+    can reject SFX or bad OCR and the backend can hide only the rejected element. Explicit
+    ``preserve`` and ``explain`` overrides remain source-preserving even if stale translation
+    data exists.
+    """
+    return [
+        region
+        for region in ocr_regions
+        if region.get("translatedText")
+        and not region.get("translationFailed")
+        and select_region_action(
+            region.get("regionType") or region.get("region_type"),
+            region.get("user_override"),
+        ).user_override
+        not in {"preserve", "explain"}
+    ]
 
 
 def _qa_default_model(prov: str, task: str) -> str | None:
@@ -314,9 +337,10 @@ def _process_qa_hybrid(job_data):
         logger.error(f"[QA] Error fetching image details: {e}")
         raise
 
-    # Build region metadata list to seed the LLM
+    qa_regions = _translation_qa_regions(ocr_regions)
+    # Build metadata only for replacement-authorized translation QA targets.
     regions_metadata = []
-    for r in ocr_regions:
+    for r in qa_regions:
         regions_metadata.append(
             {
                 "regionId": r["id"],
@@ -366,8 +390,8 @@ Region Metadata:
 
 You MUST return a JSON object containing a "results" key with an array of objects conforming to the requested schema. No other text."""
 
-    provider = job_data.get("qaProvider") or QA_CONFIG.provider
-    api_key = QA_CONFIG.resolve_key(provider)
+    provider = (job_data.get("qaProvider") or QA_CONFIG.provider) if regions_metadata else ""
+    api_key = QA_CONFIG.resolve_key(provider) if provider else None
     routing_strategy = job_data.get("routingStrategy") or "lowest-cost"
 
     qa_response = None
@@ -403,7 +427,7 @@ You MUST return a JSON object containing a "results" key with an array of object
     )
     is_explicit_local = provider in ("ollama", "lmstudio")
 
-    if not qa_response and local_llm_model and (is_explicit_local or not disable_local):
+    if not qa_response and regions_metadata and local_llm_model and (is_explicit_local or not disable_local):
         try:
             qa_response = try_local_ai(prompt, json.dumps(regions_metadata), QA_JSON_SCHEMA)
         except Exception as e:
@@ -424,6 +448,7 @@ You MUST return a JSON object containing a "results" key with an array of object
             results = parsed.get("results") or []
         except Exception as e:
             logger.error(f"[QA] Failed to parse LLM response: {e}. Raw response: {log_payload(qa_response)}")
+    results = _sanitize_qa_results(results, qa_regions, label="LLM")
 
     # Call backend prepare endpoint to apply fixes and set visibility
     prepare_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}/qa-hybrid-prepare")
@@ -438,13 +463,16 @@ You MUST return a JSON object containing a "results" key with an array of object
         logger.error(f"[QA] Failed to post Hybrid QA preparation: {e}")
         raise
 
-    # Trigger render inline
-    from worker.handlers.render import render_image_core
-
-    render_ok = render_image_core(image_id)
-    if not render_ok:
-        logger.error("[QA] Rendering failed during Hybrid QA. Aborting.")
+    # The prepare endpoint applied the first pass's fixes, snapshotted the page and returned the
+    # immutable render payload; draw it through the browser renderer so the VLM judges the same
+    # pixels the export will carry (tracker R1). 204 means the image has no page — nothing to render.
+    if prep_res.status_code == 204:
+        logger.warning("[QA] Hybrid QA: image has no page; skipping the VLM pass.")
         return
+    prep_res.raise_for_status()
+    from worker.page_scene_renderer import render_page_scene
+
+    render_page_scene(prep_res.json())
 
     # Now run VLM check on updated render
     try:
@@ -461,6 +489,7 @@ You MUST return a JSON object containing a "results" key with an array of object
     except Exception as e:
         logger.error(f"[QA] Error fetching image details: {e}")
         raise
+    qa_regions = _translation_qa_regions(ocr_regions)
 
     # Download original image
     try:
@@ -509,9 +538,10 @@ You MUST return a JSON object containing a "results" key with an array of object
         logger.error(f"[QA] Error combining images: {e}")
         raise
 
-    # Build region metadata list to seed the VLM
+    # The VLM sees the complete page and every successful translation-layer element. It decides
+    # which candidate SFX/gibberish must be hidden after visual inspection.
     regions_metadata_vlm = []
-    for r in ocr_regions:
+    for r in qa_regions:
         regions_metadata_vlm.append(
             {
                 "regionId": r["id"],
@@ -613,7 +643,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         except Exception as e:
             logger.error(f"[QA] Failed to parse VLM response: {e}. Raw response: {log_payload(qa_response_vlm)}")
 
-    results_vlm = _sanitize_qa_results(results_vlm, ocr_regions, label="VLM")
+    results_vlm = _sanitize_qa_results(results_vlm, qa_regions, label="VLM")
 
     if not results_vlm:
         # Deliberately not auto-passing. Fabricating a pass for every region is what made a failed
@@ -746,9 +776,11 @@ def _process_qa_llm(job_data):
         logger.error(f"[QA] Error fetching image details: {e}")
         raise
 
-    # Build region metadata list to seed the LLM
+    # Per-region QA follows actual translation-layer elements, not canonical-scene cleanup
+    # authorization. It can therefore reject/hide SFX after inspecting the translation.
+    qa_regions = _translation_qa_regions(ocr_regions)
     regions_metadata = []
-    for r in ocr_regions:
+    for r in qa_regions:
         regions_metadata.append(
             {
                 "regionId": r["id"],
@@ -798,8 +830,8 @@ Region Metadata:
 
 You MUST return a JSON object containing a "results" key with an array of objects conforming to the requested schema. No other text."""
 
-    provider = job_data.get("qaProvider") or QA_CONFIG.provider
-    api_key = QA_CONFIG.resolve_key(provider)
+    provider = (job_data.get("qaProvider") or QA_CONFIG.provider) if regions_metadata else ""
+    api_key = QA_CONFIG.resolve_key(provider) if provider else None
     routing_strategy = job_data.get("routingStrategy") or "lowest-cost"
 
     qa_response = None
@@ -852,7 +884,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         except Exception as e:
             logger.error(f"[QA] Failed to parse LLM response: {e}. Raw response: {log_payload(qa_response)}")
 
-    results = _sanitize_qa_results(results, ocr_regions, label="LLM")
+    results = _sanitize_qa_results(results, qa_regions, label="LLM")
 
     if not results:
         # Deliberately not auto-passing. Fabricating a pass for every region is what made a failed
@@ -970,9 +1002,11 @@ def _process_qa_vlm(job_data):
         logger.error(f"[QA] Error combining images: {e}")
         raise
 
-    # Build region metadata list to seed the VLM
+    qa_regions = _translation_qa_regions(ocr_regions)
+    # The VLM sees the complete page image, including preserved source SFX, but receives only
+    # replacement-authorized IDs as per-region translation verdict targets.
     regions_metadata = []
-    for r in ocr_regions:
+    for r in qa_regions:
         regions_metadata.append(
             {
                 "regionId": r["id"],
@@ -1086,7 +1120,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         except Exception as e:
             logger.error(f"[QA] Failed to parse VLM response: {e}. Raw response: {log_payload(qa_response)}")
 
-    results = _sanitize_qa_results(results, ocr_regions, label="VLM")
+    results = _sanitize_qa_results(results, qa_regions, label="VLM")
 
     if not results:
         # Deliberately not auto-passing. Fabricating a pass for every region is what made a failed

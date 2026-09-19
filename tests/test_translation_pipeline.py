@@ -27,6 +27,8 @@ def test_process_translation_gemini(mock_tl_config, mock_post, mock_get, mock_tr
                 "width": 100,
                 "height": 100,
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
         "conversations": [],
@@ -104,6 +106,8 @@ def test_process_translation_openrouter(mock_tl_config, mock_post, mock_get, moc
                 "width": 100,
                 "height": 100,
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
         "conversations": [],
@@ -170,6 +174,8 @@ def test_process_translation_openai(mock_tl_config, mock_post, mock_get, mock_tr
                 "width": 100,
                 "height": 100,
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
         "conversations": [],
@@ -236,6 +242,8 @@ def test_process_translation_anthropic(mock_tl_config, mock_post, mock_get, mock
                 "width": 100,
                 "height": 100,
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
         "conversations": [],
@@ -302,6 +310,8 @@ def test_process_translation_nvidia(mock_tl_config, mock_post, mock_get, mock_tr
                 "width": 100,
                 "height": 100,
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
         "conversations": [],
@@ -368,6 +378,8 @@ def test_process_translation_local_fallback(mock_tl_config, mock_post, mock_get,
                 "width": 100,
                 "height": 100,
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
         "conversations": [],
@@ -438,6 +450,8 @@ def test_process_translation_retry_individual_fallback(
                 "width": 100,
                 "height": 100,
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
         "conversations": [],
@@ -486,6 +500,8 @@ def _image_info_one_region():
                 "width": 100,
                 "height": 100,
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
         "conversations": [],
@@ -751,3 +767,129 @@ def test_a_page_that_got_no_answer_at_all_still_raises_for_retry(
     payload = mock_post.call_args[1]["json"]
     assert payload["allFailed"] is True
     assert payload["failedCount"] == 1
+
+
+@patch("worker.utils.rate_limit.get_job_costs", return_value=[])
+@patch("worker.handlers.translation.translate_batch_llm")
+@patch("worker.handlers.translation.requests.get")
+@patch("worker.handlers.translation.requests.post")
+@patch("worker.handlers.translation.TL_CONFIG")
+def test_unreviewed_dialogue_and_sfx_reach_translation_callback(
+    mock_tl_config,
+    mock_post,
+    mock_get,
+    mock_translate_batch,
+    _mock_get_job_costs,
+):
+    """Unreviewed is a QA state, not a zero-object translation-layer state."""
+    mock_tl_config.provider = "gemini"
+    mock_tl_config.llm_model = "gemini-1.5-pro"
+    mock_get.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {
+            "ocrRegions": [
+                {
+                    "id": "review-sfx",
+                    "text": "ドキ",
+                    "detectedLanguage": "ja",
+                    "confidence": 0.95,
+                    "width": 100,
+                    "height": 100,
+                    "regionType": "sfx",
+                },
+                {
+                    "id": "review-dialogue",
+                    "text": "こんにちは",
+                    "detectedLanguage": "ja",
+                    "confidence": 0.95,
+                    "width": 100,
+                    "height": 100,
+                    "regionType": "speech",
+                },
+            ],
+            "conversations": [],
+        },
+    )
+    mock_translate_batch.return_value = json.dumps(
+        {
+            "translations": [
+                {"id": "review-sfx", "translation": "Heartbeat"},
+                {"id": "review-dialogue", "translation": "Hello"},
+            ]
+        }
+    )
+    mock_post.return_value = MagicMock(status_code=200)
+
+    process_translation({"imageId": "image-uuid-1", "sourceLanguage": "ja", "targetLanguage": "en"})
+
+    provider_regions, provider_context, *_ = mock_translate_batch.call_args.args
+    assert [region["id"] for region in provider_regions] == ["review-sfx", "review-dialogue"]
+    assert "ドキ" in provider_context
+    assert "こんにちは" in provider_context
+    payload = mock_post.call_args.kwargs["json"]
+    assert [translation["regionId"] for translation in payload["translations"]] == [
+        "review-sfx",
+        "review-dialogue",
+    ]
+    assert payload["policy"] == {
+        "selectedTargetIds": ["review-sfx", "review-dialogue"],
+        "skipped": [],
+        "translationChunkCount": 1,
+    }
+
+
+@patch("worker.utils.rate_limit.get_job_costs", return_value=[])
+@patch("worker.handlers.translation.translate_text", return_value="Hello")
+@patch("worker.handlers.translation.translate_batch_llm", return_value=None)
+@patch("worker.handlers.translation.requests.get")
+@patch("worker.handlers.translation.requests.post")
+@patch("worker.handlers.translation.TL_CONFIG")
+def test_explicit_preserve_never_reaches_translation_retry_or_fallback(
+    mock_tl_config,
+    mock_post,
+    mock_get,
+    mock_translate_batch,
+    mock_translate_text,
+    _mock_get_job_costs,
+):
+    mock_tl_config.provider = "gemini"
+    mock_tl_config.llm_model = "gemini-1.5-pro"
+    mock_get.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {
+            "ocrRegions": [
+                {
+                    "id": "preserved-sfx",
+                    "text": "ドキ",
+                    "detectedLanguage": "ja",
+                    "confidence": 0.95,
+                    "width": 100,
+                    "height": 100,
+                    "regionType": "sfx",
+                    "user_override": "preserve",
+                },
+                {
+                    "id": "review-dialogue",
+                    "text": "こんにちは",
+                    "detectedLanguage": "ja",
+                    "confidence": 0.95,
+                    "width": 100,
+                    "height": 100,
+                    "regionType": "speech",
+                },
+            ],
+            "conversations": [],
+        },
+    )
+    mock_post.return_value = MagicMock(status_code=200)
+
+    process_translation({"imageId": "image-uuid-1", "sourceLanguage": "ja", "targetLanguage": "en"})
+
+    assert mock_translate_batch.call_count == 2, "one target gets one batch retry"
+    for call in mock_translate_batch.call_args_list:
+        assert [region["id"] for region in call.args[0]] == ["review-dialogue"]
+    mock_translate_text.assert_called_once()
+    assert mock_translate_text.call_args.args[0] == "こんにちは"
+    payload = mock_post.call_args.kwargs["json"]
+    assert [translation["regionId"] for translation in payload["translations"]] == ["review-dialogue"]
+    assert [entry["regionId"] for entry in payload["policy"]["skipped"]] == ["preserved-sfx"]

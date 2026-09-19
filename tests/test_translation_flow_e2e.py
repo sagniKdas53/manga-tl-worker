@@ -35,8 +35,8 @@ def get_dummy_image_bytes():
 @patch("worker.handlers.ocr.detect_bubbles_yolo")
 @patch("worker.handlers.ocr.download_image")
 @patch("worker.services.translation.try_cloud_ai")
-@patch("worker.handlers.render.download_image")
-@patch("worker.handlers.render.minio_client")
+@patch("worker.page_scene_renderer.render_page_scene")
+@patch("worker.handlers.render.redis_client")
 @patch("worker.handlers.qa.try_cloud_ai")
 @patch("worker.handlers.qa.try_cloud_ai_vision")
 @patch("worker.handlers.qa.download_image")
@@ -50,8 +50,8 @@ def test_core_translation_flow_e2e(
     mock_qa_download,
     mock_try_vlm,
     mock_try_llm_qa,
-    mock_render_minio,
-    mock_render_download,
+    mock_render_redis,
+    mock_browser_render,
     mock_try_llm_tl,
     mock_ocr_download,
     mock_detect_bubbles_yolo,
@@ -125,34 +125,11 @@ def test_core_translation_flow_e2e(
                 "width": 100,
                 "height": 100,
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
         "conversations": [],
-    }
-
-    mock_render_get_res = MagicMock()
-    mock_render_get_res.status_code = 200
-    mock_render_get_res.json.return_value = {
-        "id": "image-uuid-1",
-        "filename": "page1.png",
-        "storagePath": "originals/page1.png",
-        "layerElements": [
-            {
-                "text": "Hello",
-                "x": 10.0,
-                "y": 10.0,
-                "maxWidth": 100,
-                "maxHeight": 50,
-                "visible": True,
-                "backgroundColor": "#ffffff",
-                "textColor": "#000000",
-                "size": 14.0,
-                "fontWeight": "bold",
-                "fontStyle": "normal",
-                "boxShape": "rectangular",
-                "font": "Comic Neue",
-            }
-        ],
     }
 
     mock_qa_get_res = MagicMock()
@@ -169,6 +146,8 @@ def test_core_translation_flow_e2e(
                 "bboxH": 50,
                 "translatedText": "Hello",
                 "bubbleReadingOrder": 1,
+                "regionType": "speech",
+                "user_override": "replace",
             }
         ],
     }
@@ -178,9 +157,7 @@ def test_core_translation_flow_e2e(
         mock_ocr_get_res,
         mock_layout_get_res,
         mock_tl_get_res,
-        mock_render_get_res,  # for render phase
         mock_qa_get_res,  # for QA phase text check
-        mock_render_get_res,  # for QA phase rendering of direct fixes
         mock_qa_get_res,  # for QA phase VLM check
     ]
 
@@ -193,7 +170,15 @@ def test_core_translation_flow_e2e(
     mock_minio_read = MagicMock()
     mock_minio_read.read.return_value = get_dummy_image_bytes()
     mock_qa_minio.get_object.return_value = mock_minio_read
-    mock_render_minio.get_object.return_value = mock_minio_read
+    mock_render_redis.llen.return_value = 0
+    # R1: renders go through the browser renderer; the transport is exercised in
+    # test_page_scene_renderer.py, here it only needs to answer with an immutable identity.
+    mock_browser_render.return_value = {
+        "pageRevision": 1,
+        "logicalSceneSha256": "a" * 64,
+        "pngSha256": "b" * 64,
+        "diagnostics": [],
+    }
 
     # --- 1. Panel Detection ---
     mock_panel_download.return_value = get_dummy_image_bytes()
@@ -246,9 +231,16 @@ def test_core_translation_flow_e2e(
     process_translation(tl_job)
 
     # --- 5. Rendering ---
-    mock_render_download.return_value = get_dummy_image_bytes()
-    render_job = {"imageId": "image-uuid-1", "pageNumber": 1, "chapterNumber": 1.0}
+    render_job = {
+        "imageId": "image-uuid-1",
+        "pageNumber": 1,
+        "chapterNumber": 1.0,
+        "logicalScene": {},
+        "pageRevision": 1,
+        "logicalSceneSha256": "a" * 64,
+    }
     process_render(render_job)
+    mock_browser_render.assert_called_once()
 
     # --- 6. Hybrid QA (LLM + VLM) ---
     mock_try_llm_qa.return_value = json.dumps(
@@ -290,5 +282,6 @@ def test_core_translation_flow_e2e(
 
     # Verify both hybrid preparation and final QA results callback posts were sent
     assert mock_post.call_count == 7
-    # Verify MinIO put_object was called (once during process_render, once during process_qa's hybrid direct-fix render)
-    assert mock_render_minio.put_object.call_count == 2
+    # Once during process_render, once for hybrid QA's interim VLM render — both through the
+    # browser renderer, neither through Pillow.
+    assert mock_browser_render.call_count == 2
