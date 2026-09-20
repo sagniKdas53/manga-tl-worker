@@ -37,7 +37,13 @@ _aot_session = None
 class CleanupConfig:
     ctd_threshold: float = CTD_CONF_THRESHOLD
     crop_pad_px: int = 64
-    mask_dilate_px: int = 3
+    # 3px left visible anti-aliased stroke fringes on dense small-glyph text -- measured on the
+    # glyph-erasure-candidates corpus (docs/quality-runs/glyph-erasure-candidates/results/
+    # 3_r0_dilation_sweep.png): +2px alone took a 10.6%-coverage region from 28.65dB/25.43dB
+    # (AOT/LaMa-mpe, visible residual strokes) to 32.75dB/33.99dB (clean, matches Torii's own
+    # plate); +6px more gained under 1dB further. 5 is the new floor, not the ceiling -- the
+    # residual-ink recheck below still discards anything that isn't actually clean.
+    mask_dilate_px: int = 5
     # Reuse the existing flat-vs-structured statistic and threshold rather than a second knob
     # (docs/archive/mask_precision_2026-08-27.md §4, archive erasure plan §8): flat interior ->
     # TELEA, structured/artwork interior -> AOT.
@@ -159,7 +165,14 @@ def _reconstruct_aot(crop_bgr: np.ndarray, mask_bool: np.ndarray, config: Cleanu
     """
     session = get_aot_session()
     h, w = crop_bgr.shape[:2]
-    scale = config.aot_max_side / max(h, w)
+    # Only ever downscale -- a crop already smaller than aot_max_side must not be blown up
+    # (upstream MIT only resizes when the long side exceeds inpainting_size, never upsamples;
+    # docs/archive/erasure_overhaul_plan_2026-08-26.md line 175-176). Missing this clamp meant
+    # every production crop under 1024px on its long side was being upscaled toward 1024 with
+    # cv2.INTER_AREA (which degrades toward nearest-neighbour when zooming in), inpainted at
+    # that inflated size, then downscaled back -- paying up to ~8x the compute for a softer,
+    # less detailed result than running at native resolution.
+    scale = min(1.0, config.aot_max_side / max(h, w))
     scaled_w, scaled_h = max(1, round(w * scale)), max(1, round(h * scale))
     scaled_img = cv2.resize(crop_bgr, (scaled_w, scaled_h), interpolation=cv2.INTER_AREA)
     scaled_mask = cv2.resize(mask_bool.astype(np.uint8) * 255, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
