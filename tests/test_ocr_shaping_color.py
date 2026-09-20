@@ -259,3 +259,83 @@ def test_free_standing_text_on_a_flat_ground_keeps_the_honest_rectangle():
     color, shape = cover_fill_for_region(img, None, 40, 40, 120, 120, container_detected=False)
     assert color == "#f0f0f0"
     assert shape == rect
+
+
+def test_compute_cleanup_fields_no_page_id_skips_reconstruction():
+    """R3. Without a page_id there is nowhere content-addressed to upload to -- reconstruction
+    is not even attempted, and R2's flat-plate/no-plate fields stand untouched."""
+    from unittest.mock import patch
+
+    from worker.handlers.ocr import _compute_cleanup_fields
+
+    img = np.zeros((100, 100, 3), dtype=np.uint8)
+    with patch("worker.handlers.ocr.reconstruct_region") as mock_reconstruct:
+        fields = _compute_cleanup_fields(img, None, 10, 10, 20, 20)
+    mock_reconstruct.assert_not_called()
+    assert fields == {}
+
+
+def test_compute_cleanup_fields_none_result_yields_empty_dict():
+    """R2's behaviour for this region stands when reconstruct_region declines (model failure,
+    residual ink over bound, etc.) -- no cleanup fields are added."""
+    from unittest.mock import patch
+
+    from worker.handlers.ocr import _compute_cleanup_fields
+
+    img = np.zeros((100, 100, 3), dtype=np.uint8)
+    with patch("worker.handlers.ocr.reconstruct_region", return_value=None):
+        fields = _compute_cleanup_fields(img, "page-1", 10, 10, 20, 20)
+    assert fields == {}
+
+
+def test_compute_cleanup_fields_uploads_and_returns_refs():
+    """On success, both assets are uploaded content-addressed and the OCR region gets back
+    small JSON refs -- no raw pixel bytes flow through the callback."""
+    from unittest.mock import MagicMock, patch
+
+    from worker.handlers.ocr import _compute_cleanup_fields
+    from worker.services.cleanup_reconstruct import CleanupResult
+
+    img = np.zeros((100, 100, 3), dtype=np.uint8)
+    result = CleanupResult(
+        mask_png=b"mask-bytes",
+        patch_png=b"patch-bytes",
+        bounds={"x": 5, "y": 5, "width": 30, "height": 30},
+        diagnostics=["reconstruction method: telea (pixel_spread=1.0)"],
+    )
+    mock_minio = MagicMock()
+    with (
+        patch("worker.handlers.ocr.reconstruct_region", return_value=result),
+        patch("worker.handlers.ocr.minio_client", mock_minio),
+    ):
+        fields = _compute_cleanup_fields(img, "page-1", 10, 10, 20, 20)
+
+    assert mock_minio.put_object.call_count == 2
+    uploaded_paths = [call.args[1] for call in mock_minio.put_object.call_args_list]
+    assert all(path.startswith("scene-assets/page-1/") for path in uploaded_paths)
+    assert fields["cleanupBounds"] == result.bounds
+    assert fields["cleanupDiagnostics"] == result.diagnostics
+    assert fields["cleanupGeneratorSha256"] == result.generator_sha256
+    assert fields["cleanupMaskAssetId"].startswith("mask-")
+    assert fields["cleanupPatchAssetId"].startswith("patch-")
+
+
+def test_compute_cleanup_fields_upload_failure_yields_empty_dict():
+    """A MinIO outage must not surface as a worse result than R2 -- it degrades to no cleanup
+    fields, same as reconstruct_region declining."""
+    from unittest.mock import MagicMock, patch
+
+    from worker.handlers.ocr import _compute_cleanup_fields
+    from worker.services.cleanup_reconstruct import CleanupResult
+
+    img = np.zeros((100, 100, 3), dtype=np.uint8)
+    result = CleanupResult(mask_png=b"mask-bytes", patch_png=b"patch-bytes", bounds={"x": 0, "y": 0})
+    mock_minio = MagicMock()
+    mock_minio.put_object.side_effect = RuntimeError("minio unavailable")
+    with (
+        patch("worker.handlers.ocr.reconstruct_region", return_value=result),
+        patch("worker.handlers.ocr.minio_client", mock_minio),
+    ):
+        fields = _compute_cleanup_fields(img, "page-1", 10, 10, 20, 20)
+
+    assert fields == {}

@@ -1,8 +1,8 @@
 """Model cache preparation CLI for worker container volumes.
 
 This module deliberately imports ML dependencies only after argument parsing.  It is safe to use
-``python -m worker.seed_models --help`` in a minimal environment, and it never downloads the YOLO
-artifact or contacts the worker API. OCR libraries may download missing weights.
+``python -m worker.seed_models --help`` in a minimal environment, and it never downloads the YOLO,
+CTD or AOT artifacts, or contacts the worker API. OCR libraries may download missing weights.
 """
 
 import argparse
@@ -48,9 +48,46 @@ def _verify_yolo() -> None:
         raise SeedModelsError("YOLO ONNX Runtime session initialized to None")
 
 
+def _verify_ctd() -> None:
+    from worker import config
+
+    path = config.CTD_MODEL_PATH
+    if not path or not os.path.isfile(path):
+        raise SeedModelsError(f"CTD glyph-mask model is missing at {path or '<unset>'}")
+
+    actual = _sha256(path)
+    if actual != config.CTD_PINNED_CHECKSUM:
+        raise SeedModelsError(f"CTD checksum mismatch at {path}: expected {config.CTD_PINNED_CHECKSUM}, got {actual}")
+
+    from worker.services.glyph_mask import get_ctd_session
+
+    if get_ctd_session() is None:
+        raise SeedModelsError("CTD ONNX Runtime session initialized to None")
+
+
+def _verify_aot() -> None:
+    from worker import config
+
+    path = config.AOT_MODEL_PATH
+    if not path or not os.path.isfile(path):
+        raise SeedModelsError(f"AOT inpainting model is missing at {path or '<unset>'}")
+
+    actual = _sha256(path)
+    if actual != config.AOT_PINNED_CHECKSUM:
+        raise SeedModelsError(f"AOT checksum mismatch at {path}: expected {config.AOT_PINNED_CHECKSUM}, got {actual}")
+
+    import onnxruntime as ort
+
+    session = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+    if session is None:
+        raise SeedModelsError("AOT ONNX Runtime session initialized to None")
+
+
 def seed_models(languages: Sequence[str], *, skip_local_ocr: bool = False) -> list[tuple[str, str]]:
-    """Verify YOLO and initialize one local OCR reader for each requested language."""
+    """Verify YOLO, CTD and AOT, and initialize one local OCR reader for each requested language."""
     _verify_yolo()
+    _verify_ctd()
+    _verify_aot()
     if skip_local_ocr or _disabled(os.environ.get("DISABLE_LOCAL_OCR")):
         return []
 

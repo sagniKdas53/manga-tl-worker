@@ -315,6 +315,31 @@ YOLO_MASK_EROSION = int(os.environ.get("YOLO_MASK_EROSION", "3"))
 YOLO_PINNED_CHECKSUM = "c9208cb610aa35b8f8dc7ef0890182322992a43399a853093ad5d04a3764af4f"
 YOLO_FALLBACK_MODE = os.environ.get("YOLO_FALLBACK_MODE", "opencv").lower()
 
+# CTD (comic-text-detector) glyph-mask config -- R3 glyph-mask cleanup. Only the `seg` head
+# subgraph is shipped (`ctd_seg_dyn.onnx`): the published model's YOLO/line-map heads are
+# removed and the input made spatially dynamic, per docs/archive/ctd_mask_validation_2026-08-26.md.
+CTD_MODEL_PATH = os.environ.get("CTD_MODEL_PATH", "")
+if not CTD_MODEL_PATH:
+    LOCAL_PATH = "/home/sagnik/Projects/docker-composes/manga-library/data/bootstrap/ctd_seg_dyn.onnx"
+    DOCKER_PATH = "/home/worker/.cache/huggingface/models/ctd_seg_dyn.onnx"
+    CTD_MODEL_PATH = LOCAL_PATH if os.path.exists(LOCAL_PATH) else DOCKER_PATH
+
+# 0.3, not the published default of 0.5: light-on-dark recall moves 26.6 points across
+# 0.3-0.7 in the validated measurement -- a confidence-calibration gap, not a detection one.
+CTD_CONF_THRESHOLD = float(os.environ.get("CTD_CONF_THRESHOLD", "0.3"))
+CTD_PINNED_CHECKSUM = "a0e08c52bdd493e795ee5572a973f5ea6a4630f068e1c229bf23f41796929de9"
+
+# AOT GAN inpainting config -- R3's textured/artwork-background reconstruction candidate,
+# used for crops where `_pixel_spread` reports a structured (non-flat) interior; TELEA
+# handles flat interiors directly via cv2 and needs no model.
+AOT_MODEL_PATH = os.environ.get("AOT_MODEL_PATH", "")
+if not AOT_MODEL_PATH:
+    LOCAL_PATH = "/home/sagnik/Projects/docker-composes/manga-library/data/bootstrap/lama_aot.onnx"
+    DOCKER_PATH = "/home/worker/.cache/huggingface/models/lama_aot.onnx"
+    AOT_MODEL_PATH = LOCAL_PATH if os.path.exists(LOCAL_PATH) else DOCKER_PATH
+
+AOT_PINNED_CHECKSUM = "c5965aca4e5ffa8269051dca1fc30e379d2bded46e0a55366e299ade47086cfc"
+
 # When YOLO is active but matched no bubble to a text fragment, try the OpenCV contour search on
 # that fragment before giving up and using the raw text bbox as the "bubble".
 #

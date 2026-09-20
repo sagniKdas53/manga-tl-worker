@@ -2,6 +2,8 @@ import base64
 import concurrent.futures
 import contextvars
 import gc
+import hashlib
+import io
 import json
 import logging
 import math
@@ -35,11 +37,13 @@ from worker.config import (
     OCR_WAIST_MAX_SOLIDITY,
     YOLO_MASK_EROSION,
     backend_headers,
+    minio_client,
     redis_client,
 )
 from worker.model_manager import get_local_ocr_backend, model_manager, resolve_local_ocr_model
 from worker.services.bubble_detector import detect_bubbles_yolo
 from worker.services.bubble_geometry import bubble_grouping_context, simplify_mask_polygon
+from worker.services.cleanup_reconstruct import reconstruct_region
 from worker.services.fragment_grouping import GroupingConfig, GroupingContext, group_fragments
 from worker.services.layout import bubble_compare
 from worker.services.merge_regions import merge_ocr_regions
@@ -48,6 +52,7 @@ from worker.services.ocr_capture import capture_observed_ocr_grouping
 from worker.services.owner_assignment import assign_captured_owners
 from worker.services.ownership_features import capture_fragment_features
 from worker.services.panel_detection import detect_text_containers
+from worker.services.pixel_stats import pixel_spread as _pixel_spread
 from worker.services.translation import (
     LANG_MAP,
     try_cloud_ai_vision_batch,
@@ -193,19 +198,6 @@ def sort_fragments_vertical(fragments, reading_direction="rtl"):
         sorted_fragments.extend(col)
 
     return sorted_fragments
-
-
-def _pixel_spread(pixels: np.ndarray) -> float:
-    """Per-channel median absolute deviation, maxed across channels.
-
-    Robust in the two ways a plain stddev over the flattened array is not: a handful of
-    anti-aliased text-edge pixels in an otherwise-flat sample barely moves a median-based
-    measure, and computing per-channel (then taking the max) rather than over B/G/R mixed
-    together means a saturated solid colour reads as flat instead of "spread" by its own
-    channel separation.
-    """
-    medians = np.median(pixels, axis=0)
-    return float(np.max(np.median(np.abs(pixels - medians), axis=0)))
 
 
 def detect_background_color(img, x, y, w, h):
@@ -445,6 +437,54 @@ def cover_fill_for_region(img, mask_polygon, x, y, width, height, container_dete
     if poly is None:
         return covering, mask_polygon
     return covering, poly
+
+
+def _compute_cleanup_fields(img, page_id, x, y, width, height) -> dict:
+    """R3: attempt real glyph-mask cleanup for one region and, on success, upload its mask/patch
+    assets to the same content-addressed path `page_scene_builder.rs` already uses, returning
+    the small JSON refs the OCR callback carries. Returns `{}` on any failure or when no
+    cleanup is warranted -- the caller's existing `backgroundColor`/`maskPolygon` (R2's flat
+    plate / no-plate-plus-halo) is what renders in that case, never a worse result than today.
+    Requires a page_id: without one there is nowhere content-addressed to upload to.
+    """
+    if not page_id:
+        return {}
+    result = reconstruct_region(img, x, y, width, height)
+    if result is None:
+        return {}
+
+    mask_sha = hashlib.sha256(result.mask_png).hexdigest()
+    patch_sha = hashlib.sha256(result.patch_png).hexdigest()
+    try:
+        minio_client.put_object(
+            "manga-library",
+            f"scene-assets/{page_id}/{mask_sha}.png",
+            io.BytesIO(result.mask_png),
+            len(result.mask_png),
+            content_type="image/png",
+        )
+        minio_client.put_object(
+            "manga-library",
+            f"scene-assets/{page_id}/{patch_sha}.png",
+            io.BytesIO(result.patch_png),
+            len(result.patch_png),
+            content_type="image/png",
+        )
+    except Exception as exc:
+        logger.warning(f"[Cleanup] asset upload failed, R2 behaviour stands: {exc}")
+        return {}
+
+    return {
+        "cleanupMaskAssetId": f"mask-{mask_sha}",
+        "cleanupMaskSha256": mask_sha,
+        "cleanupMaskByteLength": len(result.mask_png),
+        "cleanupPatchAssetId": f"patch-{patch_sha}",
+        "cleanupPatchSha256": patch_sha,
+        "cleanupPatchByteLength": len(result.patch_png),
+        "cleanupBounds": result.bounds,
+        "cleanupGeneratorSha256": result.generator_sha256,
+        "cleanupDiagnostics": result.diagnostics,
+    }
 
 
 def bubble_covers_text(mask, fx1, fy1, fx2, fy2):
@@ -1395,6 +1435,7 @@ def process_ocr(job_data):
                                 continue
                             if r.get("containerResolution", "").startswith("review"):
                                 bg_color = None
+                                cleanup_fields = {}
                             else:
                                 bg_color, r["poly_pts"] = cover_fill_for_region(
                                     img,
@@ -1404,6 +1445,9 @@ def process_ocr(job_data):
                                     r["width"],
                                     r["height"],
                                     container_detected=r.get("containerDetected", True),
+                                )
+                                cleanup_fields = _compute_cleanup_fields(
+                                    img, page_id, r["x"], r["y"], r["width"], r["height"]
                                 )
                             if r["type"] == "bubble":
                                 regions.append(
@@ -1432,6 +1476,7 @@ def process_ocr(job_data):
                                         "safeTextY": r["safe_rect"][1],
                                         "safeTextW": r["safe_rect"][2],
                                         "safeTextH": r["safe_rect"][3],
+                                        **cleanup_fields,
                                     }
                                 )
                             else:
@@ -1464,6 +1509,7 @@ def process_ocr(job_data):
                                         "safeTextY": r["safe_rect"][1],
                                         "safeTextW": r["safe_rect"][2],
                                         "safeTextH": r["safe_rect"][3],
+                                        **cleanup_fields,
                                     }
                                 )
 
@@ -1474,6 +1520,7 @@ def process_ocr(job_data):
                     if final_text:
                         if r.get("containerResolution", "").startswith("review"):
                             bg_color = None
+                            cleanup_fields = {}
                         else:
                             bg_color, r["poly_pts"] = cover_fill_for_region(
                                 img,
@@ -1483,6 +1530,9 @@ def process_ocr(job_data):
                                 r["width"],
                                 r["height"],
                                 container_detected=r.get("containerDetected", True),
+                            )
+                            cleanup_fields = _compute_cleanup_fields(
+                                img, page_id, r["x"], r["y"], r["width"], r["height"]
                             )
                         if r["type"] == "bubble":
                             regions.append(
@@ -1511,6 +1561,7 @@ def process_ocr(job_data):
                                     "safeTextY": r["safe_rect"][1],
                                     "safeTextW": r["safe_rect"][2],
                                     "safeTextH": r["safe_rect"][3],
+                                    **cleanup_fields,
                                 }
                             )
                         else:
@@ -1543,6 +1594,7 @@ def process_ocr(job_data):
                                     "safeTextY": r["safe_rect"][1],
                                     "safeTextW": r["safe_rect"][2],
                                     "safeTextH": r["safe_rect"][3],
+                                    **cleanup_fields,
                                 }
                             )
 
@@ -1574,6 +1626,7 @@ def process_ocr(job_data):
                 bg_color, mask_polygon = cover_fill_for_region(
                     img, mask_polygon, x, y, width, height, container_detected=bool(use_bubble_contour)
                 )
+                cleanup_fields = _compute_cleanup_fields(img, page_id, x, y, width, height)
 
                 regions.append(
                     {
@@ -1599,6 +1652,7 @@ def process_ocr(job_data):
                         "safeTextY": by,
                         "safeTextW": bw,
                         "safeTextH": bh,
+                        **cleanup_fields,
                     }
                 )
                 if capture_dir:
