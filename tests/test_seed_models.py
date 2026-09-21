@@ -16,6 +16,10 @@ def _fake_yolo(monkeypatch, tmp_path):
         YOLO_PINNED_CHECKSUM = seed_models._sha256(str(path))
 
     monkeypatch.setattr(seed_models, "_verify_yolo", lambda: None)
+    # R3a-c added CTD/AOT verification to seed_models() alongside YOLO's; these tests are about
+    # local-OCR reader routing, not model-file presence, so stub all three the same way.
+    monkeypatch.setattr(seed_models, "_verify_ctd", lambda: None)
+    monkeypatch.setattr(seed_models, "_verify_aot", lambda: None)
     return Config
 
 
