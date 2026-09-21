@@ -24,6 +24,15 @@ from worker.utils.rate_limit import enforce_rate_limit, record_llm_call
 # QA verdict for ~16 regions runs well under this.
 DEFAULT_MAX_OUTPUT_TOKENS = 8192
 
+# OpenRouter-routed reasoning models (deepseek-v4-pro measured here) reason unboundedly with no
+# budget sent: 74-81% of a normal call's output tokens on 2026-09-21, and on one page 8073/8192
+# tokens went to reasoning with finish=length -- no content at all, four retries, 17.5 minutes for
+# one page. `reasoning.max_tokens` keeps reasoning on (per the user's call -- capping, not
+# disabling) while bounding it; OpenRouter requires the overall max_tokens to exceed this, so it
+# stays well under DEFAULT_MAX_OUTPUT_TOKENS, leaving headroom comfortably above the ~1200 tokens
+# of actual content a translation/QA chunk has needed in practice.
+REASONING_MAX_TOKENS = 4096
+
 
 class TransientAPIError(Exception):
     """Raised on retryable HTTP errors (429, 5xx, timeouts)."""
@@ -293,6 +302,9 @@ class LLMClient:
                     }
                     if self.provider == "openrouter":
                         payload["plugins"] = [{"id": "response-healing"}]
+
+            if self.provider == "openrouter":
+                payload["reasoning"] = {"max_tokens": REASONING_MAX_TOKENS}
 
         return payload
 

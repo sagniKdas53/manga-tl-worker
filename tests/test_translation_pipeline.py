@@ -158,6 +158,81 @@ def test_process_translation_openrouter(mock_tl_config, mock_post, mock_get, moc
 @patch("worker.handlers.translation.requests.get")
 @patch("worker.handlers.translation.requests.post")
 @patch("worker.config.TL_CONFIG")
+def test_translation_chunks_honor_cloud_concurrency(
+    mock_tl_config, mock_post, mock_get, mock_try_cloud_ai, monkeypatch
+):
+    """2026-09-21: a July 2026 refactor hardcoded the chunk executor to max_workers=1, silently
+    serializing every multi-chunk page (a 7-chunk page ran back-to-back with ~0 idle gap, so total
+    translation time was ~7x one chunk's own reasoning-heavy latency). CLOUD_CONCURRENCY was
+    reinstated -- verify the executor is actually built with it, not with a stale hardcoded 1.
+    """
+    import concurrent.futures
+
+    import worker.handlers.translation as translation_module
+
+    monkeypatch.setattr(translation_module, "CLOUD_CONCURRENCY", 3)
+    seen_max_workers = []
+    real_executor = concurrent.futures.ThreadPoolExecutor
+
+    class SpyExecutor(real_executor):
+        def __init__(self, max_workers=None, *args, **kwargs):
+            seen_max_workers.append(max_workers)
+            super().__init__(max_workers, *args, **kwargs)
+
+    monkeypatch.setattr(translation_module.concurrent.futures, "ThreadPoolExecutor", SpyExecutor)
+
+    mock_tl_config.provider = "openrouter"
+    mock_tl_config.resolve_key.return_value = "fake-openrouter-key"
+    mock_tl_config.llm_model = "deepseek/deepseek-v4-pro"
+
+    regions = [
+        {
+            "id": f"region-uuid-{i}",
+            "text": "こんにちは",
+            "detectedLanguage": "ja",
+            "confidence": 0.9,
+            "width": 100,
+            "height": 100,
+            "bubbleReadingOrder": i,
+            "regionType": "speech",
+            "user_override": "replace",
+        }
+        for i in range(3)
+    ]
+    mock_get_res = MagicMock()
+    mock_get_res.status_code = 200
+    mock_get_res.json.return_value = {"id": "image-uuid-1", "ocrRegions": regions, "conversations": []}
+    mock_get.return_value = mock_get_res
+
+    mock_try_cloud_ai.return_value = json.dumps(
+        {
+            "translations": [
+                {
+                    "id": r["id"],
+                    "translation": "Hello",
+                    "translationNotes": "Greeting",
+                    "emotion": "neutral",
+                    "tone": "polite",
+                    "translationScore": 0.98,
+                }
+                for r in regions
+            ]
+        }
+    )
+    mock_post_res = MagicMock()
+    mock_post_res.status_code = 200
+    mock_post.return_value = mock_post_res
+
+    process_translation({"imageId": "image-uuid-1", "sourceLanguage": "ja", "targetLanguage": "en"})
+
+    assert seen_max_workers
+    assert all(mw == 3 for mw in seen_max_workers)
+
+
+@patch("worker.services.translation.try_cloud_ai")
+@patch("worker.handlers.translation.requests.get")
+@patch("worker.handlers.translation.requests.post")
+@patch("worker.config.TL_CONFIG")
 def test_process_translation_openai(mock_tl_config, mock_post, mock_get, mock_try_cloud_ai):
     mock_tl_config.provider = "openai"
     mock_tl_config.resolve_key.return_value = "fake-openai-key"

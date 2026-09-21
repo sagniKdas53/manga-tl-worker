@@ -7,6 +7,7 @@ import requests
 
 from worker.config import (
     CALLBACK_URL,
+    CLOUD_CONCURRENCY,
     TL_CONFIG,
     backend_headers,
     redis_client,
@@ -182,7 +183,7 @@ def process_translation(job_data):
                 logger.error(f"{req_prefix}Standard batch translation failed for chunk {idx + 1}: {e}")
                 return None
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=CLOUD_CONCURRENCY) as executor:
             futures = {
                 executor.submit(contextvars.copy_context().run, process_chunk, idx, chunk): chunk
                 for idx, chunk in enumerate(unmatched_chunks)
@@ -253,7 +254,7 @@ def process_translation(job_data):
                     return None
 
             retry_mapping = {}
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=CLOUD_CONCURRENCY) as executor:
                 futures = {
                     executor.submit(contextvars.copy_context().run, process_retry_chunk, idx, r_chunk): r_chunk
                     for idx, r_chunk in enumerate(retry_chunks)

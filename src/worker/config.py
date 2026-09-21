@@ -277,6 +277,15 @@ RATE_LIMIT = os.environ.get("RATE_LIMIT", "").strip()
 # Default: 1 hour in seconds
 MODEL_TTL = int(os.environ.get("MODEL_TTL", "3600"))
 HEALTH_PORT = int(os.environ.get("HEALTH_PORT", "8000"))
+# How many of one page's translation chunks run concurrently against the cloud provider. These
+# are independent requests -- the context string is built once, upfront, from the page manifest,
+# not accumulated chunk-by-chunk -- so there is no ordering dependency between them. Reinstated
+# 2026-09-21: a July 2026 refactor ("Phase 2 ... deprecating CLOUD_CONCURRENCY") removed this env
+# var and hardcoded the executor to max_workers=1, silently serializing every multi-chunk page
+# (measured: a 7-chunk page ran its chunks back-to-back with ~0 idle gap between them, so total
+# translation time was ~7x one chunk's own reasoning-heavy latency). Only bounds concurrency
+# within one page's own translation job, not across jobs (that is CONCURRENT_JOBS).
+CLOUD_CONCURRENCY = int(os.environ.get("CLOUD_CONCURRENCY", "2"))
 
 # Clients
 redis_client = redis.Redis(
