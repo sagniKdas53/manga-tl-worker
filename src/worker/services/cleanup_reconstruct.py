@@ -16,6 +16,7 @@ Public entry point: `reconstruct_region`. Everything else here is a private help
 import hashlib
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 
 import cv2
@@ -264,26 +265,41 @@ def reconstruct_region(
     if img is None or width <= 0 or height <= 0:
         return None
 
+    # One line per region at the end, whatever the outcome: this step is 80-95% of a page's OCR
+    # job and used to leave no trace of its own on the success path (tracker, R3 addenda
+    # 2026-09-21). Every branch that returns None says why, with the time it cost to find out.
+    region_tag = f"[Cleanup] region ({int(x)},{int(y)} {int(width)}x{int(height)})"
+    started = time.perf_counter()
+
     crop, crop_x0, crop_y0 = _crop_with_context(img, x, y, width, height, config.crop_pad_px)
     if crop is None or crop.shape[0] == 0 or crop.shape[1] == 0:
+        logger.info(f"{region_tag}: rejected, degenerate crop")
         return None
+    crop_h, crop_w = crop.shape[:2]
 
+    t = time.perf_counter()
     try:
         prob = segment_crop(crop, session=ctd_session)
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
-        logger.warning(f"[Cleanup] CTD segmentation failed, R2 behaviour stands: {exc}")
+        logger.warning(
+            f"{region_tag}: CTD segmentation failed after {time.perf_counter() - t:.1f}s, R2 behaviour stands: {exc}"
+        )
         return None
+    ctd_s = time.perf_counter() - t
 
     raw_mask = threshold_mask(prob, config.ctd_threshold)
     gated_mask = _gate_to_region_footprint(raw_mask, crop_x0, crop_y0, x, y, width, height)
     if not gated_mask.any():
+        logger.info(f"{region_tag} crop {crop_w}x{crop_h}: rejected, CTD found no glyphs (ctd={ctd_s:.1f}s)")
         return None
 
     dilated_mask = _dilate(gated_mask, config.mask_dilate_px)
+    coverage_pct = 100.0 * float(dilated_mask.mean())
 
     diagnostics: list[str] = []
     interior = crop[dilated_mask]
     spread = pixel_spread(interior) if len(interior) else 0.0
+    t = time.perf_counter()
     if spread <= config.spread_threshold:
         method = "telea"
         reconstructed = _reconstruct_telea(crop, dilated_mask)
@@ -295,21 +311,34 @@ def reconstruct_region(
             logger.warning(f"[Cleanup] AOT reconstruction failed, falling back to TELEA: {exc}")
             method = "telea-fallback"
             reconstructed = _reconstruct_telea(crop, dilated_mask)
+    inpaint_s = time.perf_counter() - t
     diagnostics.append(f"reconstruction method: {method} (pixel_spread={spread:.1f})")
 
+    t = time.perf_counter()
     residual_pct = _residual_ink_pct(reconstructed, dilated_mask, config.ctd_threshold, session=ctd_session)
+    recheck_s = time.perf_counter() - t
     diagnostics.append(f"residual ink: {residual_pct:.1f}%")
+    steps = (
+        f"ctd={ctd_s:.1f}s mask={coverage_pct:.1f}% {method}={inpaint_s:.1f}s "
+        f"recheck={recheck_s:.1f}s residual={residual_pct:.1f}%"
+    )
     if residual_pct > config.residual_ink_max_pct:
         logger.info(
-            f"[Cleanup] residual ink {residual_pct:.1f}% exceeds {config.residual_ink_max_pct}% "
-            "bound; R2 behaviour stands for this region"
+            f"{region_tag} crop {crop_w}x{crop_h}: rejected, residual ink exceeds "
+            f"{config.residual_ink_max_pct}% bound, R2 behaviour stands | {steps} "
+            f"total={time.perf_counter() - started:.1f}s"
         )
         return None
 
-    crop_h, crop_w = crop.shape[:2]
-    return CleanupResult(
+    t = time.perf_counter()
+    result = CleanupResult(
         mask_png=_encode_mask_png(dilated_mask),
         patch_png=_encode_patch_png(reconstructed, dilated_mask),
         bounds={"x": crop_x0, "y": crop_y0, "width": crop_w, "height": crop_h},
         diagnostics=diagnostics,
     )
+    logger.info(
+        f"{region_tag} crop {crop_w}x{crop_h}: kept | {steps} encode={time.perf_counter() - t:.1f}s "
+        f"total={time.perf_counter() - started:.1f}s"
+    )
+    return result

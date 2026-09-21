@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import os
+import time
 from collections import defaultdict
 from dataclasses import replace
 from functools import cmp_to_key
@@ -53,6 +54,7 @@ from worker.services.owner_assignment import assign_captured_owners
 from worker.services.ownership_features import capture_fragment_features
 from worker.services.panel_detection import detect_text_containers
 from worker.services.pixel_stats import pixel_spread as _pixel_spread
+from worker.services.stage_timer import StageTimer
 from worker.services.translation import (
     LANG_MAP,
     try_cloud_ai_vision_batch,
@@ -439,22 +441,27 @@ def cover_fill_for_region(img, mask_polygon, x, y, width, height, container_dete
     return covering, poly
 
 
-def _compute_cleanup_fields(img, page_id, x, y, width, height) -> dict:
+def _compute_cleanup_fields(img, page_id, x, y, width, height, timer: StageTimer | None = None) -> dict:
     """R3: attempt real glyph-mask cleanup for one region and, on success, upload its mask/patch
     assets to the same content-addressed path `page_scene_builder.rs` already uses, returning
     the small JSON refs the OCR callback carries. Returns `{}` on any failure or when no
     cleanup is warranted -- the caller's existing `backgroundColor`/`maskPolygon` (R2's flat
     plate / no-plate-plus-halo) is what renders in that case, never a worse result than today.
     Requires a page_id: without one there is nowhere content-addressed to upload to.
+    `timer` accumulates this region's reconstruct/upload time into the job's stage summary.
     """
     if not page_id:
         return {}
+    started = time.perf_counter()
     result = reconstruct_region(img, x, y, width, height)
+    if timer is not None:
+        timer.add("cleanup", time.perf_counter() - started)
     if result is None:
         return {}
 
     mask_sha = hashlib.sha256(result.mask_png).hexdigest()
     patch_sha = hashlib.sha256(result.patch_png).hexdigest()
+    upload_started = time.perf_counter()
     try:
         minio_client.put_object(
             "manga-library",
@@ -473,6 +480,13 @@ def _compute_cleanup_fields(img, page_id, x, y, width, height) -> dict:
     except Exception as exc:
         logger.warning(f"[Cleanup] asset upload failed, R2 behaviour stands: {exc}")
         return {}
+    upload_s = time.perf_counter() - upload_started
+    if timer is not None:
+        timer.add("cleanup-upload", upload_s)
+    logger.info(
+        f"[Cleanup] uploaded mask {len(result.mask_png) / 1024:.0f}KB + patch "
+        f"{len(result.patch_png) / 1024:.0f}KB in {upload_s:.2f}s"
+    )
 
     return {
         "cleanupMaskAssetId": f"mask-{mask_sha}",
@@ -718,6 +732,7 @@ def process_ocr(job_data):
     logger.info(
         f"[OCR] Processing image: {image_id} (lang={source_language}, direction={reading_direction}){progress_str}"
     )
+    timer = StageTimer("[OCR]")
 
     try:
         backend_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}")
@@ -744,6 +759,7 @@ def process_ocr(job_data):
     except Exception as e:
         logger.error(f"[OCR] Error downloading image: {e}")
         raise
+    timer.mark("fetch")
 
     try:
         results = []
@@ -858,7 +874,7 @@ def process_ocr(job_data):
                             assert rapid_ocr_engine is not None
                             raw_results = rapid_ocr_engine(img_decoded)
                             results = parse_rapid_ocr_results(raw_results)
-                        logger.info(f"[OCR] {engine_name} returned.")
+                        logger.info(f"[OCR] {engine_name} returned in {timer.mark('page-ocr'):.1f}s.")
                         del raw_results
                         gc.collect()
                     else:
@@ -881,6 +897,7 @@ def process_ocr(job_data):
                     if img_decoded is not None:
                         raw_results = paddle_ocr_detector.predict(img_decoded)
                         results = parse_paddle_ocr_results(raw_results)
+                        logger.info(f"[OCR] PaddleOCR Detector returned in {timer.mark('page-detect'):.1f}s.")
                         del raw_results
                         gc.collect()
                     else:
@@ -910,8 +927,10 @@ def process_ocr(job_data):
             page_area = float(img_w * img_h)
             detected_bubbles = None
             text_containers = detect_text_containers(img) if img is not None else []
+            timer.mark("text-containers")
             if img is not None:
                 detected_bubbles = detect_bubbles_yolo(img)
+            timer.mark("yolo")
 
         regions = []
         is_yolo_active = detected_bubbles is not None
@@ -1447,7 +1466,7 @@ def process_ocr(job_data):
                                     container_detected=r.get("containerDetected", True),
                                 )
                                 cleanup_fields = _compute_cleanup_fields(
-                                    img, page_id, r["x"], r["y"], r["width"], r["height"]
+                                    img, page_id, r["x"], r["y"], r["width"], r["height"], timer=timer
                                 )
                             if r["type"] == "bubble":
                                 regions.append(
@@ -1532,7 +1551,7 @@ def process_ocr(job_data):
                                 container_detected=r.get("containerDetected", True),
                             )
                             cleanup_fields = _compute_cleanup_fields(
-                                img, page_id, r["x"], r["y"], r["width"], r["height"]
+                                img, page_id, r["x"], r["y"], r["width"], r["height"], timer=timer
                             )
                         if r["type"] == "bubble":
                             regions.append(
@@ -1626,7 +1645,7 @@ def process_ocr(job_data):
                 bg_color, mask_polygon = cover_fill_for_region(
                     img, mask_polygon, x, y, width, height, container_detected=bool(use_bubble_contour)
                 )
-                cleanup_fields = _compute_cleanup_fields(img, page_id, x, y, width, height)
+                cleanup_fields = _compute_cleanup_fields(img, page_id, x, y, width, height, timer=timer)
 
                 regions.append(
                     {
@@ -1682,6 +1701,10 @@ def process_ocr(job_data):
                 capture_groups = fallback_groups
             regions = merge_ocr_regions(regions, grouping=grouping, context=page_context)
 
+        # Everything between the detector marks and here is per-region work: fragment matching,
+        # merging, cloud-OCR chunks in VLM mode, and the inline R3 cleanup (which reports its own
+        # share via timer.add so the summary line shows both the wall time and the cleanup part).
+        timer.mark("regions")
         panel_regions_map = {}
         unmapped_regions = []
 
@@ -1810,6 +1833,7 @@ def process_ocr(job_data):
 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"[OCR] Outputs: callback_payload={callback_payload}")
+        timer.mark("order+payload")
         try:
             res = requests.post(
                 f"{CALLBACK_URL}/ocr",
@@ -1820,6 +1844,8 @@ def process_ocr(job_data):
         except Exception as e:
             logger.error(f"[OCR] Failed to post callback to backend: {e}")
             raise e
+        timer.mark("callback")
+        logger.info(timer.summary())
     except Exception as e:
         logger.error(f"[OCR] Error during OCR process: {e}")
         raise e

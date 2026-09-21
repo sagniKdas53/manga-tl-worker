@@ -33,6 +33,7 @@ be re-verified before trusting its threshold as tightly as before.
 import hashlib
 import logging
 import os
+import time
 
 import cv2
 import numpy as np
@@ -135,7 +136,16 @@ def segment_crop(crop_bgr: np.ndarray, session=None) -> np.ndarray:
     rgb = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
     tensor = rgb.transpose(2, 0, 1)[None]  # NCHW
 
+    started = time.perf_counter()
     outputs = sess.run(None, {"images": tensor})
+    elapsed = time.perf_counter() - started
+    fed_px = padded.shape[0] * padded.shape[1]
+    # The cost of this graph is per fed pixel (~80us/px on a 2-core CPU, measured 2026-09-21), so
+    # the fed shape is the number that explains the time; the crop shape says what the cap did.
+    logger.info(
+        f"[CTD] crop {orig_w}x{orig_h} -> fed {padded.shape[1]}x{padded.shape[0]} "
+        f"({fed_px / 1e6:.2f} MP) in {elapsed:.1f}s ({elapsed / fed_px * 1e6:.0f} us/px)"
+    )
     seg = outputs[0][0, 0]  # type: ignore
     if seg.min() < -0.01 or seg.max() > 1.01:
         seg = 1.0 / (1.0 + np.exp(-seg))

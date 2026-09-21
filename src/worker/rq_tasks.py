@@ -1,4 +1,7 @@
 import logging
+import re
+import time
+from datetime import datetime, timezone
 
 import requests
 from tenacity import retry
@@ -120,6 +123,21 @@ def update_job_status(job_id, status, error=None, attempt=None):
         )
 
 
+def _seconds_since(iso_timestamp) -> float | None:
+    if not isinstance(iso_timestamp, str) or not iso_timestamp:
+        return None
+    # The backend (Rust chrono) writes nanosecond fractions; fromisoformat takes at most six digits.
+    normalised = re.sub(r"(\.\d{6})\d+", r"\1", iso_timestamp.replace("Z", "+00:00"))
+    try:
+        created = datetime.fromisoformat(normalised)
+    except ValueError:
+        return None
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)  # noqa: UP017
+    now = datetime.now(timezone.utc)  # noqa: UP017
+    return max(0.0, (now - created).total_seconds())
+
+
 def process_job_rq(queue_name, job_data):
     job_id = job_data.get("jobId")
     # Every job the worker runs comes through here, which makes this the one place the pipeline's
@@ -137,6 +155,18 @@ def process_job_rq(queue_name, job_data):
     # job, so the list is bound here rather than reset inside each handler. Handler-level resets
     # against a shared global meant a job starting mid-flight discarded another job's costs.
     reset_job_costs()
+    stage = queue_name.removeprefix("queue:")
+    attempt = int(job_data.get("attempt", 1))
+    max_attempts = int(job_data.get("maxAttempts", 3))
+    started = time.perf_counter()
+    # Time since the backend enqueued this job (createdAt). On attempt 1 that is pure queue wait;
+    # on a re-dispatched attempt it also contains the earlier attempt(s) -- either way it is the
+    # part of a page's wall time that this worker did not spend working on it.
+    queued_s = _seconds_since(job_data.get("createdAt"))
+    logger.info(
+        f"[RQ Worker] Job {job_id} ({stage}) started, attempt {attempt}/{max_attempts}"
+        + (f", {queued_s:.0f}s since enqueue" if queued_s is not None else "")
+    )
     try:
         if check_stale_job(queue_name, job_data):
             update_job_status(job_id, "FAILED", "Stale job")
@@ -180,14 +210,14 @@ def process_job_rq(queue_name, job_data):
             process_qa_re_ocr(job_data)
 
         update_job_status(job_id, "COMPLETED")
+        logger.info(f"[RQ Worker] Job {job_id} ({stage}) completed in {time.perf_counter() - started:.1f}s")
     except Exception as e:
         # logger.exception attaches the traceback to the log record, so it goes through the same
         # handler as everything else and carries the trace id. traceback.print_exc() wrote straight
         # to stderr: unlevelled, uncorrelated, and invisible to any level setting.
-        logger.exception(f"[RQ Worker] Error processing job from {queue_name}")
-
-        attempt = int(job_data.get("attempt", 1))
-        max_attempts = int(job_data.get("maxAttempts", 3))
+        logger.exception(
+            f"[RQ Worker] Error processing job from {queue_name} after {time.perf_counter() - started:.1f}s"
+        )
 
         if attempt < max_attempts:
             logger.error(

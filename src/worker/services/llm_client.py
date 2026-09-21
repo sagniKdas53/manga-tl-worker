@@ -437,6 +437,9 @@ class LLMClient:
             total_tokens = prompt_tokens + completion_tokens
             # Anthropic spells it "max_tokens"; normalize onto the OpenAI vocabulary.
             finish_reason = "length" if data.get("stop_reason") == "max_tokens" else "stop"
+            # Anthropic does not break reasoning out of output_tokens; only whether it happened.
+            reasoning_tokens = None
+            reasoning_present = any(b.get("type") == "thinking" for b in data.get("content", []))
         else:
             choices = data.get("choices", [])
             # `or ""` rather than a .get default: providers send an explicit null content alongside
@@ -451,6 +454,14 @@ class LLMClient:
             details = usage.get("prompt_tokens_details") or {}
             cached_tokens = details.get("cached_tokens") or 0
             cache_write_tokens = details.get("cache_write_tokens") or 0
+            # OpenRouter (and OpenAI-shaped providers with reasoning models) report how much of
+            # completion_tokens was spent thinking. A translation batch that hit finish=length with
+            # 8073/8192 reasoning tokens (2026-09-21) was invisible here until the truncation.
+            completion_details = usage.get("completion_tokens_details") or {}
+            reasoning_tokens = completion_details.get("reasoning_tokens")
+            reasoning_present = bool(reasoning_tokens) or bool(
+                choices[0].get("message", {}).get("reasoning") if choices else None
+            )
             # Present only because _inject_routing_and_caching asks for it; absent on providers
             # that do not report a cost, which is what the estimator fallback is for.
             authoritative_cost = usage.get("cost")
@@ -459,7 +470,16 @@ class LLMClient:
             model_resolved = data.get("model") or ""
 
         logger.info(f"{self.req_prefix}Provider={self.provider} Model={self.model} Time={elapsed:.2f}s")
-        logger.info(f"{self.req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
+        reasoning_str = (
+            f"{reasoning_tokens}"
+            if reasoning_tokens is not None
+            else ("present, uncounted" if reasoning_present else "0")
+        )
+        logger.info(
+            f"{self.req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens} "
+            f"reasoning={reasoning_str} finish={finish_reason or 'unknown'} "
+            f"({completion_tokens / max(elapsed, 0.001):.0f} tok/s)"
+        )
 
         if finish_reason == "length":
             logger.warning(
