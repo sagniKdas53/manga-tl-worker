@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from worker.services.glyph_mask import (
+    CTD_MAX_SIDE,
     CTD_SIZE_MULTIPLE,
     _pad_to_multiple,
     _sha256,
@@ -111,6 +112,43 @@ def test_segment_crop_applies_sigmoid_when_output_is_logits():
     assert prob.min() >= 0.0 and prob.max() <= 1.0
     assert prob[0, 0] > 0.9  # sigmoid(10) ~= 1
     assert prob[0, 1] < 0.1  # sigmoid(-10) ~= 0
+
+
+def test_segment_crop_caps_oversized_crop_before_inference():
+    # A 1408x832 crop (the shape that measured ~82s/call uncapped, R3 addendum 2026-09-21)
+    # must be downscaled to CTD_MAX_SIDE on its long side before it reaches the session, and
+    # the returned probability map must be upscaled back to the crop's own native shape --
+    # callers (reconstruct_region, _residual_ink_pct) rely on prob.shape == crop.shape.
+    session = MagicMock()
+    long_side = CTD_MAX_SIDE
+    scale = long_side / 1408
+    expected_w = round(832 * scale)
+    padded_h = ((long_side + CTD_SIZE_MULTIPLE - 1) // CTD_SIZE_MULTIPLE) * CTD_SIZE_MULTIPLE
+    padded_w = ((expected_w + CTD_SIZE_MULTIPLE - 1) // CTD_SIZE_MULTIPLE) * CTD_SIZE_MULTIPLE
+    session.run.return_value = [np.zeros((1, 1, padded_h, padded_w), dtype=np.float32)]
+    crop = np.zeros((1408, 832, 3), dtype=np.uint8)
+
+    prob = segment_crop(crop, session=session)
+
+    assert prob.shape == (1408, 832)
+    fed_tensor = session.run.call_args[0][1]["images"]
+    assert max(fed_tensor.shape[2], fed_tensor.shape[3]) <= padded_h
+    assert fed_tensor.shape[2] <= long_side + CTD_SIZE_MULTIPLE
+    assert fed_tensor.shape[3] < 832  # actually downscaled, not just padded
+
+
+def test_segment_crop_leaves_small_crop_unscaled():
+    # Below CTD_MAX_SIDE, behaviour is unchanged from before the cap: no resize, only the
+    # existing pad-to-multiple-64.
+    session = MagicMock()
+    session.run.return_value = [np.zeros((1, 1, 128, 64), dtype=np.float32)]
+    crop = np.zeros((100, 50, 3), dtype=np.uint8)
+
+    prob = segment_crop(crop, session=session)
+
+    assert prob.shape == (100, 50)
+    fed_tensor = session.run.call_args[0][1]["images"]
+    assert fed_tensor.shape == (1, 3, 128, 64)
 
 
 def test_threshold_mask():
