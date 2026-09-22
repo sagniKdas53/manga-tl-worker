@@ -3,12 +3,9 @@
 Turns a CTD probability map into a `cleanup_artifact`'s two assets: a glyph-shaped alpha mask
 and a reconstructed RGBA patch, routed to TELEA or an AOT GAN inpainter by the same
 `pixel_spread` statistic `handlers.ocr` already uses to decide whether a background is flat
-enough to fill (docs/archive/erasure_overhaul_plan_2026-08-26.md §8). Three recall-recovery
-tiers guard the known residual-ink risk (CTD+TELEA alone leaves visible source strokes on
-under-detected pages, docs/archive/ctd_mask_validation_2026-08-26.md Finding 7): the 0.3
-detection threshold, a small bounded dilation of the gated mask, and a runtime residual-ink
-re-check that falls back to `None` -- i.e. R2's current flat-plate / no-plate behaviour for
-that region stands, never a worse result than today.
+enough to fill (docs/archive/erasure_overhaul_plan_2026-08-26.md §8). The runtime path uses one
+capped CTD segmentation pass per region: the 0.3 detection threshold and bounded dilation remain.
+``_residual_ink_pct`` remains an offline evaluation helper; it is not a second production CTD pass.
 
 Public entry point: `reconstruct_region`. Everything else here is a private helper.
 """
@@ -28,7 +25,7 @@ from worker.services.pixel_stats import pixel_spread
 
 logger = logging.getLogger(__name__)
 
-GENERATOR_ID = "ctd-seg+telea-aotgan-cleanup/v1"
+GENERATOR_ID = "ctd-seg+telea-aotgan-cleanup/v2-single-ctd"
 GENERATOR_SHA256 = hashlib.sha256(GENERATOR_ID.encode()).hexdigest()
 
 _aot_session = None
@@ -42,15 +39,18 @@ class CleanupConfig:
     # glyph-erasure-candidates corpus (docs/quality-runs/glyph-erasure-candidates/results/
     # 3_r0_dilation_sweep.png): +2px alone took a 10.6%-coverage region from 28.65dB/25.43dB
     # (AOT/LaMa-mpe, visible residual strokes) to 32.75dB/33.99dB (clean, matches Torii's own
-    # plate); +6px more gained under 1dB further. 5 is the new floor, not the ceiling -- the
-    # residual-ink recheck below still discards anything that isn't actually clean.
+    # plate); +6px more gained under 1dB further. 5 is the floor. It used to be described as
+    # "not the ceiling" because a runtime residual-ink recheck discarded anything still dirty;
+    # that recheck cost about half of cleanup's wall time and rejected no region in the logged
+    # gate run, so it is gone (R3 phase separation). Nothing downstream re-inspects the result
+    # now, which makes this dilation and the 0.3 threshold the whole of the recall margin.
     mask_dilate_px: int = 5
     # Reuse the existing flat-vs-structured statistic and threshold rather than a second knob
     # (docs/archive/mask_precision_2026-08-27.md §4, archive erasure plan §8): flat interior ->
     # TELEA, structured/artwork interior -> AOT.
     spread_threshold: float = BACKGROUND_FILL_MAX_SPREAD
-    # Starting bound from the 21-page validation (median 6.1%, 9/21 over 10%, 4/21 over 27%);
-    # confirm/adjust against that same set before trusting it in production (R3b test plan).
+    # Bound for the OFFLINE residual-ink evaluation (`_residual_ink_pct`), from the 21-page
+    # validation (median 6.1%, 9/21 over 10%, 4/21 over 27%). No longer read on the runtime path.
     residual_ink_max_pct: float = 15.0
     aot_max_side: int = 1024
 
@@ -257,9 +257,8 @@ def reconstruct_region(
 ) -> CleanupResult | None:
     """Erase and reconstruct one region's glyphs.
 
-    Returns `None` -- R2's current flat-plate / no-plate-plus-halo behaviour for this region
-    stands untouched, never a worse result than today -- on a degenerate crop, a CTD/AOT model
-    failure, an empty gated mask, or the residual-ink recall-recovery check firing.
+    Returns ``None`` on a degenerate crop, CTD failure, or an empty gated mask. Callers report
+    that condition explicitly; it is not a successful cleanup fallback.
     """
     config = config if config is not None else _DEFAULT_CONFIG
     if img is None or width <= 0 or height <= 0:
@@ -314,21 +313,7 @@ def reconstruct_region(
     inpaint_s = time.perf_counter() - t
     diagnostics.append(f"reconstruction method: {method} (pixel_spread={spread:.1f})")
 
-    t = time.perf_counter()
-    residual_pct = _residual_ink_pct(reconstructed, dilated_mask, config.ctd_threshold, session=ctd_session)
-    recheck_s = time.perf_counter() - t
-    diagnostics.append(f"residual ink: {residual_pct:.1f}%")
-    steps = (
-        f"ctd={ctd_s:.1f}s mask={coverage_pct:.1f}% {method}={inpaint_s:.1f}s "
-        f"recheck={recheck_s:.1f}s residual={residual_pct:.1f}%"
-    )
-    if residual_pct > config.residual_ink_max_pct:
-        logger.info(
-            f"{region_tag} crop {crop_w}x{crop_h}: rejected, residual ink exceeds "
-            f"{config.residual_ink_max_pct}% bound, R2 behaviour stands | {steps} "
-            f"total={time.perf_counter() - started:.1f}s"
-        )
-        return None
+    steps = f"ctd={ctd_s:.1f}s mask={coverage_pct:.1f}% {method}={inpaint_s:.1f}s"
 
     t = time.perf_counter()
     result = CleanupResult(

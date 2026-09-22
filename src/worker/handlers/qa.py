@@ -676,10 +676,12 @@ You MUST return a JSON object containing a "results" key with an array of object
             f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
         )
     try:
-        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=backend_headers())
+        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=backend_headers(), timeout=(5, 30))
+        res.raise_for_status()
         logger.debug(f"[QA] Callback status code: {res.status_code}")
     except Exception as e:
         logger.error(f"[QA] Failed to post QA callback to backend: {e}")
+        raise
 
 
 def _auto_pass_all(job_data):
@@ -742,10 +744,12 @@ def _auto_pass_all(job_data):
             f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
         )
     try:
-        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=backend_headers())
+        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=backend_headers(), timeout=(5, 30))
+        res.raise_for_status()
         logger.debug(f"[QA] Callback status code: {res.status_code}")
     except Exception as e:
         logger.error(f"[QA] Failed to post QA callback to backend: {e}")
+        raise
 
 
 def _process_qa_llm(job_data):
@@ -919,10 +923,12 @@ You MUST return a JSON object containing a "results" key with an array of object
             f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
         )
     try:
-        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=backend_headers())
+        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=backend_headers(), timeout=(5, 30))
+        res.raise_for_status()
         logger.debug(f"[QA] Callback status code: {res.status_code}")
     except Exception as e:
         logger.error(f"[QA] Failed to post QA callback to backend: {e}")
+        raise
 
 
 def _process_qa_vlm(job_data):
@@ -1155,7 +1161,9 @@ You MUST return a JSON object containing a "results" key with an array of object
             f"(Tokens: in={total_prompt_tokens}, out={total_completion_tokens})"
         )
     try:
-        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=backend_headers())
+        res = requests.post(f"{CALLBACK_URL}/qa", json=callback_payload, headers=backend_headers(), timeout=(5, 30))
+        res.raise_for_status()
         logger.debug(f"[QA] Callback status code: {res.status_code}")
     except Exception as e:
         logger.error(f"[QA] Failed to post QA callback to backend: {e}")
+        raise

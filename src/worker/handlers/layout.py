@@ -60,10 +60,14 @@ def process_layout(job_data):
             "conversations": [],
         }
         try:
-            res = requests.post(f"{CALLBACK_URL}/layout", json=callback_payload, headers=backend_headers())
+            res = requests.post(
+                f"{CALLBACK_URL}/layout", json=callback_payload, headers=backend_headers(), timeout=(5, 30)
+            )
+            res.raise_for_status()
             logger.debug(f"[Layout] Callback status code: {res.status_code}")
         except Exception as e:
             logger.error(f"[Layout] Failed to post callback: {e}")
+            raise
         return
 
     # Get image dimensions from the first panel or estimate from regions
@@ -148,7 +152,9 @@ def process_layout(job_data):
         ],
     }
     try:
-        res = requests.post(f"{CALLBACK_URL}/layout", json=callback_payload, headers=backend_headers())
+        res = requests.post(f"{CALLBACK_URL}/layout", json=callback_payload, headers=backend_headers(), timeout=(5, 30))
+        res.raise_for_status()
         logger.debug(f"[Layout] Callback status code: {res.status_code}")
     except Exception as e:
         logger.error(f"[Layout] Failed to post callback to backend: {e}")
+        raise

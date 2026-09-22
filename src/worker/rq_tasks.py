@@ -1,5 +1,7 @@
+import contextvars
 import logging
 import re
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -27,6 +29,7 @@ from worker.handlers import (
     process_render,
     process_translation,
 )
+from worker.job_attempt import AttemptExpired, bind_attempt, current_attempt
 from worker.utils.rate_limit import reset_job_costs
 
 logger = logging.getLogger(__name__)
@@ -36,6 +39,7 @@ def check_stale_job(queue_name, job_data):
     image_bound_queues = {
         "queue:panel-detection",
         "queue:ocr",
+        "queue:cleanup",
         "queue:layout",
         "queue:translation",
         "queue:render",
@@ -97,30 +101,68 @@ def _patch_job_status(url, payload):
         # The row is gone: deleted or cancelled while the job ran. Nothing to update, and no
         # number of retries will bring it back.
         logger.info("[RQ Worker] Job status PATCH returned 404 — job no longer exists.")
-        return
+        return False
     if res.status_code >= 500 or res.status_code in (408, 429):
         raise StatusUpdateFailed(f"backend returned {res.status_code}")
     if res.status_code >= 400:
         # A rejected payload does not heal on retry; say so once rather than spending the budget.
         logger.error(f"[RQ Worker] Job status PATCH rejected with {res.status_code}: {res.text}")
+        return False
+    return 200 <= res.status_code < 300
 
 
-def update_job_status(job_id, status, error=None, attempt=None):
+def update_job_status(job_id, status, error=None, attempt=None, *, heartbeat=False):
     if not job_id:
-        return
+        return False
     url = CALLBACK_URL.replace("/jobs/callback", f"/jobs/{job_id}/status")
     payload = {"status": status}
     if error:
         payload["error"] = str(error)
     if attempt is not None:
         payload["attempt"] = str(attempt)
+    if heartbeat:
+        payload["heartbeat"] = "true"
+        authority = current_attempt.get()
+        if authority is not None:
+            payload["progress"] = str(authority.progress)
     try:
-        _patch_job_status(url, payload)
+        return _patch_job_status(url, payload)
     except Exception as e:
         logger.error(
             f"[RQ Worker] Failed to update job {job_id} status to {status} after retries: {e} — "
             f"the backend will hold it PROCESSING until the stale sweeper requeues it"
         )
+        return False
+
+
+class JobHeartbeat:
+    """Renew only while the finite attempt is alive, independently of blocked inference."""
+
+    interval = 30.0
+
+    def __init__(self, job_id):
+        self.job_id = job_id
+        self.stop = threading.Event()
+        context = contextvars.copy_context()
+        self.thread = threading.Thread(target=context.run, args=(self.run,), daemon=True)
+
+    def run(self):
+        while not self.stop.wait(self.interval):
+            authority = current_attempt.get()
+            if authority is None:
+                return
+            try:
+                authority.check()
+                if not update_job_status(self.job_id, "PROCESSING", heartbeat=True):
+                    authority.revoked.set()
+                    return
+            except AttemptExpired:
+                authority.revoked.set()
+                return
+
+    def close(self):
+        self.stop.set()
+        self.thread.join(timeout=1)
 
 
 def _seconds_since(iso_timestamp) -> float | None:
@@ -140,6 +182,8 @@ def _seconds_since(iso_timestamp) -> float | None:
 
 def process_job_rq(queue_name, job_data):
     job_id = job_data.get("jobId")
+    authority_token = bind_attempt(job_data)
+    heartbeat = None
     # Every job the worker runs comes through here, which makes this the one place the pipeline's
     # trace id needs binding. The backend has been sending it in the payload as "traceId" all along;
     # from here it lands on every log line this job produces (via the formatter's %(trace)s) and on
@@ -186,13 +230,21 @@ def process_job_rq(queue_name, job_data):
                         return
             except Exception as e:
                 logger.error(f"[RQ Worker] Failed to check job status from backend: {e}")
+                return
 
-        update_job_status(job_id, "PROCESSING")
+        if not update_job_status(job_id, "PROCESSING"):
+            return
+        heartbeat = JobHeartbeat(job_id)
+        heartbeat.thread.start()
 
         if queue_name == "queue:panel-detection":
             process_panel_detection(job_data)
         elif queue_name == "queue:ocr":
             process_ocr(job_data)
+        elif queue_name == "queue:cleanup":
+            from worker.handlers.cleanup import process_cleanup
+
+            process_cleanup(job_data)
         elif queue_name == "queue:layout":
             process_layout(job_data)
         elif queue_name == "queue:translation":
@@ -209,7 +261,9 @@ def process_job_rq(queue_name, job_data):
         elif queue_name == "queue:qa-re-ocr":
             process_qa_re_ocr(job_data)
 
-        update_job_status(job_id, "COMPLETED")
+        if not update_job_status(job_id, "COMPLETED"):
+            logger.warning("[RQ Worker] Job %s completion was not accepted", job_id)
+            return
         logger.info(f"[RQ Worker] Job {job_id} ({stage}) completed in {time.perf_counter() - started:.1f}s")
     except Exception as e:
         # logger.exception attaches the traceback to the log record, so it goes through the same
@@ -229,6 +283,9 @@ def process_job_rq(queue_name, job_data):
             logger.error(f"[RQ Worker] Job {job_id} failed on attempt {attempt}/{max_attempts}. Max attempts reached.")
             update_job_status(job_id, "FAILED", str(e), attempt)
     finally:
+        if heartbeat is not None:
+            heartbeat.close()
+        current_attempt.reset(authority_token)
         # Jobs run concurrently on reused threads; an id left bound would label the next unrelated
         # job's output with this one's pipeline.
         reset_trace_id(trace_token)

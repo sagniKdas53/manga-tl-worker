@@ -151,7 +151,8 @@ def process_region_redo(job_data):
 
     try:
         callback_url = CALLBACK_URL.replace("/jobs/callback", f"/ocr-regions/{region_id}/callback")
-        res = requests.post(callback_url, json=callback_payload, headers=backend_headers())
+        res = requests.post(callback_url, json=callback_payload, headers=backend_headers(), timeout=(5, 30))
+        res.raise_for_status()
         if redo_type == "translation":
             logger.info(f"{req_prefix}Callback status code: {res.status_code}")
         else:
@@ -161,3 +162,4 @@ def process_region_redo(job_data):
             logger.error(f"{req_prefix}Failed to post callback: {e}")
         else:
             logger.error(f"[Region Redo] Failed to post callback: {e}")
+        raise

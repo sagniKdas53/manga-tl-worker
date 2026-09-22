@@ -419,13 +419,13 @@ def process_translation(job_data):
         logger.debug(f"{req_prefix}Translation Outputs: callback_payload={callback_payload}")
     try:
         res = requests.post(
-            f"{CALLBACK_URL}/translation",
-            json=callback_payload,
-            headers=backend_headers(),
+            f"{CALLBACK_URL}/translation", json=callback_payload, headers=backend_headers(), timeout=(5, 30)
         )
+        res.raise_for_status()
         logger.info(f"{req_prefix}Callback status code: {res.status_code}")
     except Exception as e:
         logger.error(f"{req_prefix}Failed to post callback to backend: {e}")
+        raise
 
     # AUDIT-B13, corrected. Raise only when another attempt could answer differently.
     #

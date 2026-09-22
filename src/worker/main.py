@@ -211,6 +211,7 @@ async def capabilities():
         "supported_tasks": [
             "queue:panel-detection",
             "queue:ocr",
+            "queue:cleanup",
             "queue:layout",
             "queue:translation",
             "queue:render",

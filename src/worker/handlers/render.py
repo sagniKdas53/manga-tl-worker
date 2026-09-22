@@ -64,7 +64,9 @@ def process_render(job_data):
         "layout": result.get("layout") or [],
     }
     try:
-        res = requests.post(f"{CALLBACK_URL}/render", json=callback_payload, headers=backend_headers())
+        res = requests.post(f"{CALLBACK_URL}/render", json=callback_payload, headers=backend_headers(), timeout=(5, 30))
+        res.raise_for_status()
         logger.debug(f"[Render] Callback status code: {res.status_code}")
     except Exception as e:
         logger.error(f"[Render] Failed to post callback: {e}")
+        raise

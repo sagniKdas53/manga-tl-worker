@@ -267,9 +267,12 @@ def backend_headers():
 
     Prefer this over the ``BACKEND_HEADERS`` dict for any request made while handling a job.
     """
-    if not _trace_id.get():
-        return BACKEND_HEADERS
-    return {**BACKEND_HEADERS, "X-Trace-Id": _trace_id.get()}
+    from worker.job_attempt import attempt_headers
+
+    headers = {**BACKEND_HEADERS, **attempt_headers()}
+    if _trace_id.get():
+        headers["X-Trace-Id"] = _trace_id.get()
+    return headers
 
 
 # Service Settings

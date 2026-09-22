@@ -300,18 +300,19 @@ def test_reconstruct_region_falls_back_to_telea_when_aot_fails(mock_segment_crop
 
 @patch("worker.services.cleanup_reconstruct._reconstruct_telea")
 @patch("worker.services.cleanup_reconstruct.segment_crop")
-def test_reconstruct_region_none_when_residual_ink_exceeds_bound(mock_segment_crop, mock_telea):
+def test_reconstruct_region_uses_one_ctd_pass_and_leaves_residual_check_offline(mock_segment_crop, mock_telea):
     img = np.full((100, 100, 3), 200, dtype=np.uint8)
     config = CleanupConfig(crop_pad_px=5, residual_ink_max_pct=15.0)
     crop, _crop_x0, _crop_y0 = _crop_with_context(img, 40, 40, 20, 20, config.crop_pad_px)
     assert crop is not None
     hot = (slice(5, 25), slice(5, 25))
     detect_prob = _prob_map(crop.shape[:2], hot)
-    # "Reconstruction" left the whole detected footprint still hot -- 100% residual, over bound.
-    mock_segment_crop.side_effect = [detect_prob, detect_prob]
+    # The runtime cleanup path no longer performs a second CTD residual pass.
+    mock_segment_crop.return_value = detect_prob
     mock_telea.return_value = crop.copy()
 
-    assert reconstruct_region(img, 40, 40, 20, 20, config=config) is None
+    assert reconstruct_region(img, 40, 40, 20, 20, config=config) is not None
+    mock_segment_crop.assert_called_once()
 
 
 CTD_MODEL_PATH_ON_DISK = os.path.join(os.path.dirname(__file__), "..", "..", "data", "bootstrap", "ctd_seg_dyn.onnx")

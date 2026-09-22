@@ -11,6 +11,8 @@ renders one greppable line.
 
 import time
 
+from worker.job_attempt import record_progress
+
 
 class StageTimer:
     def __init__(self, tag: str) -> None:
@@ -23,6 +25,7 @@ class StageTimer:
 
     def mark(self, stage: str) -> float:
         """Close the stage running since the previous mark (or since construction)."""
+        record_progress()
         now = time.perf_counter()
         elapsed = now - self._last
         self._stages.append((stage, elapsed))
@@ -31,6 +34,7 @@ class StageTimer:
 
     def add(self, stage: str, seconds: float, count: int = 1) -> None:
         """Accumulate time measured by a callee, for steps that repeat inside one stage."""
+        record_progress()
         self._extra[stage] = self._extra.get(stage, 0.0) + seconds
         self._counts[stage] = self._counts.get(stage, 0) + count
 
