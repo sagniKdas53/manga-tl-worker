@@ -62,8 +62,15 @@ def test_browser_adapter_uses_only_queued_scene_and_checks_source(mock_requests,
     previous_url = os.environ.get("PAGE_RENDERER_URL")
     os.environ["PAGE_RENDERER_URL"] = "http://renderer"
     try:
-        render_page_scene(
-            {"imageId": "image", "pageRevision": 3, "logicalSceneSha256": digest, "logicalScene": document}
+        result = render_page_scene(
+            {
+                "imageId": "image",
+                "jobId": "job-1",
+                "attempt": 2,
+                "pageRevision": 3,
+                "logicalSceneSha256": digest,
+                "logicalScene": document,
+            }
         )
     finally:
         if previous_url is None:
@@ -76,6 +83,28 @@ def test_browser_adapter_uses_only_queued_scene_and_checks_source(mock_requests,
     assert payload["scene"]["cleanupAssets"] == []
     assert payload["logicalSceneSha256"] == digest
     mock_minio.put_object.assert_called_once()
+    # OQ-01: the PNG lands under this attempt's own content-addressed key, never a page-global one
+    # another render could overwrite before the callback is read.
+    png_sha = hashlib.sha256(png).hexdigest()
+    expected_key = f"rendered/image/jobs/job-1/attempts/2/{png_sha}.png"
+    assert mock_minio.put_object.call_args.args[1] == expected_key
+    assert result["artifact"] == {
+        "storagePath": expected_key,
+        "sha256": png_sha,
+        "byteLength": len(png),
+        "contentType": "image/png",
+    }
+
+
+def test_render_artifact_key_requires_attempt_identity():
+    import pytest
+
+    from worker.page_scene_renderer import _render_artifact_path
+
+    with pytest.raises(ValueError):
+        _render_artifact_path({"imageId": "image", "jobId": "job"}, "a" * 64)
+    with pytest.raises(ValueError):
+        _render_artifact_path({"imageId": "image", "jobId": "../x", "attempt": 1}, "a" * 64)
 
 
 @patch("worker.handlers.render.requests.post")
@@ -91,6 +120,7 @@ def test_render_dispatcher_routes_immutable_scene_to_browser_then_callback(
         "pageRevision": 3,
         "logicalSceneSha256": "a" * 64,
         "pngSha256": "b" * 64,
+        "artifact": {"storagePath": "k", "sha256": "b" * 64, "byteLength": 1, "contentType": "image/png"},
         "diagnostics": [{"code": "text-overflow", "objectId": "text-1"}],
         "layout": [{"object_id": "text-1", "font_size": 28.5, "lines": ["Hello", "there"]}],
     }
@@ -105,6 +135,7 @@ def test_render_dispatcher_routes_immutable_scene_to_browser_then_callback(
         "pageRevision": 3,
         "logicalSceneSha256": "a" * 64,
         "renderedPngSha256": "b" * 64,
+        "artifact": {"storagePath": "k", "sha256": "b" * 64, "byteLength": 1, "contentType": "image/png"},
         "diagnostics": [{"code": "text-overflow", "objectId": "text-1"}],
         "layout": [{"object_id": "text-1", "font_size": 28.5, "lines": ["Hello", "there"]}],
     }
@@ -207,6 +238,8 @@ def _run_with_renderer(mock_requests, mock_download, source, document, asset_url
         return render_page_scene(
             {
                 "imageId": "image",
+                "jobId": "job-1",
+                "attempt": 1,
                 "pageRevision": 3,
                 "logicalSceneSha256": digest,
                 "logicalScene": document,

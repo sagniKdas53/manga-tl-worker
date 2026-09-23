@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 from PIL import Image
 
+from tests.qa_binding import artifact_for, bound_qa_job
 from worker.handlers.layout import process_layout
 from worker.handlers.ocr import process_ocr
 from worker.handlers.panel import process_panel_detection
@@ -177,6 +178,7 @@ def test_core_translation_flow_e2e(
         "pageRevision": 1,
         "logicalSceneSha256": "a" * 64,
         "pngSha256": "b" * 64,
+        "artifact": artifact_for(get_dummy_image_bytes()),
         "diagnostics": [],
     }
 
@@ -272,7 +274,7 @@ def test_core_translation_flow_e2e(
         }
     )
 
-    qa_job = {"imageId": "image-uuid-1", "qaMode": "hybrid"}
+    qa_job = bound_qa_job({"imageId": "image-uuid-1", "qaMode": "hybrid"})
     process_qa(qa_job)
 
     # Verify LLM QA called

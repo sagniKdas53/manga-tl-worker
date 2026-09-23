@@ -1,6 +1,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
+from tests.qa_binding import bound_qa_job
 from worker.handlers.qa import _process_qa_llm, _translation_qa_regions
 
 
@@ -70,7 +71,7 @@ def test_unreviewed_sfx_enters_translation_qa_for_rejection(
         }
     )
 
-    _process_qa_llm({"imageId": "image-1"})
+    _process_qa_llm(bound_qa_job({"imageId": "image-1"}))
 
     prompt = mock_try_cloud_ai.call_args.args[3]
     assert "review-sfx" in prompt

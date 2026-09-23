@@ -60,6 +60,7 @@ def process_render(job_data):
         "pageRevision": result["pageRevision"],
         "logicalSceneSha256": result["logicalSceneSha256"],
         "renderedPngSha256": result["pngSha256"],
+        "artifact": result["artifact"],
         "diagnostics": result.get("diagnostics") or [],
         "layout": result.get("layout") or [],
     }

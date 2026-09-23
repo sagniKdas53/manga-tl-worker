@@ -13,6 +13,7 @@ import hashlib
 import io
 import json
 import os
+import re
 from typing import Any
 
 import requests
@@ -37,6 +38,20 @@ def _render_input_digest(scene_digest: str, source_sha256: str, asset_sha256s: l
         sort_keys=True,
     )
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _render_artifact_path(job_data: dict[str, Any], png_sha256: str) -> str:
+    """Return an attempt-scoped, immutable object key for a completed render."""
+    image_id = job_data.get("imageId")
+    job_id = job_data.get("jobId")
+    attempt = job_data.get("attempt")
+    if not all(isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9._-]+", value) for value in (image_id, job_id)):
+        raise ValueError("render artifacts require safe imageId and jobId values")
+    if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1:
+        raise ValueError("render artifacts require a positive integer attempt")
+    if not isinstance(png_sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", png_sha256):
+        raise ValueError("renderer returned an invalid PNG digest")
+    return f"rendered/{image_id}/jobs/{job_id}/attempts/{attempt}/{png_sha256}.png"
 
 
 def _fetch_asset(url: str, record: dict[str, Any], asset_id: str) -> bytes:
@@ -165,13 +180,20 @@ def render_page_scene(job_data: dict[str, Any]) -> dict[str, Any]:
     png = base64.b64decode(rendered["pngBase64"], validate=True)
     if hashlib.sha256(png).hexdigest() != rendered.get("pngSha256"):
         raise ValueError("renderer PNG digest mismatch")
+    artifact = {
+        "storagePath": _render_artifact_path(job_data, rendered["pngSha256"]),
+        "sha256": rendered["pngSha256"],
+        "byteLength": len(png),
+        "contentType": "image/png",
+    }
     minio_client.put_object(
-        "manga-library", f"rendered/{image_id}.png", io.BytesIO(png), len(png), content_type="image/png"
+        "manga-library", artifact["storagePath"], io.BytesIO(png), len(png), content_type=artifact["contentType"]
     )
     return {
         "pageRevision": rendered["pageRevision"],
         "logicalSceneSha256": rendered["logicalSceneSha256"],
         "pngSha256": rendered["pngSha256"],
+        "artifact": artifact,
         "diagnostics": rendered.get("diagnostics") or [],
         # Resolved font px + line breaks per text object (tracker R2 (c)); the backend writes
         # the size back onto the element and keeps the whole layout in the render ledger.

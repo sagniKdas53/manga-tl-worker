@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import io
 import json
 import logging
@@ -101,6 +102,104 @@ QA_JSON_SCHEMA = {
 
 
 VALID_QA_STATUSES = {"passed", "failed", "direct_fix", "reject_sfx"}
+
+
+def _qa_response_integrity(results, ocr_regions):
+    """Describe every completeness failure without discarding the provider's raw result."""
+    expected_ids = {str(region.get("id")) for region in ocr_regions if region.get("id")}
+    if not isinstance(results, list):
+        return {"complete": False, "errors": ["results is not an array"]}
+
+    errors = []
+    returned_ids = []
+    for index, result in enumerate(results):
+        if not isinstance(result, dict):
+            errors.append(f"result[{index}] is not an object")
+            continue
+        region_id = result.get("regionId")
+        if not isinstance(region_id, str) or not region_id.strip():
+            errors.append(f"result[{index}] has no regionId")
+            continue
+        if region_id not in expected_ids:
+            errors.append(f"result[{index}] has foreign regionId {region_id}")
+            continue
+        if result.get("qaStatus") not in VALID_QA_STATUSES:
+            errors.append(f"result[{index}] has invalid qaStatus for {region_id}")
+            continue
+        returned_ids.append(region_id)
+
+    duplicate_ids = sorted({region_id for region_id in returned_ids if returned_ids.count(region_id) > 1})
+    errors.extend(f"duplicate verdict for {region_id}" for region_id in duplicate_ids)
+    missing_ids = sorted(expected_ids - set(returned_ids))
+    errors.extend(f"missing verdict for {region_id}" for region_id in missing_ids)
+    return {"complete": not errors, "errors": errors}
+
+
+def _artifact_fields(artifact):
+    if not isinstance(artifact, dict):
+        raise ValueError("QA job has no immutable render artifact")
+    required = {"storagePath", "sha256", "byteLength", "contentType"}
+    if set(artifact) != required:
+        raise ValueError("QA render artifact has an invalid shape")
+    if not isinstance(artifact["storagePath"], str) or not artifact["storagePath"]:
+        raise ValueError("QA render artifact has no storage path")
+    if not isinstance(artifact["sha256"], str) or len(artifact["sha256"]) != 64:
+        raise ValueError("QA render artifact has an invalid digest")
+    if not isinstance(artifact["byteLength"], int) or artifact["byteLength"] < 0:
+        raise ValueError("QA render artifact has an invalid byte length")
+    if artifact["contentType"] != "image/png":
+        raise ValueError("QA render artifact is not a PNG")
+    return artifact
+
+
+def _read_render_artifact(artifact):
+    """Read and verify exactly the immutable PNG a VLM is about to judge."""
+    artifact = _artifact_fields(artifact)
+    response = minio_client.get_object("manga-library", artifact["storagePath"])
+    rendered_bytes = response.read()
+    if len(rendered_bytes) != artifact["byteLength"]:
+        raise ValueError("QA render artifact byte length mismatch")
+    if hashlib.sha256(rendered_bytes).hexdigest() != artifact["sha256"]:
+        raise ValueError("QA render artifact digest mismatch")
+    return rendered_bytes
+
+
+def _judged_artifact(job_data, artifact=None, render_result=None):
+    """Build the identity the backend compares with the persisted QA-job binding."""
+    if render_result is not None:
+        artifact = render_result["artifact"]
+        page_revision = render_result["pageRevision"]
+        logical_scene_sha256 = render_result["logicalSceneSha256"]
+    else:
+        artifact = artifact if artifact is not None else job_data.get("renderArtifact")
+        page_revision = job_data.get("pageRevision")
+        logical_scene_sha256 = job_data.get("logicalSceneSha256")
+    _artifact_fields(artifact)
+    if not isinstance(page_revision, int) or isinstance(page_revision, bool):
+        raise ValueError("QA artifact has no page revision")
+    if not isinstance(logical_scene_sha256, str) or len(logical_scene_sha256) != 64:
+        raise ValueError("QA artifact has no logical scene digest")
+    return {
+        "artifact": artifact,
+        "pageRevision": page_revision,
+        "logicalSceneSha256": logical_scene_sha256,
+    }
+
+
+def _qa_accounting(job_data, raw_results, qa_regions, *, judged=True, render_result=None):
+    """Fields the backend needs to tell a complete verdict set from a truncated or stale one.
+
+    The backend, not this worker, decides whether QA passed: it compares the verdicts against
+    ``qaTargetIds`` and against every region the page actually displays text for, and it only
+    accepts verdicts about the revision it asked to have judged.
+    """
+    accounting = {
+        "qaTargetIds": sorted(str(region["id"]) for region in qa_regions if region.get("id")),
+        "qaResponseIntegrity": _qa_response_integrity(raw_results, qa_regions),
+    }
+    if judged:
+        accounting["judgedArtifact"] = _judged_artifact(job_data, render_result=render_result)
+    return accounting
 
 
 def _sanitize_qa_results(results, ocr_regions, label="LLM"):
@@ -448,14 +547,26 @@ You MUST return a JSON object containing a "results" key with an array of object
             results = parsed.get("results") or []
         except Exception as e:
             logger.error(f"[QA] Failed to parse LLM response: {e}. Raw response: {log_payload(qa_response)}")
+    llm_integrity = _qa_response_integrity(results, qa_regions)
     results = _sanitize_qa_results(results, qa_regions, label="LLM")
+    if not llm_integrity["complete"]:
+        # OQ-02: a partial first pass is untrustworthy as a whole, so none of its fixes are applied.
+        # The VLM pass still judges the page as it stands, under the same accounting rules.
+        logger.warning(
+            f"[QA] Hybrid LLM pass incomplete ({len(llm_integrity['errors'])} problem(s)); "
+            "applying none of its fixes before the VLM pass."
+        )
+        results = []
 
     # Call backend prepare endpoint to apply fixes and set visibility
     prepare_url = CALLBACK_URL.replace("/jobs/callback", f"/images/{image_id}/qa-hybrid-prepare")
     try:
         prep_res = requests.post(
             prepare_url,
-            json={"pageId": job_data.get("pageId"), "qaResults": results},
+            json={
+                "pageId": job_data.get("pageId"),
+                "qaResults": results,
+            },
             headers=backend_headers(),
         )
         logger.info(f"[QA] Hybrid QA preparation status code: {prep_res.status_code}")
@@ -472,7 +583,11 @@ You MUST return a JSON object containing a "results" key with an array of object
     prep_res.raise_for_status()
     from worker.page_scene_renderer import render_page_scene
 
-    render_page_scene(prep_res.json())
+    # The prepared scene is rendered under this QA job's own attempt identity, so its artifact key
+    # cannot collide with a render job's, or with another QA attempt's.
+    render_result = render_page_scene(
+        {**prep_res.json(), "jobId": job_data.get("jobId"), "attempt": job_data.get("attempt", 1)}
+    )
 
     # Now run VLM check on updated render
     try:
@@ -498,13 +613,8 @@ You MUST return a JSON object containing a "results" key with an array of object
         logger.error(f"[QA] Error downloading original image: {e}")
         raise
 
-    # Download rendered typeset image from MinIO
-    try:
-        response = minio_client.get_object("manga-library", f"rendered/{image_id}.png")
-        rendered_bytes = response.read()
-    except Exception as e:
-        logger.error(f"[QA] Error downloading rendered image: {e}")
-        raise
+    # Judge the exact immutable PNG rendered from the prepared scene, never a page-global key.
+    rendered_bytes = _read_render_artifact(render_result["artifact"])
 
     try:
         img1 = Image.open(io.BytesIO(original_bytes)).convert("RGB")
@@ -643,6 +753,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         except Exception as e:
             logger.error(f"[QA] Failed to parse VLM response: {e}. Raw response: {log_payload(qa_response_vlm)}")
 
+    accounting = _qa_accounting(job_data, results_vlm, qa_regions, render_result=render_result)
     results_vlm = _sanitize_qa_results(results_vlm, qa_regions, label="VLM")
 
     if not results_vlm:
@@ -657,6 +768,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         "imageId": image_id,
         "pageId": job_data.get("pageId"),
         "qaResults": results_vlm,
+        **accounting,
     }
     from worker.utils.rate_limit import build_cost_payload, format_cost, get_job_costs
 
@@ -719,12 +831,21 @@ def _auto_pass_all(job_data):
             }
         )
 
+    # QA is bypassed, not judged: the targets are every region, and each gets a stated pass.
+    accounting = _qa_accounting(
+        job_data,
+        results,
+        [{"id": r["id"]} for r in ocr_regions],
+        judged=bool(job_data.get("renderArtifact")),
+    )
+
     # Call backend
     callback_payload = {
         "jobId": job_data.get("jobId"),
         "imageId": image_id,
         "pageId": job_data.get("pageId"),
         "qaResults": results,
+        **accounting,
     }
     from worker.utils.rate_limit import build_cost_payload, format_cost, get_job_costs
 
@@ -888,6 +1009,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         except Exception as e:
             logger.error(f"[QA] Failed to parse LLM response: {e}. Raw response: {log_payload(qa_response)}")
 
+    accounting = _qa_accounting(job_data, results, qa_regions)
     results = _sanitize_qa_results(results, qa_regions, label="LLM")
 
     if not results:
@@ -904,6 +1026,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         "imageId": image_id,
         "pageId": job_data.get("pageId"),
         "qaResults": results,
+        **accounting,
     }
     from worker.utils.rate_limit import build_cost_payload, format_cost, get_job_costs
 
@@ -966,13 +1089,9 @@ def _process_qa_vlm(job_data):
         logger.error(f"[QA] Error downloading original image: {e}")
         raise
 
-    # Download rendered typeset image from MinIO
-    try:
-        response = minio_client.get_object("manga-library", f"rendered/{image_id}.png")
-        rendered_bytes = response.read()
-    except Exception as e:
-        logger.error(f"[QA] Error downloading rendered image: {e}")
-        raise
+    # Judge exactly the immutable PNG the render callback bound to this QA job. A page-global
+    # key could hold another revision's pixels; a job without a binding is a backend bug.
+    rendered_bytes = _read_render_artifact(job_data.get("renderArtifact"))
 
     try:
         # Create side-by-side combined image for VLM comparison
@@ -1126,6 +1245,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         except Exception as e:
             logger.error(f"[QA] Failed to parse VLM response: {e}. Raw response: {log_payload(qa_response)}")
 
+    accounting = _qa_accounting(job_data, results, qa_regions)
     results = _sanitize_qa_results(results, qa_regions, label="VLM")
 
     if not results:
@@ -1142,6 +1262,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         "imageId": image_id,
         "pageId": job_data.get("pageId"),
         "qaResults": results,
+        **accounting,
     }
     from worker.utils.rate_limit import build_cost_payload, format_cost, get_job_costs
 

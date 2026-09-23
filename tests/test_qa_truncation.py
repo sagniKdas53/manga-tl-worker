@@ -7,8 +7,10 @@ The worker forwarded it, the backend could not apply it, and — because nothing
 the page as a clean QA pass and completed the pipeline.
 """
 
+import json
 from unittest.mock import MagicMock, patch
 
+from tests.qa_binding import bound_qa_job
 from worker.handlers.qa import QA_JSON_SCHEMA, _sanitize_qa_results
 from worker.services.llm_client import LLMClient
 
@@ -80,7 +82,7 @@ def test_unusable_qa_response_is_not_reported_as_a_pass(mock_redis, mock_request
     ):
         from worker.handlers.qa import process_qa
 
-        process_qa({"imageId": "img1"})
+        process_qa(bound_qa_job({"imageId": "img1"}))
 
     posted = mock_requests.post.call_args[1]["json"]["qaResults"]
     assert posted == [], "an unusable QA response must report no verdict, not a pass"
@@ -135,3 +137,77 @@ def test_every_provider_gets_an_explicit_output_budget(mock_post):
     client.complete([{"role": "user", "content": "hi"}])
 
     assert mock_post.call_args[1]["json"]["max_tokens"] > 4096
+
+
+@patch("worker.handlers.qa.requests")
+@patch("worker.handlers.qa.redis_client")
+def test_truncated_response_is_reported_incomplete_with_its_targets(mock_redis, mock_requests):
+    """OQ-02: the 38-of-63 case. The backend, not the worker, decides the pass, so the callback
+    states what was asked and what came back wrong, and names the scene it judged."""
+    mock_redis.llen.return_value = 0
+    mock_res = MagicMock()
+    mock_res.status_code = 200
+    translated = [{**r, "translatedText": f"english {r['id']}"} for r in REGIONS]
+    mock_res.json.return_value = {"ocrRegions": translated}
+    mock_requests.get.return_value = mock_res
+    judged = [r["id"] for r in translated]
+    partial = json.dumps({"results": [{"regionId": judged[0], "qaStatus": "passed", "qaScore": 1}]})
+
+    with (
+        patch("worker.handlers.qa.QA_MODE", "llm"),
+        patch("worker.handlers.qa.try_cloud_ai", return_value=partial),
+        patch("worker.handlers.qa.try_local_ai", return_value=partial),
+    ):
+        from worker.handlers.qa import process_qa
+
+        job = bound_qa_job({"imageId": "img1"})
+        process_qa(job)
+
+    posted = mock_requests.post.call_args[1]["json"]
+    assert sorted(posted["qaTargetIds"]) == sorted(judged)
+    assert posted["qaResponseIntegrity"]["complete"] is False
+    assert any(judged[1] in e for e in posted["qaResponseIntegrity"]["errors"])
+    assert posted["judgedArtifact"] == {
+        "artifact": job["renderArtifact"],
+        "pageRevision": job["pageRevision"],
+        "logicalSceneSha256": job["logicalSceneSha256"],
+    }
+
+
+def test_duplicate_and_foreign_verdicts_are_integrity_errors():
+    from worker.handlers.qa import _qa_response_integrity
+
+    regions = [{"id": "a"}, {"id": "b"}]
+    report = _qa_response_integrity(
+        [
+            {"regionId": "a", "qaStatus": "passed"},
+            {"regionId": "a", "qaStatus": "failed"},
+            {"regionId": "b", "qaStatus": "passed"},
+            {"regionId": "zzz", "qaStatus": "passed"},
+        ],
+        regions,
+    )
+    assert report["complete"] is False
+    assert "duplicate verdict for a" in report["errors"]
+    assert any("foreign regionId zzz" in e for e in report["errors"])
+    complete = _qa_response_integrity(
+        [{"regionId": "a", "qaStatus": "passed"}, {"regionId": "b", "qaStatus": "reject_sfx"}], regions
+    )
+    assert complete == {"complete": True, "errors": []}
+
+
+@patch("worker.handlers.qa.minio_client")
+def test_vlm_refuses_to_judge_bytes_that_are_not_the_bound_artifact(mock_minio):
+    """OQ-01: the VLM judges exactly the artifact the render bound to the job, or nothing."""
+    import pytest
+
+    from worker.handlers.qa import _read_render_artifact
+
+    job = bound_qa_job({"imageId": "img1"}, rendered=b"final")
+    mock_minio.get_object.return_value.read.return_value = b"initial"
+    with pytest.raises(ValueError):
+        _read_render_artifact(job["renderArtifact"])
+    mock_minio.get_object.return_value.read.return_value = b"final"
+    assert _read_render_artifact(job["renderArtifact"]) == b"final"
+    with pytest.raises(ValueError):
+        _read_render_artifact(None)
