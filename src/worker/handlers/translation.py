@@ -86,12 +86,20 @@ def process_translation(job_data):
     resolved_translations = {}
     unmatched_regions = []
     policy_skipped = {}
+    cleanup_skipped = []
     failure_reasons = {}
 
     def note_failure(region_id, answer):
         failure_reasons[region_id] = "rejected" if answer else "unavailable"
 
     for r in ocr_regions:
+        if r.get("qaStatus") == "cleanup_review":
+            # Cleanup found no reliable glyph support. Never typeset over preserved source
+            # pixels, including OCR false positives on artwork. Other regions may continue.
+            cleanup_skipped.append(
+                {"regionId": r["id"], "policyAction": "review", "policyReason": "cleanup-review-required"}
+            )
+            continue
         policy = select_region_action(r.get("regionType") or r.get("region_type"), r.get("user_override"))
         r["policyAction"] = policy.action
         r["policyReason"] = policy.reason
@@ -111,6 +119,8 @@ def process_translation(job_data):
                 f"{policy.kind}:{policy.action}:{region_id[:8]}" for region_id, policy in policy_skipped.items()
             )
         )
+    if cleanup_skipped:
+        logger.warning("%sPreserving %d regions requiring cleanup review", req_prefix, len(cleanup_skipped))
 
     translation_chunk_count = 0
 
@@ -393,7 +403,8 @@ def process_translation(job_data):
             "selectedTargetIds": [r["id"] for r in unmatched_regions],
             "skipped": [
                 {"regionId": region_id, **policy.callback_fields()} for region_id, policy in policy_skipped.items()
-            ],
+            ]
+            + cleanup_skipped,
             "translationChunkCount": translation_chunk_count,
         },
     }

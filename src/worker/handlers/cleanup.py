@@ -7,6 +7,7 @@ explicit per-region outcome for the immutable cleanup payload.
 import hashlib
 import io
 import logging
+from urllib.parse import unquote, urlparse
 
 import cv2
 import numpy as np
@@ -14,7 +15,8 @@ import requests
 
 from worker.config import CALLBACK_URL, backend_headers, minio_client
 from worker.job_attempt import record_progress
-from worker.services.cleanup_reconstruct import CleanupResult, reconstruct_region
+from worker.services.cleanup_reconstruct import CleanupResult, CleanupUncertain, reconstruct_region
+from worker.services.cleanup_review import assess_empty_mask
 from worker.utils.lock import acquire_lock
 
 logger = logging.getLogger(__name__)
@@ -53,11 +55,27 @@ def _download_verified_source(job_data: dict) -> np.ndarray:
     if not isinstance(source_sha256, str) or len(source_sha256) != 64:
         raise ValueError("cleanup job is missing immutable sourceSha256")
     response = requests.get(image_url, timeout=(5, 60))
-    response.raise_for_status()
-    actual = hashlib.sha256(response.content).hexdigest()
+    if response.status_code == 403:
+        # Manual retries can outlive the presigned URL. Read the same object through our
+        # configured store, still requiring the dispatched immutable content digest below.
+        path = unquote(urlparse(image_url).path).lstrip("/")
+        bucket, separator, key = path.partition("/")
+        if bucket != "manga-library" or not separator or not key:
+            response.raise_for_status()
+            raise ValueError("cleanup source URL has no recognized storage object")
+        stored = minio_client.get_object(bucket, key)
+        try:
+            source = stored.read()
+        finally:
+            stored.close()
+            stored.release_conn()
+    else:
+        response.raise_for_status()
+        source = response.content
+    actual = hashlib.sha256(source).hexdigest()
     if actual.lower() != source_sha256.lower():
         raise ValueError("downloaded source does not match sourceSha256")
-    image = cv2.imdecode(np.frombuffer(response.content, dtype=np.uint8), cv2.IMREAD_COLOR)
+    image = cv2.imdecode(np.frombuffer(source, dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError("downloaded source is not a decodable image")
     return image
@@ -92,7 +110,7 @@ def _geometry(region: dict) -> tuple[float, float, float, float] | None:
     return values[0], values[1], values[2], values[3]
 
 
-def _process_region(image: np.ndarray, page_id: str, region: object) -> dict:
+def _process_region(image: np.ndarray, page_id: str, region: object, source_language="ja", ocr_model="") -> dict:
     if not isinstance(region, dict):
         return _region_result(region, "failed", ["invalid cleanup region payload"])
     if region.get("policyAction") == "exclude":
@@ -109,13 +127,16 @@ def _process_region(image: np.ndarray, page_id: str, region: object) -> dict:
     try:
         result = reconstruct_region(image, *geometry)
         if result is None:
-            # reconstruct_region returns None for every rejection it makes — degenerate crop,
-            # CTD found no glyphs, model failure. R2's flat-plate/halo behaviour for this region
+            # A degenerate crop or model failure is distinct from an uncertain empty mask.
+            # R2's flat-plate/halo behaviour for this region
             # still renders, but it is not cleanup, so it is not reported as cleanup.
             return _region_result(region, "failed", ["CTD/reconstruction produced no cleanup artifact"])
         fields = _asset_fields(result, page_id)
         status = "degraded" if any("fallback" in diagnostic for diagnostic in result.diagnostics) else "complete"
         return _region_result(region, status, result.diagnostics, **fields)
+    except CleanupUncertain as exc:
+        diagnostics = assess_empty_mask(image, geometry, source_language, ocr_model, region.get("ocrText") or "")
+        return _region_result(region, "uncertain", [str(exc), *diagnostics])
     except Exception as exc:
         logger.warning("[Cleanup] region %s failed: %s", region.get("regionId"), exc)
         return _region_result(region, "failed", [str(exc)])
@@ -148,7 +169,11 @@ def process_cleanup(job_data: dict) -> None:
         # one container; this bounds the machine.
         with acquire_lock("ocr", node_scoped=True):
             for region in regions:
-                outcomes.append(_process_region(image, page_id, region))
+                outcomes.append(
+                    _process_region(
+                        image, page_id, region, job_data.get("sourceLanguage") or "ja", job_data.get("ocrModel") or ""
+                    )
+                )
                 # Cleanup is the longest stage on the page and makes no network calls while it
                 # runs, so the per-region tick is the only thing that distinguishes "working" from
                 # "hung" in the backend's progress counter.

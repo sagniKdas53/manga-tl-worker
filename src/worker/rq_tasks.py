@@ -245,6 +245,15 @@ def process_job_rq(queue_name, job_data):
             from worker.handlers.cleanup import process_cleanup
 
             process_cleanup(job_data)
+            # The accepted cleanup callback commits the terminal job state together with
+            # its region outcomes and downstream dispatch. It may have committed FAILED;
+            # a transport-successful callback is not permission to overwrite that decision.
+            logger.info(
+                "[RQ Worker] Job %s (cleanup) callback accepted in %.1fs; backend owns its outcome",
+                job_id,
+                time.perf_counter() - started,
+            )
+            return
         elif queue_name == "queue:layout":
             process_layout(job_data)
         elif queue_name == "queue:translation":

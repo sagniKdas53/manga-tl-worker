@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 
 from worker.handlers.cleanup import process_cleanup
-from worker.services.cleanup_reconstruct import CleanupResult
+from worker.services.cleanup_reconstruct import CleanupResult, CleanupUncertain
 
 
 def _source_bytes():
@@ -176,6 +176,36 @@ def test_a_region_reconstruct_declines_and_the_page_still_reports_it():
     minio.put_object.assert_not_called()
     outcome = post.call_args.kwargs["json"]["regions"][0]
     assert (outcome["regionId"], outcome["status"]) == ("a", "failed")
+
+
+def test_uncertain_region_preserves_source_and_reports_review_diagnostics():
+    source = _source_bytes()
+    response = MagicMock(content=source)
+    regions = [
+        {"regionId": "a", "inputDigest": "a-digest", "x": 1, "y": 2, "width": 3, "height": 4, "policyAction": "replace"}
+    ]
+
+    def uncertain_without_mutating_source(image, *_geometry):
+        expected = cv2.imdecode(np.frombuffer(source, dtype=np.uint8), cv2.IMREAD_COLOR)
+        np.testing.assert_array_equal(image, expected)
+        raise CleanupUncertain("CTD found no glyphs inside the region; source preserved")
+
+    with (
+        patch("worker.handlers.cleanup.requests.get", return_value=response),
+        patch("worker.handlers.cleanup.requests.post") as post,
+        patch("worker.handlers.cleanup.reconstruct_region", side_effect=uncertain_without_mutating_source),
+        patch("worker.handlers.cleanup.assess_empty_mask", return_value=["local OCR rechecked"]),
+        patch("worker.handlers.cleanup.minio_client") as minio,
+    ):
+        process_cleanup(_job(source, regions))
+
+    minio.put_object.assert_not_called()
+    assert response.content == source
+    outcome = post.call_args.kwargs["json"]["regions"][0]
+    assert outcome["status"] == "uncertain"
+    assert "source preserved" in outcome["diagnostics"][0]
+    assert "cleanupMaskAssetId" not in outcome
+    assert "cleanupPatchAssetId" not in outcome
 
 
 def test_ocr_has_no_inline_cleanup_execution():

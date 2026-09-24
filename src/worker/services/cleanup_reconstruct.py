@@ -31,6 +31,10 @@ GENERATOR_SHA256 = hashlib.sha256(GENERATOR_ID.encode()).hexdigest()
 _aot_session = None
 
 
+class CleanupUncertain(ValueError):
+    """No reliable glyph support; preserve source pixels and require review."""
+
+
 @dataclass(frozen=True)
 class CleanupConfig:
     ctd_threshold: float = CTD_CONF_THRESHOLD
@@ -257,8 +261,9 @@ def reconstruct_region(
 ) -> CleanupResult | None:
     """Erase and reconstruct one region's glyphs.
 
-    Returns ``None`` on a degenerate crop, CTD failure, or an empty gated mask. Callers report
-    that condition explicitly; it is not a successful cleanup fallback.
+    Returns ``None`` on a degenerate crop or CTD failure. An empty gated mask raises
+    ``CleanupUncertain``: it may be missed lettering or a false-positive OCR region,
+    never evidence that erasure succeeded.
     """
     config = config if config is not None else _DEFAULT_CONFIG
     if img is None or width <= 0 or height <= 0:
@@ -290,7 +295,10 @@ def reconstruct_region(
     gated_mask = _gate_to_region_footprint(raw_mask, crop_x0, crop_y0, x, y, width, height)
     if not gated_mask.any():
         logger.info(f"{region_tag} crop {crop_w}x{crop_h}: rejected, CTD found no glyphs (ctd={ctd_s:.1f}s)")
-        return None
+        raise CleanupUncertain(
+            "CTD found no glyphs inside the region; source preserved. "
+            "Review the OCR region: lettering may have been missed or artwork detected as text."
+        )
 
     dilated_mask = _dilate(gated_mask, config.mask_dilate_px)
     coverage_pct = 100.0 * float(dilated_mask.mean())

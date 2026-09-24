@@ -7,6 +7,7 @@ import pytest
 from worker.services.cleanup_reconstruct import (
     CleanupConfig,
     CleanupResult,
+    CleanupUncertain,
     _crop_with_context,
     _dilate,
     _encode_mask_png,
@@ -233,7 +234,8 @@ def test_reconstruct_region_none_when_nothing_detected_in_footprint(mock_segment
     prob = np.zeros(crop.shape[:2], dtype=np.float32)
     prob[0, 0] = 0.9  # in the padding, not the region itself
     mock_segment_crop.return_value = prob
-    assert reconstruct_region(img, 40, 40, 20, 20, config=config) is None
+    with pytest.raises(CleanupUncertain, match="source preserved"):
+        reconstruct_region(img, 40, 40, 20, 20, config=config)
 
 
 @patch("worker.services.cleanup_reconstruct._reconstruct_telea")
@@ -342,7 +344,11 @@ def test_reconstruct_region_real_models_end_to_end():
         img = rng.integers(60, 200, size=(300, 400, 3), dtype=np.uint8)
         # Paint dark "glyph-like" strokes into a sub-region to give CTD something to find.
         img[140:160, 150:250] = 10
-        result = reconstruct_region(img, 150, 140, 100, 20, config=CleanupConfig(residual_ink_max_pct=100.0))
+        try:
+            result = reconstruct_region(img, 150, 140, 100, 20, config=CleanupConfig(residual_ink_max_pct=100.0))
+        except CleanupUncertain as exc:
+            assert "source preserved" in str(exc)
+            result = None
 
     if result is not None:
         assert isinstance(result, CleanupResult)
