@@ -93,13 +93,13 @@ def process_translation(job_data):
         failure_reasons[region_id] = "rejected" if answer else "unavailable"
 
     for r in ocr_regions:
-        if r.get("qaStatus") == "cleanup_review":
-            # Cleanup found no reliable glyph support. Never typeset over preserved source
-            # pixels, including OCR false positives on artwork. Other regions may continue.
-            cleanup_skipped.append(
-                {"regionId": r["id"], "policyAction": "review", "policyReason": "cleanup-review-required"}
-            )
+        if r.get("qaStatus") == "rejected":
+            # Rejected by QA or the user: not text worth translating. Nothing to send.
+            cleanup_skipped.append({"regionId": r["id"], "policyAction": "review", "policyReason": "rejected"})
             continue
+        # A cleanup_review region (cleanup found no glyphs) is translated like any other. The
+        # backend keeps its element hidden until vision QA says what is really there: dialogue
+        # is shown over the untouched source, a sign or artwork is rejected and stays hidden.
         policy = select_region_action(r.get("regionType") or r.get("region_type"), r.get("user_override"))
         r["policyAction"] = policy.action
         r["policyReason"] = policy.reason
@@ -120,7 +120,7 @@ def process_translation(job_data):
             )
         )
     if cleanup_skipped:
-        logger.warning("%sPreserving %d regions requiring cleanup review", req_prefix, len(cleanup_skipped))
+        logger.info("%sSkipping %d rejected region(s)", req_prefix, len(cleanup_skipped))
 
     translation_chunk_count = 0
 

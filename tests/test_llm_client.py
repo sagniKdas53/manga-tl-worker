@@ -396,6 +396,28 @@ def test_400_degrades_json_schema_to_json_object_and_succeeds(mock_post, no_retr
 
 
 @patch("worker.services.llm_client.requests.post")
+def test_content_refusal_is_not_mistaken_for_an_unsupported_schema(mock_post, no_retry_sleep):
+    """Alibaba's content filter answers 400 data_inspection_failed. Degrading json_schema and
+    retrying only sends the same refused content again; it must fail once and fast."""
+    body = (
+        '{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"data: '
+        '{\\"error\\":{\\"code\\":\\"data_inspection_failed\\",\\"message\\":'
+        '\\"Input image data may contain inappropriate content.\\"}}"}}}'
+    )
+    mock_post.return_value = MagicMock(status_code=400, text=body)
+
+    client = LLMClient(provider="openrouter", api_key="k", model="m")
+    res = client.complete(
+        messages=[{"role": "user", "content": "Hi"}],
+        response_schema={"type": "object", "properties": {"a": {"type": "string"}}},
+    )
+
+    assert res is None
+    assert mock_post.call_count == 1
+    assert client._degraded_format is False
+
+
+@patch("worker.services.llm_client.requests.post")
 def test_400_without_a_schema_is_permanent_and_not_retried(mock_post, no_retry_sleep):
     mock_resp = MagicMock(status_code=400, text="malformed request")
     mock_post.return_value = mock_resp

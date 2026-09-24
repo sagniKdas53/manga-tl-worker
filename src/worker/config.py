@@ -572,6 +572,11 @@ QA_CONFIG = ModelConfig(
     vlm_list_env="QA_VLM_MODEL_LIST",
 )
 
+# Vision-QA models tried, in order, after the page's own model and QA_VLM_MODEL when those refuse
+# the page, return nothing, or leave regions unjudged. Comma-separated; empty keeps the old
+# single fallback to QA_VLM_MODEL.
+QA_VLM_FALLBACK_MODELS = [m.strip() for m in os.environ.get("QA_VLM_FALLBACK_MODELS", "").split(",") if m.strip()]
+
 LOCAL_LLM_PROVIDER = os.environ.get("LOCAL_LLM_PROVIDER", "").strip()
 LOCAL_LLM_ENDPOINT = os.environ.get("LOCAL_LLM_ENDPOINT", "").strip()
 LOCAL_LLM_MODEL = os.environ.get("LOCAL_LLM_MODEL", "").strip()

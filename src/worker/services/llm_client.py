@@ -48,6 +48,22 @@ class PermanentAPIError(Exception):
     pass
 
 
+class ContentRefusedError(PermanentAPIError):
+    """The upstream's content filter refused the input; the same request will be refused again."""
+
+
+# Markers of an upstream moderation refusal inside an HTTP 400 body. Alibaba (the only OpenRouter
+# host for qwen3.7-flash) answers `data_inspection_failed` for images and prompt text it flags,
+# non-deterministically across identical requests. It is a 400, so it used to be mistaken for an
+# unsupported json_schema and retried once in json_object mode -- refused again, one call wasted.
+_CONTENT_REFUSAL_MARKERS = ("data_inspection_failed", "inappropriate content", "content_policy", "content policy")
+
+
+def is_content_refusal(body: str) -> bool:
+    lowered = body.lower()
+    return any(marker in lowered for marker in _CONTENT_REFUSAL_MARKERS)
+
+
 @dataclass
 class LLMResponse:
     """Normalized response from any LLM provider."""
@@ -363,9 +379,14 @@ class LLMClient:
             cooldown_time = self._register_rate_limit(response.headers.get("Retry-After"))
             raise TransientAPIError(f"Rate limited (429), cooldown: {cooldown_time}s", status_code=429)
 
+        if response.status_code == 400 and is_content_refusal(response.text):
+            raise ContentRefusedError(f"Content refused by upstream filter (400) — {response.text[:300]}")
+
         if response.status_code == 400 and not self._degraded_format:
             if payload.get("response_format", {}).get("type") == "json_schema":
-                logger.warning(f"{self.req_prefix}400 with json_schema — degrading to json_object")
+                logger.warning(
+                    f"{self.req_prefix}400 with json_schema — degrading to json_object: {response.text[:300]}"
+                )
                 payload["response_format"] = {"type": "json_object"}
                 self._degraded_format = True
                 raise TransientAPIError("Degrading json_schema to json_object", status_code=400)

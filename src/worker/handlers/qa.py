@@ -1,4 +1,5 @@
 import base64
+import copy
 import hashlib
 import io
 import json
@@ -12,6 +13,7 @@ from worker.config import (
     CALLBACK_URL,
     QA_CONFIG,
     QA_MODE,
+    QA_VLM_FALLBACK_MODELS,
     backend_headers,
     is_usable_model,
     log_payload,
@@ -102,6 +104,142 @@ QA_JSON_SCHEMA = {
 
 
 VALID_QA_STATUSES = {"passed", "failed", "direct_fix", "reject_sfx"}
+
+# Verdicts for regions whose cleanup found no glyphs (qaStatus "cleanup_review"). The VLM decides
+# what OCR actually found there, instead of the user having to.
+UNCERTAIN_KINDS = {"dialogue", "sfx", "background_text", "not_text"}
+
+# Vision QA also answers for uncertain regions. A separate schema, so the text-only QA modes are
+# not forced to emit a key they have no image to fill.
+QA_VLM_JSON_SCHEMA = copy.deepcopy(QA_JSON_SCHEMA)
+QA_VLM_JSON_SCHEMA["properties"]["uncertainChecks"] = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "regionId": {"type": "string"},
+            "kind": {"type": "string", "enum": sorted(UNCERTAIN_KINDS)},
+            "reason": {"type": "string"},
+        },
+        "required": ["regionId", "kind", "reason"],
+        "additionalProperties": False,
+    },
+}
+QA_VLM_JSON_SCHEMA["required"] = ["results", "uncertainChecks"]
+
+# Key spellings models use when no schema holds them to ours. qwen3.7-flash's only OpenRouter host
+# does not support structured outputs, so its json_schema request 400s, degrades to json_object,
+# and it then writes "status" for "qaStatus" -- every verdict on page 4 was discarded that way.
+_QA_KEY_ALIASES = {
+    "status": "qaStatus",
+    "qa_status": "qaStatus",
+    "verdict": "qaStatus",
+    "score": "qaScore",
+    "qa_score": "qaScore",
+    "feedback": "qaFeedback",
+    "qa_feedback": "qaFeedback",
+    "region_id": "regionId",
+    "id": "regionId",
+    "region": "regionId",
+    "regionNumber": "regionId",
+    "direct_fix": "directFix",
+    "type": "kind",
+    "classification": "kind",
+}
+
+
+def _region_labels(regions):
+    """Map the number the Reader shows for each region (#1, #2, ...) to its UUID.
+
+    The prompt names regions by these numbers rather than UUIDs: models copy a short number
+    reliably, and a UUID they re-type can come back one character off (GLM on page 13 invented
+    one). The reading order is used when it is a clean 1..n numbering; otherwise the regions are
+    numbered by reading order, then position.
+    """
+    orders = [region.get("bubbleReadingOrder") for region in regions]
+    if all(isinstance(order, int) and order > 0 for order in orders) and len(set(orders)) == len(orders):
+        return {str(order): str(region["id"]) for order, region in zip(orders, regions, strict=True)}
+    ordered = sorted(
+        regions,
+        key=lambda r: (r.get("bubbleReadingOrder") or 0, r.get("bboxY") or 0, r.get("bboxX") or 0),
+    )
+    return {str(index): str(region["id"]) for index, region in enumerate(ordered, 1)}
+
+
+def _normalize_qa_items(items, uuid_by_label):
+    """Return model output items with our key names and region UUIDs.
+
+    Only spelling is repaired: a status still has to be one of ours, and an unknown region stays
+    unknown so the integrity check reports it. Nothing is invented.
+    """
+    normalized = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            normalized.append(item)
+            continue
+        item = dict(item)
+        for alias, key in _QA_KEY_ALIASES.items():
+            if alias in item and key not in item:
+                item[key] = item.pop(alias)
+        region_id = item.get("regionId")
+        if isinstance(region_id, (int, float)) and not isinstance(region_id, bool):
+            region_id = str(int(region_id))
+        if isinstance(region_id, str):
+            label = region_id.strip().lstrip("#").strip()
+            item["regionId"] = uuid_by_label.get(label, label)
+        for key in ("qaStatus", "kind"):
+            if isinstance(item.get(key), str):
+                item[key] = item[key].strip().lower()
+        normalized.append(item)
+    return normalized
+
+
+def _parse_qa_response(qa_response):
+    """Parse a raw model reply into (results, uncertainChecks); ``None`` when it is not JSON."""
+    if not qa_response:
+        return None
+    cleaned = qa_response.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+    try:
+        parsed = json.loads(cleaned)
+    except Exception as e:
+        logger.error(f"[QA] Failed to parse VLM response: {e}. Raw response: {log_payload(qa_response)}")
+        return None
+    if isinstance(parsed, list):
+        return parsed, []
+    if not isinstance(parsed, dict):
+        return None
+    return parsed.get("results") or [], parsed.get("uncertainChecks") or []
+
+
+def _unique_by_region(items):
+    """Keep items that name a region exactly once; a region named twice gets asked again."""
+    counts = {}
+    for item in items:
+        if isinstance(item, dict) and isinstance(item.get("regionId"), str):
+            counts[item["regionId"]] = counts.get(item["regionId"], 0) + 1
+    return [item for item in items if isinstance(item, dict) and counts.get(item.get("regionId")) == 1]
+
+
+def _qa_vlm_model_chain(job_data, provider):
+    """Models to try, in order: the page's configured model, then the deployment's fallbacks.
+
+    A later model is asked only about what the earlier ones did not answer: a refusal (Alibaba's
+    content filter refuses explicit pages at random), an empty reply, or missing verdicts.
+    """
+    # "" stands for the provider's own qaVLM default, which _resolve_qa_model looks up.
+    primary = job_data.get("qaVlmModel") or QA_CONFIG.vlm_model or ""
+    chain = [primary]
+    if job_data.get("useFallbackModels", True) and QA_CONFIG.provider == provider:
+        chain += [m for m in (QA_CONFIG.vlm_model, *QA_VLM_FALLBACK_MODELS) if m]
+    seen = set()
+    return [m for m in chain if not (m in seen or seen.add(m))]
 
 
 def _qa_response_integrity(results, ocr_regions):
@@ -266,12 +404,17 @@ def _translation_qa_regions(ocr_regions):
     can reject SFX or bad OCR and the backend can hide only the rejected element. Explicit
     ``preserve`` and ``explain`` overrides remain source-preserving even if stale translation
     data exists.
+
+    Uncertain regions (``cleanup_review``: cleanup found no glyphs) are translated but kept
+    hidden, so they are not translation targets; vision QA judges them separately through
+    ``uncertainChecks``. Rejected regions are hidden for good and are not judged again.
     """
     return [
         region
         for region in ocr_regions
         if region.get("translatedText")
         and not region.get("translationFailed")
+        and region.get("qaStatus") not in {"cleanup_review", "rejected"}
         and select_region_action(
             region.get("regionType") or region.get("region_type"),
             region.get("user_override"),
@@ -337,7 +480,7 @@ def _qa_cloud_llm(prov, api_key, user_model, prompt, routing_strategy):
         return None
 
 
-def _qa_cloud_vlm(prov, api_key, user_model, prompt, base64_image, routing_strategy):
+def _qa_cloud_vlm(prov, api_key, user_model, prompt, base64_image, routing_strategy, schema=None):
     """Vision QA against any provider in config/providers.json."""
     model = _resolve_qa_model(prov, api_key, user_model, "qaVLM")
     if not model:
@@ -349,7 +492,7 @@ def _qa_cloud_vlm(prov, api_key, user_model, prompt, base64_image, routing_strat
             model,
             prompt,
             base64_image,
-            QA_JSON_SCHEMA,
+            schema or QA_JSON_SCHEMA,
             routing_strategy=routing_strategy,
         )
     except Exception as e:
@@ -820,6 +963,9 @@ def _auto_pass_all(job_data):
         logger.error(f"[QA] Error fetching image details: {e}")
         raise
 
+    # Settled (rejected) and unjudged-uncertain regions keep their state: a bypass is not a verdict
+    # that the ornament OCR misread is now fine, or that a hidden uncertain region was checked.
+    ocr_regions = [r for r in ocr_regions if r.get("qaStatus") not in {"rejected", "cleanup_review"}]
     results = []
     for r in ocr_regions:
         results.append(
@@ -1054,6 +1200,101 @@ You MUST return a JSON object containing a "results" key with an array of object
         raise
 
 
+def _vlm_qa_prompt(targets, uncertain, label_by_uuid):
+    """The vision-QA prompt for translated ``targets`` and cleanup-``uncertain`` regions."""
+    regions_metadata = [
+        {
+            "regionId": label_by_uuid[str(r["id"])],
+            "ocrText": r["text"],
+            "ocrScore": r.get("ocrScore") or r.get("confidence") or 1.0,
+            "translatedText": r.get("translatedText") or "",
+            "translationScore": r.get("translationScore") or 1.0,
+            "x": r["bboxX"],
+            "y": r["bboxY"],
+            "w": r["bboxW"],
+            "h": r["bboxH"],
+        }
+        for r in targets
+    ]
+    uncertain_metadata = [
+        {
+            "regionId": label_by_uuid[str(r["id"])],
+            "ocrText": r.get("text") or "",
+            "x": r["bboxX"],
+            "y": r["bboxY"],
+            "w": r["bboxW"],
+            "h": r["bboxH"],
+        }
+        for r in uncertain
+    ]
+    logger.debug(f"[QA] VLM QA input metadata (regions_metadata):\n{log_payload(regions_metadata)}")
+
+    uncertain_section = ""
+    if uncertain_metadata:
+        uncertain_section = f"""
+
+UNCERTAIN REGIONS. OCR reported text at these boxes, but the text detector found no lettering
+inside them. Look at each box on the ORIGINAL page (left) and classify what is really there:
+- "dialogue": lettering meant for the reader -- speech, thoughts, narration, captions.
+- "sfx": a sound effect or drawn onomatopoeia -- it stays as the artist drew it.
+- "background_text": text that is part of the scenery -- signs, book spines, posters, labels,
+  logos, screens.
+- "not_text": no lettering at all -- artwork, ornaments, patterns, hair, clothing or noise that
+  OCR misread as text.
+Give one entry per uncertain region in "uncertainChecks", with a one-sentence "reason".
+
+Uncertain regions:
+{json.dumps(uncertain_metadata, ensure_ascii=False, indent=2)}"""
+
+    return f"""You are an expert Japanese-to-English manga translator and typesetting reviewer. Given the original Japanese manga page (left) and the English typeset page (right), verify: (1) OCR accuracy by comparing visible Japanese text against transcription, (2) Translation quality and natural English, (3) Typesetting quality — text fitting, overflow, readability.
+
+Each region is identified by its number ("regionId"). Copy that number exactly; do not invent,
+renumber or skip regions.
+
+We have seeded each text region with its OCR confidence (ocrScore) and translation confidence (translationScore). Keep these previous scores in mind when evaluating the overall results.
+
+For each region in the provided metadata, evaluate and check if:
+1. Text overflows the speech bubble/mask boundaries.
+2. Text overlaps with panel borders or other text.
+3. Translation flow is awkward, or the English translation does not match the original Japanese text.
+4. The OCR transcription was bad/inaccurate:
+   - If you can deduce the correct text from the image, flag with ocrBad=true and provide correctedSourceText.
+   - If the OCR text is garbage and you CANNOT deduce it or read it, flag needsReOcr=true.
+   - If the region is completely unfixable or obscured, flag needsManualIntervention=true.
+5. The reading order/bubble sequence is incorrect (flag with orderBad=true and provide suggestedReadingOrderIndex).
+
+Status categories ("qaStatus"):
+- "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed.
+- "direct_fix": If you have a better translation, output it directly. You must supply "directFix" object with correctedText or suggestedFontSize. You MUST also provide detailed reasoning in "qaFeedback".
+- "reject_sfx": If the region is a sound effect (SFX) or gibberish that shouldn't be translated, set this status (downstream will hide the element).
+- "failed": Major translation error or layout issue requiring a translation/typesetting re-run. Specify "qaFeedback" with detailed correction notes. Your output must be strictly better. Do not send back the exact same text if flagging an error.
+
+IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
+
+IMPORTANT: Every result MUST include both a "directFix" object and an "escalation" object. They are
+never omitted. When a field does not apply, send its empty value rather than leaving it out —
+empty string for text fields, false for flags, 0 for numbers.
+  - "directFix" always carries: correctedText, suggestedFontSize
+  - "escalation" always carries: ocrBad, correctedSourceText, needsReOcr, needsManualIntervention,
+    orderBad, suggestedReadingOrderIndex
+The ocrBad / needsReOcr / needsManualIntervention / orderBad flags described above live inside
+"escalation". Describing a problem only in "qaFeedback" prose has no effect — the flags are what
+route the fix. In particular, if the OCR text is unreadable, set escalation.needsReOcr to true;
+asking for a re-OCR in prose alone will instead re-run the translation over the same bad text.
+
+Region Metadata:
+{json.dumps(regions_metadata, ensure_ascii=False, indent=2)}{uncertain_section}
+
+Return ONLY a JSON object of exactly this shape, using exactly these key names:
+{{"results": [{{"regionId": "<region number>", "qaStatus": "passed", "qaScore": 0.9, "qaFeedback": "...",
+  "directFix": {{"correctedText": "", "suggestedFontSize": 0}},
+  "escalation": {{"ocrBad": false, "correctedSourceText": "", "needsReOcr": false,
+    "needsManualIntervention": false, "orderBad": false, "suggestedReadingOrderIndex": 0}}}}],
+ "uncertainChecks": [{{"regionId": "<region number>", "kind": "not_text", "reason": "..."}}]}}
+One "results" entry per region in Region Metadata and one "uncertainChecks" entry per uncertain
+region (an empty list when there are none). No other text."""
+
+
 def _process_qa_vlm(job_data):
     image_id = job_data["imageId"]
     logger.info(f"[QA] Processing VLM vision QA check for image: {image_id}")
@@ -1128,125 +1369,71 @@ def _process_qa_vlm(job_data):
         raise
 
     qa_regions = _translation_qa_regions(ocr_regions)
-    # The VLM sees the complete page image, including preserved source SFX, but receives only
-    # replacement-authorized IDs as per-region translation verdict targets.
-    regions_metadata = []
-    for r in qa_regions:
-        regions_metadata.append(
-            {
-                "regionId": r["id"],
-                "ocrText": r["text"],
-                "ocrScore": r.get("ocrScore") or r.get("confidence") or 1.0,
-                "translatedText": r.get("translatedText") or "",
-                "translationScore": r.get("translationScore") or 1.0,
-                "x": r["bboxX"],
-                "y": r["bboxY"],
-                "w": r["bboxW"],
-                "h": r["bboxH"],
-                "readingOrder": r.get("bubbleReadingOrder") or 0,
-            }
-        )
-
-    logger.debug(f"[QA] VLM QA input metadata (regions_metadata):\n{log_payload(regions_metadata)}")
-
-    prompt = f"""You are an expert Japanese-to-English manga translator and typesetting reviewer. Given the original Japanese manga page (left) and the English typeset page (right), verify: (1) OCR accuracy by comparing visible Japanese text against transcription, (2) Translation quality and natural English, (3) Typesetting quality — text fitting, overflow, readability.
-
-We have seeded each text region with its OCR confidence (ocrScore) and translation confidence (translationScore). Keep these previous scores in mind when evaluating the overall results.
-
-For each region in the provided metadata, evaluate and check if:
-1. Text overflows the speech bubble/mask boundaries.
-2. Text overlaps with panel borders or other text.
-3. Translation flow is awkward, or the English translation does not match the original Japanese text.
-4. The OCR transcription was bad/inaccurate:
-   - If you can deduce the correct text from the image, flag with ocrBad=true and provide correctedSourceText.
-   - If the OCR text is garbage and you CANNOT deduce it or read it, flag needsReOcr=true.
-   - If the region is completely unfixable or obscured, flag needsManualIntervention=true.
-5. The reading order/bubble sequence is incorrect (flag with orderBad=true and provide suggestedReadingOrderIndex).
-
-Status categories:
-- "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed.
-- "direct_fix": If you have a better translation, output it directly. You must supply "directFix" object with correctedText or suggestedFontSize. You MUST also provide detailed reasoning in "qaFeedback".
-- "reject_sfx": If the region is a sound effect (SFX) or gibberish that shouldn't be translated, set this status (downstream will hide the element).
-- "failed": Major translation error or layout issue requiring a translation/typesetting re-run. Specify "qaFeedback" with detailed correction notes. Your output must be strictly better. Do not send back the exact same text if flagging an error.
-
-IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
-
-IMPORTANT: Every result MUST include both a "directFix" object and an "escalation" object. They are
-never omitted. When a field does not apply, send its empty value rather than leaving it out —
-empty string for text fields, false for flags, 0 for numbers.
-  - "directFix" always carries: correctedText, suggestedFontSize
-  - "escalation" always carries: ocrBad, correctedSourceText, needsReOcr, needsManualIntervention,
-    orderBad, suggestedReadingOrderIndex
-The ocrBad / needsReOcr / needsManualIntervention / orderBad flags described above live inside
-"escalation". Describing a problem only in "qaFeedback" prose has no effect — the flags are what
-route the fix. In particular, if the OCR text is unreadable, set escalation.needsReOcr to true;
-asking for a re-OCR in prose alone will instead re-run the translation over the same bad text.
-
-Region Metadata:
-{json.dumps(regions_metadata, ensure_ascii=False, indent=2)}
-
-You MUST return a JSON object containing a "results" key with an array of objects conforming to the requested schema. No other text."""
+    uncertain_regions = [r for r in ocr_regions if r.get("qaStatus") == "cleanup_review"]
+    # Every region is named by the number the Reader shows for it, never by UUID.
+    uuid_by_label = _region_labels(ocr_regions)
+    label_by_uuid = {uuid: label for label, uuid in uuid_by_label.items()}
 
     provider = job_data.get("qaProvider") or QA_CONFIG.provider
     api_key = QA_CONFIG.resolve_key(provider)
     routing_strategy = job_data.get("routingStrategy") or "lowest-cost"
 
-    qa_response = None
+    judged = {}
+    checked = {}
+    call_notes = []
 
-    def attempt_vlm(prov, model_override=None):
-        user_model = model_override or job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
-        return _qa_cloud_vlm(prov, api_key, user_model, prompt, combined_base64, routing_strategy)
-
-    local_only = provider in ("ollama", "lmstudio")
-    if local_only:
-        local_vlm_model = os.environ.get("LOCAL_VLM_MODEL", "").strip()
-        if local_vlm_model:
+    def ask(model, targets, uncertain):
+        prompt = _vlm_qa_prompt(targets, uncertain, label_by_uuid)
+        if model is None:
+            local_vlm_model = os.environ.get("LOCAL_VLM_MODEL", "").strip()
+            if not local_vlm_model:
+                return None
             try:
-                qa_response = try_local_vlm_vision(local_vlm_model, prompt, combined_base64, QA_JSON_SCHEMA)
+                return try_local_vlm_vision(local_vlm_model, prompt, combined_base64, QA_VLM_JSON_SCHEMA)
             except Exception as e:
                 logger.error(f"[QA] VLM QA via Local VLM failed: {e}")
-    else:
-        # Try the preferred provider first
-        if provider:
-            user_model = job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
-            qa_response = attempt_vlm(provider, user_model)
+                return None
+        return _qa_cloud_vlm(provider, api_key, model, prompt, combined_base64, routing_strategy, QA_VLM_JSON_SCHEMA)
 
-            if not qa_response:
-                use_fallback_models = job_data.get("useFallbackModels", True)
-                if use_fallback_models:
-                    global_model = QA_CONFIG.vlm_model
-                    global_provider = QA_CONFIG.provider
-                    if global_provider == provider and global_model and global_model != user_model:
-                        logger.warning(f"[QA] Falling back to global default VLM model '{global_model}'...")
-                        qa_response = attempt_vlm(provider, global_model)
-                    else:
-                        logger.warning("[QA] No fallback applied (global provider different or model identical).")
+    local_only = provider in ("ollama", "lmstudio")
+    chain: list[str | None] = [None] if local_only else []
+    if provider and not local_only:
+        chain = list(_qa_vlm_model_chain(job_data, provider))
+    for index, model in enumerate(chain):
+        targets = [r for r in qa_regions if str(r["id"]) not in judged]
+        uncertain = [r for r in uncertain_regions if str(r["id"]) not in checked]
+        if not targets and not uncertain:
+            break
+        if index:
+            logger.warning(
+                f"[QA] Asking fallback VLM '{model}' about {len(targets)} unjudged region(s) "
+                f"and {len(uncertain)} uncertain region(s)"
+            )
+        qa_response = ask(model, targets, uncertain)
+        if logger.isEnabledFor(logging.DEBUG) and qa_response:
+            logger.debug(f"[QA] Raw VLM Response ({model}): {qa_response}")
+        parsed = _parse_qa_response(qa_response)
+        if parsed is None:
+            call_notes.append(f"{model if model is not None else 'local'}: no usable reply")
+            continue
+        raw_results, raw_checks = parsed
+        answers = _unique_by_region(_normalize_qa_items(raw_results, uuid_by_label))
+        for verdict in _sanitize_qa_results(answers, targets, label=f"VLM {model if model is not None else 'local'}"):
+            judged.setdefault(verdict["regionId"], verdict)
+        uncertain_ids = {str(r["id"]) for r in uncertain}
+        for check in _unique_by_region(_normalize_qa_items(raw_checks, uuid_by_label)):
+            if check.get("regionId") in uncertain_ids and check.get("kind") in UNCERTAIN_KINDS:
+                checked.setdefault(check["regionId"], {**check, "model": model if model is not None else "local"})
+        missing = len([r for r in targets if str(r["id"]) not in judged])
+        if missing:
+            call_notes.append(f"{model if model is not None else 'local'}: {missing} region(s) left unjudged")
 
-    # VLM Evaluation Fail-Safe Fallback:
-    # If all configured/active VLM options fail to return a parseable response,
-    # rather than crashing the worker, we construct a default "passed" result
-    # for all regions so the typesetting/translation pipeline can successfully complete.
-    results = []
-    if logger.isEnabledFor(logging.DEBUG) and qa_response:
-        logger.debug(f"[QA] Raw VLM Response: {qa_response}")
-
-    if qa_response:
-        try:
-            cleaned = qa_response.strip()
-            if cleaned.startswith("```"):
-                lines = cleaned.splitlines()
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                cleaned = "\n".join(lines).strip()
-            parsed = json.loads(cleaned)
-            results = parsed.get("results") or []
-        except Exception as e:
-            logger.error(f"[QA] Failed to parse VLM response: {e}. Raw response: {log_payload(qa_response)}")
+    results = [judged[str(r["id"])] for r in qa_regions if str(r["id"]) in judged]
+    uncertain_checks = [checked[str(r["id"])] for r in uncertain_regions if str(r["id"]) in checked]
+    if call_notes:
+        logger.info(f"[QA] VLM calls: {'; '.join(call_notes)}")
 
     accounting = _qa_accounting(job_data, results, qa_regions)
-    results = _sanitize_qa_results(results, qa_regions, label="VLM")
 
     if not results:
         # Deliberately not auto-passing. Fabricating a pass for every region is what made a failed
@@ -1262,6 +1449,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         "imageId": image_id,
         "pageId": job_data.get("pageId"),
         "qaResults": results,
+        "uncertainChecks": uncertain_checks,
         **accounting,
     }
     from worker.utils.rate_limit import build_cost_payload, format_cost, get_job_costs
