@@ -6,9 +6,48 @@ import requests
 
 from worker.config import CALLBACK_URL, backend_headers, logger
 from worker.services.ocr import perform_redo_ocr
-from worker.services.translation import translate_text
+from worker.services.translation import build_context_string, translate_text
 from worker.utils.image import download_image
 from worker.utils.text import detect_language
+
+# Bounds on what one region's retranslation carries of its page: enough to read a balloon's
+# neighbours, not a second copy of the page translation's prompt.
+_PAGE_CONTEXT_REGIONS = 40
+_PAGE_CONTEXT_CHARS = 200
+
+# Settled as not-for-translation; they would only add noise to the context.
+_NOT_DIALOGUE = {"reject_sfx", "rejected"}
+
+
+def page_context_for_region(image_info, region_id):
+    """What a single region's retranslation should know about its page.
+
+    The page translation sends every region together, in reading order, with the series and
+    previous-page context. A region redo used to send its text alone, so a fragment such as
+    「縁が無かったでしょう」 came back as a free-standing line ("we weren't meant to be") where
+    the balloon it finishes means "I'd never have had anything to do with it". This gives the redo
+    the same series context plus the rest of the page, each line with its current translation,
+    so the region is translated as part of the page it sits on.
+    """
+    context = build_context_string(image_info)
+    others = [
+        r
+        for r in image_info.get("ocrRegions") or []
+        if r.get("id") != region_id and (r.get("text") or "").strip() and r.get("qaStatus") not in _NOT_DIALOGUE
+    ]
+    others.sort(key=lambda r: (r.get("bubbleReadingOrder") is None, r.get("bubbleReadingOrder") or 0))
+    lines = []
+    for r in others[:_PAGE_CONTEXT_REGIONS]:
+        line = r["text"].strip()[:_PAGE_CONTEXT_CHARS]
+        translated = (r.get("translatedText") or "").strip()[:_PAGE_CONTEXT_CHARS]
+        lines.append(f"  - {line} → {translated}" if translated else f"  - {line}")
+    if lines:
+        context += (
+            "Other text on this page, in reading order (source → current translation):\n"
+            + "\n".join(lines)
+            + "\nTranslate only the Text below; the lines above are context.\n"
+        )
+    return context or None
 
 
 def process_region_redo(job_data):
@@ -120,6 +159,7 @@ def process_region_redo(job_data):
                 request_id=request_id,
                 provider=job_data.get("tlProvider"),
                 model=job_data.get("tlModel"),
+                context_str=page_context_for_region(image_info, region_id),
             )
             callback_payload["translatedText"] = translated
             callback_payload["translationFailed"] = translated is None
