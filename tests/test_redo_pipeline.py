@@ -296,3 +296,20 @@ def test_region_redo_translation_reads_its_page():
     assert "縁が無かった" not in page
     assert "パシャ" not in page
     assert page_context_for_region({"ocrRegions": [{"id": "b", "text": "x"}]}, "b") is None
+
+
+def test_a_merged_block_shows_the_translator_its_pieces():
+    from worker.handlers.redo import page_context_for_region
+
+    image_info = {
+        "ocrRegions": [
+            {
+                "id": "m",
+                "text": "ブライダルなんてアイドルを",
+                "ownershipProvenance": {"mergedTexts": ["ブラ", "イダルなんて", "アイ", "ドルを"]},
+            }
+        ]
+    }
+    context = page_context_for_region(image_info, "m")
+    assert "| ブラ | イダルなんて | アイ | ドルを |" in context
+    assert "order that makes sense" in context

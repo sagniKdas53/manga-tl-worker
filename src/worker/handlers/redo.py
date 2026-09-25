@@ -30,6 +30,18 @@ def page_context_for_region(image_info, region_id):
     so the region is translated as part of the page it sits on.
     """
     context = build_context_string(image_info)
+    region = next((r for r in image_info.get("ocrRegions") or [] if r.get("id") == region_id), None)
+    pieces = ((region or {}).get("ownershipProvenance") or {}).get("mergedTexts") or []
+    pieces = [p.strip() for p in pieces if isinstance(p, str) and p.strip()]
+    if len(pieces) > 1:
+        # A merged block (Reader "Merge regions"): the backend joined the pieces in geometric
+        # reading order, which is right for ordinary layouts but not always, and the person who
+        # merged them may not read the language. Show the pieces and let the model reorder.
+        context += (
+            f"The Text below was joined from {len(pieces)} OCR fragments of one text block, in "
+            "estimated reading order: | " + " | ".join(pieces) + " |. If the joined text does not "
+            "read naturally in that order, translate it in the order that makes sense.\n"
+        )
     others = [
         r
         for r in image_info.get("ocrRegions") or []

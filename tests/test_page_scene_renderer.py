@@ -292,3 +292,50 @@ def test_cleanup_patch_with_wrong_bytes_fails_the_job(mock_requests, mock_downlo
         _run_with_renderer(mock_requests, mock_download, source, document, {"patch-1": "http://assets/patch"}, b"other")
     mock_requests.post.assert_not_called()
     mock_minio.put_object.assert_not_called()
+
+
+def test_a_busy_renderer_is_waited_for_not_failed():
+    from unittest.mock import MagicMock
+
+    from worker import page_scene_renderer
+
+    busy = MagicMock(status_code=503, headers={"Retry-After": "2"})
+    done = MagicMock(status_code=200, headers={})
+    slept = []
+    with patch.object(page_scene_renderer.requests, "post", side_effect=[busy, busy, done]) as post:
+        result = page_scene_renderer._post_render("http://renderer", {}, sleep=slept.append, clock=lambda: 0.0)
+    assert result is done
+    assert post.call_count == 3
+    assert len(slept) == 2 and all(s >= 2 for s in slept), "the renderer's Retry-After is honoured"
+
+
+def test_a_renderer_busy_past_the_deadline_returns_its_answer():
+    from unittest.mock import MagicMock
+
+    from worker import page_scene_renderer
+
+    busy = MagicMock(status_code=503, headers={})
+    now = iter([0.0, 10_000.0])
+    with patch.object(page_scene_renderer.requests, "post", return_value=busy) as post:
+        result = page_scene_renderer._post_render("http://renderer", {}, sleep=lambda _s: None, clock=lambda: next(now))
+    assert result is busy, "the caller then reports it, as for any other refusal"
+    assert post.call_count == 1
+
+
+def test_a_bad_scene_is_not_retried():
+    from unittest.mock import MagicMock
+
+    from worker import page_scene_renderer
+
+    bad = MagicMock(status_code=400, headers={})
+    with patch.object(page_scene_renderer.requests, "post", return_value=bad) as post:
+        assert page_scene_renderer._post_render("http://renderer", {}, sleep=lambda _s: None) is bad
+    assert post.call_count == 1
+
+
+def test_the_safety_share_is_part_of_the_render_input_identity():
+    from worker.page_scene_renderer import _render_input_digest
+
+    a = _render_input_digest("s" * 64, "t" * 64, ["u" * 64], 100)
+    b = _render_input_digest("s" * 64, "t" * 64, ["u" * 64], 90)
+    assert a != b, "a different safety share draws a different page"

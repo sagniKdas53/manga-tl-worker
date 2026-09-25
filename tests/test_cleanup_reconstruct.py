@@ -355,3 +355,29 @@ def test_reconstruct_region_real_models_end_to_end():
         assert result.bounds["width"] > 0 and result.bounds["height"] > 0
         assert len(result.mask_png) > 0
         assert len(result.patch_png) > 0
+
+
+@patch("worker.services.cleanup_reconstruct._reconstruct_aot")
+@patch("worker.services.cleanup_reconstruct._reconstruct_telea")
+@patch("worker.services.cleanup_reconstruct.segment_crop")
+def test_a_forced_mode_overrides_the_flat_or_structured_routing(mock_segment_crop, mock_telea, mock_aot):
+    from worker.services.cleanup_reconstruct import GENERATOR_SHA256, generator_sha256_for
+
+    flat = np.full((100, 100, 3), 200, dtype=np.uint8)  # "auto" would choose TELEA
+    busy = np.random.default_rng(0).integers(0, 255, size=(100, 100, 3), dtype=np.uint8)  # "auto" -> AOT
+    config = CleanupConfig(crop_pad_px=5)
+    crop, _x0, _y0 = _crop_with_context(flat, 40, 40, 20, 20, config.crop_pad_px)
+    hot = (slice(5, 25), slice(5, 25))
+    mock_segment_crop.side_effect = lambda *_a, **_k: _prob_map(crop.shape[:2], hot)
+    mock_telea.return_value = crop.copy()
+    mock_aot.return_value = crop.copy()
+
+    forced_aot = reconstruct_region(flat, 40, 40, 20, 20, config=config, mode="aot")
+    forced_telea = reconstruct_region(busy, 40, 40, 20, 20, config=config, mode="telea")
+
+    assert mock_aot.call_count == 1 and mock_telea.call_count == 1
+    assert any("mode=aot" in d for d in forced_aot.diagnostics)
+    assert any("mode=telea" in d for d in forced_telea.diagnostics)
+    # A patch records its recipe; "auto" keeps the identity patches had before the selector.
+    assert forced_aot.generator_sha256 == generator_sha256_for("aot") != GENERATOR_SHA256
+    assert generator_sha256_for("auto") == GENERATOR_SHA256

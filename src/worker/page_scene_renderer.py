@@ -13,12 +13,14 @@ import hashlib
 import io
 import json
 import os
+import random
 import re
+import time
 from typing import Any
 
 import requests
 
-from worker.config import CALLBACK_URL, backend_headers, minio_client
+from worker.config import CALLBACK_URL, backend_headers, logger, minio_client
 from worker.page_scene import validate_page_scene
 from worker.utils.image import download_image
 
@@ -27,12 +29,16 @@ def _data_url(mime_type: str, payload: bytes) -> str:
     return f"data:{mime_type};base64,{base64.b64encode(payload).decode('ascii')}"
 
 
-def _render_input_digest(scene_digest: str, source_sha256: str, asset_sha256s: list[str]) -> str:
+def _render_input_digest(
+    scene_digest: str, source_sha256: str, asset_sha256s: list[str], safety_percent: float = 100
+) -> str:
     canonical = json.dumps(
         {
             "logicalSceneSha256": scene_digest,
             "sourceSha256": source_sha256,
             "assetSha256s": sorted(asset_sha256s),
+            # Part of what the renderer draws, and not in the logical scene, so part of the input.
+            "textBoxSafetyPercent": safety_percent,
         },
         separators=(",", ":"),
         sort_keys=True,
@@ -61,6 +67,37 @@ def _fetch_asset(url: str, record: dict[str, Any], asset_id: str) -> bytes:
     if hashlib.sha256(payload).hexdigest() != record["sha256"] or len(payload) != record["byte_length"]:
         raise ValueError(f"cleanup asset {asset_id} does not match the digest recorded in the scene")
     return payload
+
+
+# The renderer holds one browser context (UR02); a render or QA pass arriving while another page
+# renders is answered 503 "busy". That is a wait, not a failure: resend within the job instead of
+# spending one of its attempts. Three immediate attempts used to burn out in seconds and leave a
+# FAILED render in the queue until the sweeper's five-minute cooldown rendered the page anyway.
+RENDER_BUSY_WAIT_SECONDS = float(os.environ.get("RENDER_BUSY_WAIT_SECONDS", "300"))
+
+
+def _post_render(renderer_url, payload, *, sleep=time.sleep, clock=time.monotonic):
+    deadline = clock() + RENDER_BUSY_WAIT_SECONDS
+    delay = 1.0
+    waited = 0
+    while True:
+        try:
+            result = requests.post(renderer_url.rstrip("/") + "/render", json=payload, timeout=180)
+        except requests.RequestException as err:
+            # The worker no longer hard-depends on the renderer at startup (Compose), so an absent or
+            # crashed renderer surfaces here, per job, with the reason in the job table.
+            raise RuntimeError(f"page renderer at {renderer_url} is unreachable: {err}") from err
+        if result.status_code != 503 or clock() + delay > deadline:
+            if waited:
+                logger.info(f"[Render] Renderer was busy; waited {waited} time(s) before this answer")
+            return result
+        try:
+            hinted = float(result.headers.get("Retry-After", ""))
+        except ValueError:
+            hinted = 0.0
+        sleep(max(delay, hinted) + random.uniform(0, 0.5))
+        waited += 1
+        delay = min(delay * 2, 10.0)
 
 
 def render_page_scene(job_data: dict[str, Any]) -> dict[str, Any]:
@@ -106,6 +143,10 @@ def render_page_scene(job_data: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    safety_percent = job_data.get("textBoxSafetyPercent")
+    if not isinstance(safety_percent, (int, float)) or isinstance(safety_percent, bool):
+        safety_percent = 100
+    safety_percent = min(100, max(1, safety_percent))
     text_objects = []
     font_ids = set()
     for item in scene.document["objects"]:
@@ -133,6 +174,9 @@ def render_page_scene(job_data: dict[str, Any]) -> dict[str, Any]:
                     "stroke": style["stroke"],
                     "weight": style["weight"],
                     "padding": style["padding"],
+                    # System Settings' safety share. The frozen scene contract has no field for
+                    # it, so it rides on the render job (the backend sends it on every job).
+                    "safetyPercent": safety_percent,
                 },
                 "visible": item["visible"],
                 "zIndex": item["z_index"],
@@ -145,7 +189,10 @@ def render_page_scene(job_data: dict[str, Any]) -> dict[str, Any]:
         "pageRevision": job_data["pageRevision"],
         "logicalSceneSha256": scene.logical_scene_sha256,
         "renderInputSha256": _render_input_digest(
-            scene.logical_scene_sha256, source["sha256"], [asset["sha256"] for asset in assets.values()]
+            scene.logical_scene_sha256,
+            source["sha256"],
+            [asset["sha256"] for asset in assets.values()],
+            safety_percent,
         ),
         "requiredFontIds": sorted(font_ids),
         "scene": {
@@ -158,12 +205,7 @@ def render_page_scene(job_data: dict[str, Any]) -> dict[str, Any]:
             "textObjects": text_objects,
         },
     }
-    try:
-        result = requests.post(renderer_url.rstrip("/") + "/render", json=payload, timeout=180)
-    except requests.RequestException as err:
-        # The worker no longer hard-depends on the renderer at startup (Compose), so an absent or
-        # crashed renderer surfaces here, per job, with the reason in the job table.
-        raise RuntimeError(f"page renderer at {renderer_url} is unreachable: {err}") from err
+    result = _post_render(renderer_url, payload)
     if result.status_code >= 400:
         detail = ""
         try:

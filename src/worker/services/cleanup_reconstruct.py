@@ -28,6 +28,21 @@ logger = logging.getLogger(__name__)
 GENERATOR_ID = "ctd-seg+telea-aotgan-cleanup/v2-single-ctd"
 GENERATOR_SHA256 = hashlib.sha256(GENERATOR_ID.encode()).hexdigest()
 
+# How the background under erased lettering is rebuilt (System Settings → cleanup mode, per
+# chapter/series override). "auto" routes by pixel_spread: TELEA on flat interiors, AOT-GAN on
+# structured ones. "telea"/"aot" force one method everywhere so the two can be compared on the
+# same pages. "off" is handled by the cleanup handler (no CTD at all). LaMa-mpe is not here: it
+# needs a clean-room reimplementation of its network before its weights can be loaded.
+RECONSTRUCTION_MODES = ("auto", "telea", "aot")
+
+
+def generator_sha256_for(mode: str) -> str:
+    """A patch records its recipe. "auto" keeps the pre-selector identity."""
+    if mode == "auto":
+        return GENERATOR_SHA256
+    return hashlib.sha256(f"{GENERATOR_ID};mode={mode}".encode()).hexdigest()
+
+
 _aot_session = None
 
 
@@ -258,6 +273,7 @@ def reconstruct_region(
     *,
     config: CleanupConfig | None = None,
     ctd_session=None,
+    mode: str = "auto",
 ) -> CleanupResult | None:
     """Erase and reconstruct one region's glyphs.
 
@@ -266,6 +282,8 @@ def reconstruct_region(
     never evidence that erasure succeeded.
     """
     config = config if config is not None else _DEFAULT_CONFIG
+    if mode not in RECONSTRUCTION_MODES:
+        mode = "auto"
     if img is None or width <= 0 or height <= 0:
         return None
 
@@ -307,7 +325,7 @@ def reconstruct_region(
     interior = crop[dilated_mask]
     spread = pixel_spread(interior) if len(interior) else 0.0
     t = time.perf_counter()
-    if spread <= config.spread_threshold:
+    if mode == "telea" or (mode == "auto" and spread <= config.spread_threshold):
         method = "telea"
         reconstructed = _reconstruct_telea(crop, dilated_mask)
     else:
@@ -319,7 +337,7 @@ def reconstruct_region(
             method = "telea-fallback"
             reconstructed = _reconstruct_telea(crop, dilated_mask)
     inpaint_s = time.perf_counter() - t
-    diagnostics.append(f"reconstruction method: {method} (pixel_spread={spread:.1f})")
+    diagnostics.append(f"reconstruction method: {method} (mode={mode}, pixel_spread={spread:.1f})")
 
     steps = f"ctd={ctd_s:.1f}s mask={coverage_pct:.1f}% {method}={inpaint_s:.1f}s"
 
@@ -328,6 +346,7 @@ def reconstruct_region(
         mask_png=_encode_mask_png(dilated_mask),
         patch_png=_encode_patch_png(reconstructed, dilated_mask),
         bounds={"x": crop_x0, "y": crop_y0, "width": crop_w, "height": crop_h},
+        generator_sha256=generator_sha256_for(mode),
         diagnostics=diagnostics,
     )
     logger.info(

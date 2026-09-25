@@ -110,7 +110,9 @@ def _geometry(region: dict) -> tuple[float, float, float, float] | None:
     return values[0], values[1], values[2], values[3]
 
 
-def _process_region(image: np.ndarray, page_id: str, region: object, source_language="ja", ocr_model="") -> dict:
+def _process_region(
+    image: np.ndarray, page_id: str, region: object, source_language="ja", ocr_model="", mode="auto"
+) -> dict:
     if not isinstance(region, dict):
         return _region_result(region, "failed", ["invalid cleanup region payload"])
     if region.get("policyAction") == "exclude":
@@ -125,7 +127,7 @@ def _process_region(image: np.ndarray, page_id: str, region: object, source_lang
     if geometry is None:
         return _region_result(region, "failed", ["cleanup region lacks usable geometry"])
     try:
-        result = reconstruct_region(image, *geometry)
+        result = reconstruct_region(image, *geometry, mode=mode)
         if result is None:
             # A degenerate crop or model failure is distinct from an uncertain empty mask.
             # R2's flat-plate/halo behaviour for this region
@@ -155,29 +157,46 @@ def process_cleanup(job_data: dict) -> None:
     if not isinstance(regions, list):
         raise ValueError("cleanup job is missing immutable cleanupRegions list")
 
-    try:
-        image = _download_verified_source(job_data)
-    except Exception as exc:
-        logger.warning("[Cleanup] source verification failed: %s", exc)
-        outcomes = [_region_result(region, "failed", [str(exc)]) for region in regions]
+    mode = str(job_data.get("cleanupMode") or "auto").strip().lower()
+    if mode == "off":
+        # Cleanup switched off for this chapter/series/globally: no CTD, no patches. Reported as
+        # the complete "excluded" outcome, so translation proceeds and nothing is flagged for
+        # review; the text is drawn over the source with its halo, as before R3.
+        outcomes = [
+            _region_result(region, "excluded", ["cleanup mode off: source pixels kept, no patch"])
+            if isinstance(region, dict)
+            else _region_result(region, "failed", ["invalid cleanup region payload"])
+            for region in regions
+        ]
     else:
-        outcomes = []
-        # node_scoped, and the same lock name process_ocr uses. Before R3 this CTD/AOT work ran
-        # *inside* the OCR job and was covered by that lock; moving it to its own job would
-        # otherwise let a cleanup page and an OCR page run their local models concurrently on one
-        # host, which is the CPU/RAM overload the lock exists to prevent. MAX_HEAVY_SLOTS bounds
-        # one container; this bounds the machine.
-        with acquire_lock("ocr", node_scoped=True):
-            for region in regions:
-                outcomes.append(
-                    _process_region(
-                        image, page_id, region, job_data.get("sourceLanguage") or "ja", job_data.get("ocrModel") or ""
+        try:
+            image = _download_verified_source(job_data)
+        except Exception as exc:
+            logger.warning("[Cleanup] source verification failed: %s", exc)
+            outcomes = [_region_result(region, "failed", [str(exc)]) for region in regions]
+        else:
+            outcomes = []
+            # node_scoped, and the same lock name process_ocr uses. Before R3 this CTD/AOT work ran
+            # *inside* the OCR job and was covered by that lock; moving it to its own job would
+            # otherwise let a cleanup page and an OCR page run their local models concurrently on
+            # one host, which is the CPU/RAM overload the lock exists to prevent. MAX_HEAVY_SLOTS
+            # bounds one container; this bounds the machine.
+            with acquire_lock("ocr", node_scoped=True):
+                for region in regions:
+                    outcomes.append(
+                        _process_region(
+                            image,
+                            page_id,
+                            region,
+                            job_data.get("sourceLanguage") or "ja",
+                            job_data.get("ocrModel") or "",
+                            mode=mode,
+                        )
                     )
-                )
-                # Cleanup is the longest stage on the page and makes no network calls while it
-                # runs, so the per-region tick is the only thing that distinguishes "working" from
-                # "hung" in the backend's progress counter.
-                record_progress()
+                    # Cleanup is the longest stage on the page and makes no network calls while
+                    # it runs, so the per-region tick is the only thing that distinguishes
+                    # "working" from "hung" in the backend's progress counter.
+                    record_progress()
 
     callback_payload = {
         "jobId": job_data.get("jobId"),

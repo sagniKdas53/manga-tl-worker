@@ -185,7 +185,7 @@ def test_uncertain_region_preserves_source_and_reports_review_diagnostics():
         {"regionId": "a", "inputDigest": "a-digest", "x": 1, "y": 2, "width": 3, "height": 4, "policyAction": "replace"}
     ]
 
-    def uncertain_without_mutating_source(image, *_geometry):
+    def uncertain_without_mutating_source(image, *_geometry, **_options):
         expected = cv2.imdecode(np.frombuffer(source, dtype=np.uint8), cv2.IMREAD_COLOR)
         np.testing.assert_array_equal(image, expected)
         raise CleanupUncertain("CTD found no glyphs inside the region; source preserved")
@@ -213,3 +213,41 @@ def test_ocr_has_no_inline_cleanup_execution():
 
     source = Path(__file__).parents[1] / "src" / "worker" / "handlers" / "ocr.py"
     assert "reconstruct_region(" not in source.read_text()
+
+
+def test_cleanup_mode_off_skips_ctd_and_reports_every_region_excluded():
+    source = _source_bytes()
+    regions = [
+        {"regionId": "a", "inputDigest": "a-d", "x": 1, "y": 2, "width": 3, "height": 4, "policyAction": "replace"},
+        {"regionId": "b", "inputDigest": "b-d", "x": 2, "y": 2, "width": 3, "height": 4, "policyAction": "exclude"},
+    ]
+    job = {**_job(source, regions), "cleanupMode": "off"}
+    with (
+        patch("worker.handlers.cleanup.requests.get") as get,
+        patch("worker.handlers.cleanup.requests.post") as post,
+        patch("worker.handlers.cleanup.reconstruct_region") as reconstruct,
+    ):
+        process_cleanup(job)
+
+    get.assert_not_called()  # not even the source download
+    reconstruct.assert_not_called()
+    payload = post.call_args.kwargs["json"]
+    assert [item["status"] for item in payload["regions"]] == ["excluded", "excluded"]
+    assert [item["inputDigest"] for item in payload["regions"]] == ["a-d", "b-d"]
+
+
+def test_the_cleanup_mode_reaches_reconstruction():
+    source = _source_bytes()
+    response = MagicMock(content=source)
+    result = CleanupResult(mask_png=b"m", patch_png=b"p", bounds={"x": 1, "y": 2}, diagnostics=[])
+    regions = [
+        {"regionId": "a", "inputDigest": "a-d", "x": 1, "y": 2, "width": 3, "height": 4, "policyAction": "replace"}
+    ]
+    with (
+        patch("worker.handlers.cleanup.requests.get", return_value=response),
+        patch("worker.handlers.cleanup.requests.post"),
+        patch("worker.handlers.cleanup.reconstruct_region", return_value=result) as reconstruct,
+        patch("worker.handlers.cleanup.minio_client"),
+    ):
+        process_cleanup({**_job(source, regions), "cleanupMode": "AOT"})
+    assert reconstruct.call_args.kwargs["mode"] == "aot"
