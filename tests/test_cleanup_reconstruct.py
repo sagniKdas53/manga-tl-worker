@@ -367,6 +367,7 @@ def test_a_forced_mode_overrides_the_flat_or_structured_routing(mock_segment_cro
     busy = np.random.default_rng(0).integers(0, 255, size=(100, 100, 3), dtype=np.uint8)  # "auto" -> AOT
     config = CleanupConfig(crop_pad_px=5)
     crop, _x0, _y0 = _crop_with_context(flat, 40, 40, 20, 20, config.crop_pad_px)
+    assert crop is not None
     hot = (slice(5, 25), slice(5, 25))
     mock_segment_crop.side_effect = lambda *_a, **_k: _prob_map(crop.shape[:2], hot)
     mock_telea.return_value = crop.copy()
@@ -374,6 +375,7 @@ def test_a_forced_mode_overrides_the_flat_or_structured_routing(mock_segment_cro
 
     forced_aot = reconstruct_region(flat, 40, 40, 20, 20, config=config, mode="aot")
     forced_telea = reconstruct_region(busy, 40, 40, 20, 20, config=config, mode="telea")
+    assert forced_aot is not None and forced_telea is not None
 
     assert mock_aot.call_count == 1 and mock_telea.call_count == 1
     assert any("mode=aot" in d for d in forced_aot.diagnostics)

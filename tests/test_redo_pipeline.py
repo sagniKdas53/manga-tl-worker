@@ -289,6 +289,7 @@ def test_region_redo_translation_reads_its_page():
         ],
     }
     context = page_context_for_region(image_info, "b")
+    assert context is not None
     assert "Series Title: Tests" in context
     page = context.split("Other text on this page", 1)[1]
     # Reading order, current translations alongside, the region itself and settled SFX left out.
@@ -311,5 +312,6 @@ def test_a_merged_block_shows_the_translator_its_pieces():
         ]
     }
     context = page_context_for_region(image_info, "m")
+    assert context is not None
     assert "| ブラ | イダルなんて | アイ | ドルを |" in context
     assert "order that makes sense" in context
