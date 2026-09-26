@@ -92,6 +92,7 @@ WORKER_API_SECRET_FILE = os.environ.get("WORKER_API_SECRET_FILE", "").strip()
 ALLOW_UNAUTHENTICATED_API = os.environ.get("ALLOW_UNAUTHENTICATED_WORKER_API", "").strip().lower() == "true"
 
 HEAVY_QUEUES = {
+    "queue:cleanup",
     "queue:panel-detection",
     "queue:ocr",
     "queue:qa-re-ocr",

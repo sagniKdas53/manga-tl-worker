@@ -267,9 +267,12 @@ def backend_headers():
 
     Prefer this over the ``BACKEND_HEADERS`` dict for any request made while handling a job.
     """
-    if not _trace_id.get():
-        return BACKEND_HEADERS
-    return {**BACKEND_HEADERS, "X-Trace-Id": _trace_id.get()}
+    from worker.job_attempt import attempt_headers
+
+    headers = {**BACKEND_HEADERS, **attempt_headers()}
+    if _trace_id.get():
+        headers["X-Trace-Id"] = _trace_id.get()
+    return headers
 
 
 # Service Settings
@@ -277,6 +280,15 @@ RATE_LIMIT = os.environ.get("RATE_LIMIT", "").strip()
 # Default: 1 hour in seconds
 MODEL_TTL = int(os.environ.get("MODEL_TTL", "3600"))
 HEALTH_PORT = int(os.environ.get("HEALTH_PORT", "8000"))
+# How many of one page's translation chunks run concurrently against the cloud provider. These
+# are independent requests -- the context string is built once, upfront, from the page manifest,
+# not accumulated chunk-by-chunk -- so there is no ordering dependency between them. Reinstated
+# 2026-09-21: a July 2026 refactor ("Phase 2 ... deprecating CLOUD_CONCURRENCY") removed this env
+# var and hardcoded the executor to max_workers=1, silently serializing every multi-chunk page
+# (measured: a 7-chunk page ran its chunks back-to-back with ~0 idle gap between them, so total
+# translation time was ~7x one chunk's own reasoning-heavy latency). Only bounds concurrency
+# within one page's own translation job, not across jobs (that is CONCURRENT_JOBS).
+CLOUD_CONCURRENCY = int(os.environ.get("CLOUD_CONCURRENCY", "2"))
 
 # Clients
 redis_client = redis.Redis(
@@ -314,6 +326,31 @@ YOLO_INPUT_SIZE = int(os.environ.get("YOLO_INPUT_SIZE", "1280"))
 YOLO_MASK_EROSION = int(os.environ.get("YOLO_MASK_EROSION", "3"))
 YOLO_PINNED_CHECKSUM = "c9208cb610aa35b8f8dc7ef0890182322992a43399a853093ad5d04a3764af4f"
 YOLO_FALLBACK_MODE = os.environ.get("YOLO_FALLBACK_MODE", "opencv").lower()
+
+# CTD (comic-text-detector) glyph-mask config -- R3 glyph-mask cleanup. Only the `seg` head
+# subgraph is shipped (`ctd_seg_dyn.onnx`): the published model's YOLO/line-map heads are
+# removed and the input made spatially dynamic, per docs/archive/ctd_mask_validation_2026-08-26.md.
+CTD_MODEL_PATH = os.environ.get("CTD_MODEL_PATH", "")
+if not CTD_MODEL_PATH:
+    LOCAL_PATH = "/home/sagnik/Projects/docker-composes/manga-library/data/bootstrap/ctd_seg_dyn.onnx"
+    DOCKER_PATH = "/home/worker/.cache/huggingface/models/ctd_seg_dyn.onnx"
+    CTD_MODEL_PATH = LOCAL_PATH if os.path.exists(LOCAL_PATH) else DOCKER_PATH
+
+# 0.3, not the published default of 0.5: light-on-dark recall moves 26.6 points across
+# 0.3-0.7 in the validated measurement -- a confidence-calibration gap, not a detection one.
+CTD_CONF_THRESHOLD = float(os.environ.get("CTD_CONF_THRESHOLD", "0.3"))
+CTD_PINNED_CHECKSUM = "a0e08c52bdd493e795ee5572a973f5ea6a4630f068e1c229bf23f41796929de9"
+
+# AOT GAN inpainting config -- R3's textured/artwork-background reconstruction candidate,
+# used for crops where `_pixel_spread` reports a structured (non-flat) interior; TELEA
+# handles flat interiors directly via cv2 and needs no model.
+AOT_MODEL_PATH = os.environ.get("AOT_MODEL_PATH", "")
+if not AOT_MODEL_PATH:
+    LOCAL_PATH = "/home/sagnik/Projects/docker-composes/manga-library/data/bootstrap/lama_aot.onnx"
+    DOCKER_PATH = "/home/worker/.cache/huggingface/models/lama_aot.onnx"
+    AOT_MODEL_PATH = LOCAL_PATH if os.path.exists(LOCAL_PATH) else DOCKER_PATH
+
+AOT_PINNED_CHECKSUM = "c5965aca4e5ffa8269051dca1fc30e379d2bded46e0a55366e299ade47086cfc"
 
 # When YOLO is active but matched no bubble to a text fragment, try the OpenCV contour search on
 # that fragment before giving up and using the raw text bbox as the "bubble".
@@ -451,6 +488,13 @@ OCR_WAIST_MAX_SOLIDITY = float(os.environ.get("OCR_WAIST_MAX_SOLIDITY", "0.90"))
 # where there are 17).
 OCR_ORIENTATION = os.environ.get("OCR_ORIENTATION", "vote").strip().lower()
 
+# Largest share of the page one merged region may cover (tracker R2 gate: no patch larger than a
+# quarter of the page). A component whose union box exceeds it is regrouped at a tighter budget;
+# see fragment_grouping._split_oversized. sample83's three free-standing columns chained into one
+# 1011x1617 region on a 1412x2000 page (57.9 %) and that region became the flat plate over most
+# of the art. Set to 0 to disable.
+OCR_COMPONENT_MAX_AREA_FRACTION = float(os.environ.get("OCR_COMPONENT_MAX_AREA_FRACTION", "0.25"))
+
 
 def is_usable_model(model):
     """A model id counts as usable only if it is a real, non-sentinel value."""
@@ -527,6 +571,11 @@ QA_CONFIG = ModelConfig(
     llm_list_env="QA_LLM_MODEL_LIST",
     vlm_list_env="QA_VLM_MODEL_LIST",
 )
+
+# Vision-QA models tried, in order, after the page's own model and QA_VLM_MODEL when those refuse
+# the page, return nothing, or leave regions unjudged. Comma-separated; empty keeps the old
+# single fallback to QA_VLM_MODEL.
+QA_VLM_FALLBACK_MODELS = [m.strip() for m in os.environ.get("QA_VLM_FALLBACK_MODELS", "").split(",") if m.strip()]
 
 LOCAL_LLM_PROVIDER = os.environ.get("LOCAL_LLM_PROVIDER", "").strip()
 LOCAL_LLM_ENDPOINT = os.environ.get("LOCAL_LLM_ENDPOINT", "").strip()

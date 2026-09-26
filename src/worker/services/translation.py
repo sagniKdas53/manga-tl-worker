@@ -99,6 +99,35 @@ GOOD: "ELF!"
 PROMPT_VERSION = "batch-v3"
 
 
+# A model that declines to translate answers in the target language, in the first person, about
+# the *task* -- never with the line of dialogue it was given. Tracker R2 (d): a refusal is not a
+# translation, so it must fail validation like any other bad output; the region then goes through
+# the retry and fallback passes and, if nothing translates it, is reported `translationFailed`,
+# which the backend turns into a hidden element and the scene into `review`.
+#
+# Narrower than scripts/quality/reference_compare.py's REFUSAL on purpose: that one counts
+# refusals after the fact, this one throws translations away, and manga dialogue is full of
+# "I can't..." and "Sorry...". What separates a refusal is the object: it cannot *help / assist /
+# translate / provide*, or it names the content or a policy. The three strings typeset onto
+# sample222 in the g5 run were "[Explicit sexual content involving ... -- redacted.]".
+REFUSAL_PATTERN = re.compile(
+    r"\[[^\]]*\bredacted\b[^\]]*\]"
+    r"|^\s*\[?\s*(?:explicit|exploitative|graphic) (?:sexual |adult )?(?:content|material|advertisement)\b"
+    r"|\b(?:i can(?:'|no)?t|i cannot|i(?:'m| am) (?:unable|not able) to)\s+"
+    r"(?:help|assist|translate|provide|produce|comply|fulfil|fulfill|generate|process)\b"
+    r"|\bas an ai\b"
+    r"|\b(?:content|usage|safety) polic(?:y|ies)\b"
+    r"|\bviolates? (?:the |our |my )?(?:guidelines|terms)\b"
+    r"|\b(?:this|the) (?:content|request|text|material|image) (?:involves|contains|depicts|violates|appears to)\b",
+    re.IGNORECASE,
+)
+
+
+def is_refusal(translated):
+    """True when the text is the model talking about the request instead of translating it."""
+    return bool(translated) and REFUSAL_PATTERN.search(translated.strip()) is not None
+
+
 def is_valid_translation(source, translated, request_id=None):
     req_prefix = f"[{request_id}] " if request_id else ""
     if not translated:
@@ -107,6 +136,10 @@ def is_valid_translation(source, translated, request_id=None):
 
     translated_stripped = translated.strip()
     source_stripped = source.strip()
+
+    if is_refusal(translated_stripped):
+        logger.warning(f"{req_prefix}Validation failed reason=refusal source={source} translation={translated}")
+        return False
 
     # Check forbidden phrases / boilerplate
     forbidden_substrings = ["translate the following text", "text:", "output:", "json"]
@@ -208,6 +241,19 @@ def should_typeset_region(region):
         confidence = 1.0
     bubble_id = region.get("bubbleId") or region.get("bubble_id") or ""
     enclosed = bool(bubble_id) and not str(bubble_id).startswith("direct_text")
+    if not enclosed:
+        # A direct region has no verified speech container, so only source-script dialogue can
+        # justify painting a new plate over artwork. OCR digits, Latin fragments, and mixed-script
+        # guesses such as sample47's `大GG` are visual marks, not English dialogue to typeset.
+        source_script = re.fullmatch(
+            r"[\s\u3040-\u30FF\u3400-\u9FFF\uF900-\uFAFF\uAC00-\uD7AF\uFF66-\uFF9F々〆ヶー！？?!…。、・「」『』（）]+",
+            str(region.get("text", "")),
+        )
+        if not source_script:
+            logger.debug(
+                f"[Typeset Filter] Leaving unenclosed non-source-script region as drawn: '{region.get('text', '')}'"
+            )
+            return False
     if not enclosed and confidence < JUNK_REGION_MIN_CONFIDENCE:
         logger.debug(
             f"[Typeset Filter] Leaving unenclosed low-confidence region as drawn "

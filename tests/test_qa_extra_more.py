@@ -1,6 +1,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
+from tests.qa_binding import bound_qa_job
 from worker.handlers.qa import _process_qa_llm, process_qa
 
 
@@ -39,4 +40,4 @@ def test_process_qa_llm_openrouter_success():
         patch("requests.get", return_value=mock_get_res),
         patch("requests.post", return_value=mock_post_res),
     ):
-        _process_qa_llm(job_data)
+        _process_qa_llm(bound_qa_job(job_data))

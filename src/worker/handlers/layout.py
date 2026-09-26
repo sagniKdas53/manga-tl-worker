@@ -4,6 +4,7 @@ import requests
 
 from worker.config import CALLBACK_URL, backend_headers, redis_client
 from worker.services.layout import classify_region_type, group_conversations
+from worker.services.region_policy import select_region_action
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +60,14 @@ def process_layout(job_data):
             "conversations": [],
         }
         try:
-            res = requests.post(f"{CALLBACK_URL}/layout", json=callback_payload, headers=backend_headers())
+            res = requests.post(
+                f"{CALLBACK_URL}/layout", json=callback_payload, headers=backend_headers(), timeout=(5, 30)
+            )
+            res.raise_for_status()
             logger.debug(f"[Layout] Callback status code: {res.status_code}")
         except Exception as e:
             logger.error(f"[Layout] Failed to post callback: {e}")
+            raise
         return
 
     # Get image dimensions from the first panel or estimate from regions
@@ -90,11 +95,13 @@ def process_layout(job_data):
         panel = panel_by_id.get(str(panel_id)) if panel_id else None
 
         rtype = classify_region_type(r, panel, image_width, image_height)
+        policy = select_region_action(rtype, r.get("user_override"))
         r["regionType"] = rtype  # Annotate in-memory for conversation grouping
         region_types.append(
             {
                 "regionId": str(r.get("id", "")),
                 "regionType": rtype,
+                **policy.callback_fields(),
             }
         )
         logger.info(
@@ -145,7 +152,9 @@ def process_layout(job_data):
         ],
     }
     try:
-        res = requests.post(f"{CALLBACK_URL}/layout", json=callback_payload, headers=backend_headers())
+        res = requests.post(f"{CALLBACK_URL}/layout", json=callback_payload, headers=backend_headers(), timeout=(5, 30))
+        res.raise_for_status()
         logger.debug(f"[Layout] Callback status code: {res.status_code}")
     except Exception as e:
         logger.error(f"[Layout] Failed to post callback to backend: {e}")
+        raise

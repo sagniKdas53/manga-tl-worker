@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import logging
+import os
 import secrets
 import threading
 from contextlib import asynccontextmanager
@@ -11,7 +12,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 
 import worker.concurrency as conc
-from worker.config import HEALTH_PORT, MODEL_TTL, publish_provider_config
+from worker.config import HEALTH_PORT, MODEL_TTL, publish_provider_config, redis_client
 from worker.model_manager import model_manager
 from worker.schemas import JobSubmitRequest
 from worker.utils.lock import release_stale_node_locks
@@ -78,13 +79,15 @@ async def lifespan(app: FastAPI):
 
     # Background maintenance task (model eviction + status logging)
     maintenance_task = asyncio.create_task(_periodic_maintenance())
+    catalog_task = asyncio.create_task(_periodic_catalog_refresh())
 
     yield  # App is running
 
     # Shutdown
-    maintenance_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await maintenance_task
+    for task in (maintenance_task, catalog_task):
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 async def _periodic_maintenance():
@@ -112,6 +115,37 @@ async def _periodic_maintenance():
             logger.error(f"[Worker] Error in maintenance loop: {e}")
 
         await asyncio.sleep(5)
+
+
+#: Hours between provider catalog refreshes; 0 turns the job off. The GitHub workflow this
+#: replaces ran twice a week, so daily is more current at no real cost (two GETs).
+CATALOG_REFRESH_INTERVAL_HOURS = float(os.environ.get("CATALOG_REFRESH_INTERVAL_HOURS", "24"))
+#: Delay before the first run, so a restarting stack is not fetching catalogs while models seed.
+CATALOG_REFRESH_STARTUP_DELAY_SECONDS = float(os.environ.get("CATALOG_REFRESH_STARTUP_DELAY_SECONDS", "90"))
+
+
+async def _periodic_catalog_refresh():
+    """Refresh the provider catalog from OpenRouter/NVIDIA on a timer and publish it to Redis.
+
+    Replaces the ``refresh-provider-models`` workflow that committed providers.json to main. The
+    fetch and merge are blocking, so they run in a thread; the loop itself never raises.
+    """
+    from worker.provider_config import get_config_loader
+    from worker.services.catalog_refresh import CatalogRefresher
+
+    if CATALOG_REFRESH_INTERVAL_HOURS <= 0:
+        logger.info("[Worker] Catalog refresh is off (CATALOG_REFRESH_INTERVAL_HOURS=0).")
+        return
+
+    refresher = CatalogRefresher(get_config_loader(), redis_client)
+    # A restart should not lose last night's refresh: re-apply it before the first fetch.
+    if await asyncio.to_thread(refresher.restore):
+        await asyncio.to_thread(publish_provider_config)
+
+    await asyncio.sleep(CATALOG_REFRESH_STARTUP_DELAY_SECONDS)
+    while True:
+        await asyncio.to_thread(refresher.run_once)
+        await asyncio.sleep(CATALOG_REFRESH_INTERVAL_HOURS * 3600)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -177,6 +211,7 @@ async def capabilities():
         "supported_tasks": [
             "queue:panel-detection",
             "queue:ocr",
+            "queue:cleanup",
             "queue:layout",
             "queue:translation",
             "queue:render",

@@ -111,6 +111,7 @@ def test_process_region_redo_translation(mock_post, mock_get, mock_translate, mo
         request_id=mock_translate.call_args[1]["request_id"],
         provider=None,
         model=None,
+        context_str=None,
     )
 
     mock_post.assert_called_once()
@@ -272,3 +273,43 @@ def test_region_redo_translation_still_reports_its_cost(mock_post, mock_get, moc
     payload = mock_post.call_args[1]["json"]
     assert payload["cost"]["estimated_cost"] == 0.00022
     assert payload["cost"]["breakdown"][0]["stage"] == "region-redo-tl"
+
+
+def test_region_redo_translation_reads_its_page():
+    from worker.handlers.redo import page_context_for_region
+
+    image_info = {
+        "seriesMetadata": {"title": "Tests", "originalLanguage": "ja"},
+        "ocrRegions": [
+            {"id": "b", "text": "縁が無かったでしょう", "bubbleReadingOrder": 6},
+            {"id": "a", "text": "ブライダルなんて", "bubbleReadingOrder": 3, "translatedText": "Bridal stuff"},
+            {"id": "sfx", "text": "パシャ", "bubbleReadingOrder": 2, "qaStatus": "reject_sfx"},
+            {"id": "blank", "text": "  ", "bubbleReadingOrder": 1},
+            {"id": "c", "text": "仕事とはいえ", "bubbleReadingOrder": 1},
+        ],
+    }
+    context = page_context_for_region(image_info, "b")
+    assert "Series Title: Tests" in context
+    page = context.split("Other text on this page", 1)[1]
+    # Reading order, current translations alongside, the region itself and settled SFX left out.
+    assert page.index("仕事とはいえ") < page.index("ブライダルなんて → Bridal stuff")
+    assert "縁が無かった" not in page
+    assert "パシャ" not in page
+    assert page_context_for_region({"ocrRegions": [{"id": "b", "text": "x"}]}, "b") is None
+
+
+def test_a_merged_block_shows_the_translator_its_pieces():
+    from worker.handlers.redo import page_context_for_region
+
+    image_info = {
+        "ocrRegions": [
+            {
+                "id": "m",
+                "text": "ブライダルなんてアイドルを",
+                "ownershipProvenance": {"mergedTexts": ["ブラ", "イダルなんて", "アイ", "ドルを"]},
+            }
+        ]
+    }
+    context = page_context_for_region(image_info, "m")
+    assert "| ブラ | イダルなんて | アイ | ドルを |" in context
+    assert "order that makes sense" in context

@@ -6,9 +6,60 @@ import requests
 
 from worker.config import CALLBACK_URL, backend_headers, logger
 from worker.services.ocr import perform_redo_ocr
-from worker.services.translation import translate_text
+from worker.services.translation import build_context_string, translate_text
 from worker.utils.image import download_image
 from worker.utils.text import detect_language
+
+# Bounds on what one region's retranslation carries of its page: enough to read a balloon's
+# neighbours, not a second copy of the page translation's prompt.
+_PAGE_CONTEXT_REGIONS = 40
+_PAGE_CONTEXT_CHARS = 200
+
+# Settled as not-for-translation; they would only add noise to the context.
+_NOT_DIALOGUE = {"reject_sfx", "rejected"}
+
+
+def page_context_for_region(image_info, region_id):
+    """What a single region's retranslation should know about its page.
+
+    The page translation sends every region together, in reading order, with the series and
+    previous-page context. A region redo used to send its text alone, so a fragment such as
+    「縁が無かったでしょう」 came back as a free-standing line ("we weren't meant to be") where
+    the balloon it finishes means "I'd never have had anything to do with it". This gives the redo
+    the same series context plus the rest of the page, each line with its current translation,
+    so the region is translated as part of the page it sits on.
+    """
+    context = build_context_string(image_info)
+    region = next((r for r in image_info.get("ocrRegions") or [] if r.get("id") == region_id), None)
+    pieces = ((region or {}).get("ownershipProvenance") or {}).get("mergedTexts") or []
+    pieces = [p.strip() for p in pieces if isinstance(p, str) and p.strip()]
+    if len(pieces) > 1:
+        # A merged block (Reader "Merge regions"): the backend joined the pieces in geometric
+        # reading order, which is right for ordinary layouts but not always, and the person who
+        # merged them may not read the language. Show the pieces and let the model reorder.
+        context += (
+            f"The Text below was joined from {len(pieces)} OCR fragments of one text block, in "
+            "estimated reading order: | " + " | ".join(pieces) + " |. If the joined text does not "
+            "read naturally in that order, translate it in the order that makes sense.\n"
+        )
+    others = [
+        r
+        for r in image_info.get("ocrRegions") or []
+        if r.get("id") != region_id and (r.get("text") or "").strip() and r.get("qaStatus") not in _NOT_DIALOGUE
+    ]
+    others.sort(key=lambda r: (r.get("bubbleReadingOrder") is None, r.get("bubbleReadingOrder") or 0))
+    lines = []
+    for r in others[:_PAGE_CONTEXT_REGIONS]:
+        line = r["text"].strip()[:_PAGE_CONTEXT_CHARS]
+        translated = (r.get("translatedText") or "").strip()[:_PAGE_CONTEXT_CHARS]
+        lines.append(f"  - {line} → {translated}" if translated else f"  - {line}")
+    if lines:
+        context += (
+            "Other text on this page, in reading order (source → current translation):\n"
+            + "\n".join(lines)
+            + "\nTranslate only the Text below; the lines above are context.\n"
+        )
+    return context or None
 
 
 def process_region_redo(job_data):
@@ -120,6 +171,7 @@ def process_region_redo(job_data):
                 request_id=request_id,
                 provider=job_data.get("tlProvider"),
                 model=job_data.get("tlModel"),
+                context_str=page_context_for_region(image_info, region_id),
             )
             callback_payload["translatedText"] = translated
             callback_payload["translationFailed"] = translated is None
@@ -151,7 +203,8 @@ def process_region_redo(job_data):
 
     try:
         callback_url = CALLBACK_URL.replace("/jobs/callback", f"/ocr-regions/{region_id}/callback")
-        res = requests.post(callback_url, json=callback_payload, headers=backend_headers())
+        res = requests.post(callback_url, json=callback_payload, headers=backend_headers(), timeout=(5, 30))
+        res.raise_for_status()
         if redo_type == "translation":
             logger.info(f"{req_prefix}Callback status code: {res.status_code}")
         else:
@@ -161,3 +214,4 @@ def process_region_redo(job_data):
             logger.error(f"{req_prefix}Failed to post callback: {e}")
         else:
             logger.error(f"[Region Redo] Failed to post callback: {e}")
+        raise

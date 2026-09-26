@@ -90,6 +90,44 @@ def test_llm_client_openrouter_caching_and_session(mock_post):
 
 
 @patch("worker.services.llm_client.requests.post")
+def test_openrouter_sends_a_bounded_reasoning_budget(mock_post):
+    """2026-09-21: deepseek-v4-pro reasoned unboundedly with no budget sent -- 74-81% of output
+    tokens on normal pages, and 8073/8192 with finish=length (no content at all) on one page.
+    Reasoning stays on (capping, not disabling) but bounded well under DEFAULT_MAX_OUTPUT_TOKENS.
+    """
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "choices": [{"message": {"content": "OpenRouter response"}}],
+        "usage": {"prompt_tokens": 150, "completion_tokens": 25},
+    }
+    mock_post.return_value = mock_resp
+
+    client = LLMClient(provider="openrouter", api_key="test_key", model="deepseek/deepseek-v4-pro")
+    client.complete(messages=[{"role": "user", "content": "Hi"}])
+
+    posted_json = mock_post.call_args.kwargs["json"]
+    assert posted_json["reasoning"] == {"max_tokens": llm_client.REASONING_MAX_TOKENS}
+    assert posted_json["max_tokens"] > posted_json["reasoning"]["max_tokens"]
+
+
+@patch("worker.services.llm_client.requests.post")
+def test_non_openrouter_providers_get_no_reasoning_field(mock_post):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "choices": [{"message": {"content": "Hello"}}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    }
+    mock_post.return_value = mock_resp
+
+    client = LLMClient(provider="openai", api_key="test_key", model="gpt-4o-mini")
+    client.complete(messages=[{"role": "user", "content": "Hi"}])
+
+    assert "reasoning" not in mock_post.call_args.kwargs["json"]
+
+
+@patch("worker.services.llm_client.requests.post")
 def test_llm_client_null_token_details(mock_post):
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -355,6 +393,28 @@ def test_400_degrades_json_schema_to_json_object_and_succeeds(mock_post, no_retr
     assert len(sent) == 2
     assert sent[0]["response_format"]["type"] == "json_schema"
     assert sent[1]["response_format"] == {"type": "json_object"}
+
+
+@patch("worker.services.llm_client.requests.post")
+def test_content_refusal_is_not_mistaken_for_an_unsupported_schema(mock_post, no_retry_sleep):
+    """Alibaba's content filter answers 400 data_inspection_failed. Degrading json_schema and
+    retrying only sends the same refused content again; it must fail once and fast."""
+    body = (
+        '{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"data: '
+        '{\\"error\\":{\\"code\\":\\"data_inspection_failed\\",\\"message\\":'
+        '\\"Input image data may contain inappropriate content.\\"}}"}}}'
+    )
+    mock_post.return_value = MagicMock(status_code=400, text=body)
+
+    client = LLMClient(provider="openrouter", api_key="k", model="m")
+    res = client.complete(
+        messages=[{"role": "user", "content": "Hi"}],
+        response_schema={"type": "object", "properties": {"a": {"type": "string"}}},
+    )
+
+    assert res is None
+    assert mock_post.call_count == 1
+    assert client._degraded_format is False
 
 
 @patch("worker.services.llm_client.requests.post")

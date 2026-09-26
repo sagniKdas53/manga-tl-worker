@@ -3,7 +3,6 @@ import logging
 import os
 import re
 
-from worker.services.bubble_geometry import simplify_mask_polygon
 from worker.services.fragment_grouping import (
     DEFAULT_THRESHOLD_RATIO,
     GroupingConfig,
@@ -31,58 +30,37 @@ def _parse_polygon(mask_polygon):
     return polygon
 
 
-def _polygon_area(points):
-    area = 0
-    for idx, p1 in enumerate(points):
-        p2 = points[(idx + 1) % len(points)]
-        area += p1[0] * p2[1] - p2[0] * p1[1]
-    return abs(area) / 2
+def resolve_component_container(regions, comp):
+    """Return a trusted component container or an explicit review state.
 
-
-def _convex_hull(points):
-    unique = sorted({(p[0], p[1]) for p in points})
-    if len(unique) <= 1:
-        return [[p[0], p[1]] for p in unique]
-
-    def cross(o, a, b):
-        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-
-    lower = []
-    for p in unique:
-        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
-            lower.pop()
-        lower.append(p)
-
-    upper = []
-    for p in reversed(unique):
-        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
-            upper.pop()
-        upper.append(p)
-
-    hull = lower[:-1] + upper[:-1]
-    return [[p[0], p[1]] for p in hull]
-
-
-def _merged_mask_polygon(regions, comp):
-    polygons = [polygon for polygon in (_parse_polygon(regions[idx].get("maskPolygon")) for idx in comp) if polygon]
-    if not polygons:
-        return None
-    if len(polygons) == 1:
-        return json.dumps(polygons[0])
-
+    A convex hull spanning separate detector polygons is not a local container. It grants cleanup
+    authority over the gutter and both bubbles. Components with incompatible or absent polygons
+    therefore retain their local raw membership and enter review without any replacement mask.
+    """
+    polygons = [_parse_polygon(regions[idx].get("maskPolygon")) for idx in comp]
+    if any(polygon is None for polygon in polygons):
+        return None, "review-missing-container"
     first = polygons[0]
-    if all(poly == first for poly in polygons[1:]):
-        return json.dumps(first)
+    if all(polygon == first for polygon in polygons[1:]):
+        return json.dumps(first), "resolved-shared-container"
+    return None, "review-incompatible-containers"
 
-    points = [pt for polygon in polygons for pt in polygon]
-    hull = _convex_hull(points)
-    if len(hull) >= 3:
-        # AUDIT-R7: the hull of several rounded outlines carries every point that happens to be
-        # extreme, and nothing simplified it. Same absolute tolerance as everywhere else.
-        return json.dumps(simplify_mask_polygon(hull))
 
-    largest = max(polygons, key=_polygon_area)
-    return json.dumps(largest)
+def _split_cross_panel_components(components, regions):
+    """Veto a candidate that spans known distinct panels.
+
+    A shared panel is not owner evidence, but distinct panels are incompatible source geometry.
+    Preserve raw local regions rather than concatenate text across a gutter or panel boundary.
+    """
+
+    bounded = []
+    for component in components:
+        panel_ids = {regions[index].get("panelId") for index in component if regions[index].get("panelId") is not None}
+        if len(panel_ids) > 1:
+            bounded.extend([[index] for index in component])
+        else:
+            bounded.append(component)
+    return bounded
 
 
 def merge_ocr_regions(
@@ -126,15 +104,23 @@ def merge_ocr_regions(
     threshold_ratio = grouping.threshold_ratio
 
     n = len(regions)
-    components = group_fragments(regions, grouping, context)
+    components = _split_cross_panel_components(group_fragments(regions, grouping, context), regions)
 
     # Merge each component into a single region
     merged_regions = []
     cjk_pattern = re.compile(r"[\u3040-\u9FFF\uF900-\uFAFF]")
 
     for comp in components:
+        component_mask, container_resolution = resolve_component_container(regions, comp)
+        raw_membership = [{"index": index, "fragment_id": regions[index].get("fragmentId")} for index in comp]
         if len(comp) == 1:
-            merged_regions.append(regions[comp[0]])
+            merged_regions.append(
+                {
+                    **regions[comp[0]],
+                    "rawFragmentMembership": raw_membership,
+                    "containerResolution": container_resolution,
+                }
+            )
             continue
 
         # Sort indices in reading order inside the component
@@ -151,12 +137,13 @@ def merge_ocr_regions(
             if t:
                 texts_to_join.append(t)
 
-        if not texts_to_join:
-            joined_text = ""
-        else:
-            # Check if any part contains CJK characters to decide on spacer-less join
-            has_cjk = any(cjk_pattern.search(t) for t in texts_to_join)
-            joined_text = "".join(texts_to_join) if has_cjk else " ".join(texts_to_join)
+        raw_membership = [{"index": index, "fragment_id": regions[index].get("fragmentId")} for index in comp]
+        for member, index in zip(raw_membership, comp, strict=True):
+            provenance = regions[index].get("ownershipProvenance")
+            if provenance is not None:
+                member["provenance"] = provenance
+        has_cjk = any(cjk_pattern.search(t) for t in texts_to_join)
+        joined_text = "".join(texts_to_join) if has_cjk else " ".join(texts_to_join)
 
         # Calculate union bounding box
         x_min = min(regions[idx]["x"] for idx in comp)
@@ -197,7 +184,7 @@ def merge_ocr_regions(
             regions[idx].get("safeTextY", regions[idx]["y"]) + regions[idx].get("safeTextH", regions[idx]["height"])
             for idx in comp
         )
-        merged_mask_polygon = _merged_mask_polygon(regions, comp)
+        merged_mask_polygon = component_mask
 
         merged_regions.append(
             {
@@ -225,6 +212,9 @@ def merge_ocr_regions(
                 "safeTextY": sy_min,
                 "safeTextW": sx_max - sx_min,
                 "safeTextH": sy_max - sy_min,
+                "rawFragmentMembership": raw_membership,
+                "ownershipProvenance": {"fragments": raw_membership, "containerResolution": container_resolution},
+                "containerResolution": container_resolution,
             }
         )
 
