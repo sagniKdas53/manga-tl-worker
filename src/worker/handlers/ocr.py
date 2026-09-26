@@ -40,7 +40,12 @@ from worker.config import (
 from worker.model_manager import get_local_ocr_backend, model_manager, resolve_local_ocr_model
 from worker.services.bubble_detector import detect_bubbles_yolo
 from worker.services.bubble_geometry import bubble_grouping_context, simplify_mask_polygon
-from worker.services.fragment_grouping import GroupingConfig, GroupingContext, group_fragments
+from worker.services.fragment_grouping import (
+    MIN_THRESHOLD_RATIO,
+    GroupingConfig,
+    GroupingContext,
+    group_fragments,
+)
 from worker.services.layout import bubble_compare
 from worker.services.merge_regions import merge_ocr_regions
 from worker.services.ocr import parse_paddle_ocr_results, parse_rapid_ocr_results
@@ -62,16 +67,36 @@ from worker.utils.text import detect_language
 logger = logging.getLogger(__name__)
 
 
-def grouping_config(reading_direction):
+#: Bounds on a per-job grouping threshold. The floor is fragment_grouping's own, since the area
+#: gate halves the budget down to it; above 3 characters of white space everything on a page joins.
+MERGE_THRESHOLD_RANGE = (MIN_THRESHOLD_RATIO, 3.0)
+
+
+def merge_threshold_for(job_data):
+    """The job's grouping threshold (System Settings or a series/chapter override), clamped.
+
+    A job queued before the setting existed carries none, and falls back to OCR_MERGE_THRESHOLD.
+    """
+    try:
+        value = float(job_data.get("ocrMergeThreshold"))
+    except (TypeError, ValueError):
+        return OCR_MERGE_THRESHOLD
+    if not math.isfinite(value):
+        return OCR_MERGE_THRESHOLD
+    low, high = MERGE_THRESHOLD_RANGE
+    return min(high, max(low, value))
+
+
+def grouping_config(reading_direction, threshold_ratio=None):
     """One configuration for all three merge call sites in this handler.
 
     They used to disagree by accident -- the in-bubble path hardcoded 2.0 while the other two read
     OCR_MERGE_THRESHOLD -- so a deployment could tune one and silently leave the others alone.
     The clearance veto is inert wherever no mask is passed, so the same object is correct on the
-    paths that have no balloon.
+    paths that have no balloon. `threshold_ratio` is the job's value from merge_threshold_for.
     """
     return GroupingConfig(
-        threshold_ratio=OCR_MERGE_THRESHOLD,
+        threshold_ratio=OCR_MERGE_THRESHOLD if threshold_ratio is None else threshold_ratio,
         reading_direction=reading_direction,
         orientation=OCR_ORIENTATION,
         waist_gate=OCR_WAIST_GATE if OCR_WAIST_GATE > 0 else None,
@@ -643,6 +668,8 @@ def process_ocr(job_data):
     # Defaults preserve the original behaviour (Japanese RTL) when not supplied.
     source_language = (job_data.get("sourceLanguage") or "ja").strip().lower()
     reading_direction = (job_data.get("readingDirection") or "rtl").strip().lower()
+    merge_threshold = merge_threshold_for(job_data)
+    logger.info(f"[OCR] Grouping threshold {merge_threshold:g} characters")
 
     # Every model that actually transcribed a chunk, in first-use order. This was a single slot
     # that each chunk overwrote, so a page whose chunks fell back to a different model kept only
@@ -981,7 +1008,7 @@ def process_ocr(job_data):
 
                 # Run proximity grouping inside the detector container. F01 receives the full
                 # component plus the current bubble's source polygon and can only veto a join.
-                grouping = grouping_config(reading_direction)
+                grouping = grouping_config(reading_direction, merge_threshold)
                 bubble_context = bubble_grouping_context(bubble_mask, bubble["mask_polygon"])
                 if bubble_context is not None:
                     bubble_context = replace(bubble_context, page_area=page_area)
@@ -1072,7 +1099,7 @@ def process_ocr(job_data):
             direct_text_containers = [*panels, *text_containers]
             # 5. Add unmatched fragments as merged standalone regions (direct text / SFX)
             unmatched_frags = [f for f in raw_fragments if f.get("bubble_idx", -1) == -1]
-            grouping = grouping_config(reading_direction)
+            grouping = grouping_config(reading_direction, merge_threshold)
             # No balloon bounds these, so the page does: the area gate needs to know how big it is.
             page_context = GroupingContext(page_area=page_area)
             unmatched_groups = []
@@ -1622,7 +1649,7 @@ def process_ocr(job_data):
                 region["fragmentId"] = feature["id"]
                 region["ownershipProvenance"] = feature
 
-            grouping = grouping_config(reading_direction)
+            grouping = grouping_config(reading_direction, merge_threshold)
             page_context = GroupingContext(page_area=page_area)
             fallback_groups = group_fragments(regions, grouping, page_context)
             # The fallback contour is not a detector-validated owner container. Keep any
@@ -1727,7 +1754,7 @@ def process_ocr(job_data):
                     detector_masks=capture_detector_masks,
                     recognition=capture_recognition,
                     regions=capture_regions,
-                    grouping=grouping_config(reading_direction),
+                    grouping=grouping_config(reading_direction, merge_threshold),
                     observed_groups=capture_groups,
                 )
                 capture.write(Path(capture_dir) / f"{page_id or image_id}.json")

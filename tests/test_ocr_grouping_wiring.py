@@ -13,8 +13,11 @@ import numpy as np
 import pytest
 
 from worker.handlers.ocr import (
+    MERGE_THRESHOLD_RANGE,
+    OCR_MERGE_THRESHOLD,
     attach_live_owner_decisions,
     grouping_config,
+    merge_threshold_for,
     owner_aware_grouping_context,
     partition_unmatched_fragments_by_panel,
 )
@@ -217,3 +220,35 @@ def test_live_owner_context_keeps_an_uncontained_component_unresolved():
     decisions = [fragment["ownershipProvenance"]["ownerDecision"] for fragment in fragments]
     assert all(decision["state"] == "unknown" for decision in decisions)
     assert {decision["reason"] for decision in decisions} == {"missing-validated-container"}
+
+
+def test_the_job_threshold_reaches_grouping_and_is_clamped():
+    """System Settings and series/chapter overrides send `ocrMergeThreshold` on the OCR job."""
+    assert merge_threshold_for({"ocrMergeThreshold": 0.8}) == 0.8
+    assert merge_threshold_for({"ocrMergeThreshold": "0.5"}) == 0.5
+    assert merge_threshold_for({"ocrMergeThreshold": 0}) == MERGE_THRESHOLD_RANGE[0]
+    assert merge_threshold_for({"ocrMergeThreshold": 99}) == MERGE_THRESHOLD_RANGE[1]
+    # A job queued before the setting existed, or a bad value, keeps the deployment default.
+    for job in ({}, {"ocrMergeThreshold": None}, {"ocrMergeThreshold": "x"}, {"ocrMergeThreshold": float("nan")}):
+        assert merge_threshold_for(job) == OCR_MERGE_THRESHOLD
+    assert grouping_config("rtl", 0.8).threshold_ratio == 0.8
+    assert grouping_config("rtl").threshold_ratio == OCR_MERGE_THRESHOLD
+
+
+def test_a_higher_threshold_joins_what_the_default_keeps_apart():
+    # Two 40px-wide columns 30px apart: under the default 0.35-character budget (14px) they are
+    # two regions; at 1.0 (40px) they are one.
+    columns = [_frag(200, 100, 40, 200, "あ"), _frag(130, 100, 40, 200, "い")]
+    assert len(merge_ocr_regions(columns, grouping=grouping_config("rtl", 0.35))) == 2
+    assert len(merge_ocr_regions(columns, grouping=grouping_config("rtl", 1.0))) == 1
+
+
+def test_every_grouping_call_in_the_handler_uses_the_job_threshold():
+    import inspect
+
+    import worker.handlers.ocr as ocr_handler
+
+    source = inspect.getsource(ocr_handler.process_ocr)
+    calls = [line.strip() for line in source.splitlines() if "grouping_config(" in line]
+    assert calls, "process_ocr no longer builds a grouping configuration"
+    assert all("merge_threshold" in call for call in calls), calls
