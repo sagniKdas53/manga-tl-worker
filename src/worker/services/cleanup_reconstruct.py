@@ -117,8 +117,10 @@ def get_aot_session():
     try:
         import onnxruntime as ort
 
+        from worker.services.onnx_session import create_session
+
         logger.info(f"[AOT] Loading ONNX model from {AOT_MODEL_PATH} via ONNX Runtime...")
-        _aot_session = ort.InferenceSession(AOT_MODEL_PATH, providers=["CPUExecutionProvider"])
+        _aot_session = create_session(ort, AOT_MODEL_PATH, "AOT")
         logger.info("[AOT] ONNX Runtime session initialized successfully.")
         return _aot_session
     except Exception as e:

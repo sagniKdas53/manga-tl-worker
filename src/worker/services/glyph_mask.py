@@ -65,7 +65,7 @@ def _sha256(path: str) -> str | None:
 
 
 def get_ctd_session():
-    """Lazily load and cache the CTD `seg`-head ONNX session (CPU execution provider)."""
+    """Lazily load and cache the CTD `seg`-head ONNX session (OpenVINO when present, else CPU)."""
     global _ort_session
     if _ort_session is not None:
         return _ort_session
@@ -85,8 +85,10 @@ def get_ctd_session():
     try:
         import onnxruntime as ort
 
+        from worker.services.onnx_session import create_session
+
         logger.info(f"[CTD] Loading ONNX model from {CTD_MODEL_PATH} via ONNX Runtime...")
-        _ort_session = ort.InferenceSession(CTD_MODEL_PATH, providers=["CPUExecutionProvider"])
+        _ort_session = create_session(ort, CTD_MODEL_PATH, "CTD")
         logger.info("[CTD] ONNX Runtime session initialized successfully.")
         return _ort_session
     except Exception as e:

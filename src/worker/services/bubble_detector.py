@@ -50,9 +50,10 @@ def get_ort_session():
     try:
         import onnxruntime as ort
 
+        from worker.services.onnx_session import create_session
+
         logger.info(f"[YOLO] Loading ONNX model from {YOLO_MODEL_PATH} via ONNX Runtime...")
-        # Load ONNX session (CPU by default)
-        _ort_session = ort.InferenceSession(YOLO_MODEL_PATH, providers=["CPUExecutionProvider"])
+        _ort_session = create_session(ort, YOLO_MODEL_PATH, "YOLO")
         logger.info("[YOLO] ONNX Runtime session initialized successfully.")
         return _ort_session
     except Exception as e:

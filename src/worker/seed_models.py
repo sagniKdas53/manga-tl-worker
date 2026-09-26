@@ -78,7 +78,9 @@ def _verify_aot() -> None:
 
     import onnxruntime as ort
 
-    session = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+    from worker.services.onnx_session import create_session
+
+    session = create_session(ort, path, "AOT")
     if session is None:
         raise SeedModelsError("AOT ONNX Runtime session initialized to None")
 

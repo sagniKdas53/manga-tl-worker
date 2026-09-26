@@ -352,6 +352,13 @@ if not AOT_MODEL_PATH:
 
 AOT_PINNED_CHECKSUM = "c5965aca4e5ffa8269051dca1fc30e379d2bded46e0a55366e299ade47086cfc"
 
+# Which ONNX Runtime execution provider runs the local models (YOLO, CTD, AOT). "auto" (default)
+# uses Intel's OpenVINO provider when the installed onnxruntime build has it and falls back to the
+# stock CPU provider otherwise; "cpu" forces the stock provider. Masks are identical either way
+# (IoU 1.000 on the R3 fixtures). Every session also flushes denormals to zero, which is most of the
+# speed (CTD ~45x); OpenVINO adds ~1.5x on top (services/onnx_session.py, measured 2026-09-26).
+ONNX_EXECUTION_PROVIDER = os.environ.get("ONNX_EXECUTION_PROVIDER", "auto").strip().lower()
+
 # When YOLO is active but matched no bubble to a text fragment, try the OpenCV contour search on
 # that fragment before giving up and using the raw text bbox as the "bubble".
 #
