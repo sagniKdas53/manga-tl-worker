@@ -274,10 +274,29 @@ def test_cleanup_patch_is_fetched_verified_and_embedded(mock_requests, mock_down
             "height": 4,
             "zIndex": 0,
             "visible": True,
+            "opacity": 1,
         }
     ]
     assert result["pngSha256"] == hashlib.sha256(b"png").hexdigest()
     mock_minio.put_object.assert_called_once()
+
+
+@patch("worker.page_scene_renderer.minio_client")
+@patch("worker.page_scene_renderer.download_image")
+@patch("worker.page_scene_renderer.requests")
+def test_an_edited_patch_reaches_the_renderer_where_and_as_faint_as_the_editor_left_it(
+    mock_requests, mock_download, mock_minio
+):
+    """R7: the scene's bounds are the patch's edited rect and its opacity rides along."""
+    source, patch = b"source", b"patch-png-bytes"
+    document = _scene_with_cleanup(source, patch)
+    document["cleanup_artifacts"][0]["bounds"] = {"x": 40.5, "y": 7, "width": 30, "height": 12.25}
+    document["cleanup_artifacts"][0]["opacity"] = 0.4
+    _run_with_renderer(mock_requests, mock_download, source, document, {"patch-1": "http://assets/patch"}, patch)
+
+    (asset,) = mock_requests.post.call_args.kwargs["json"]["scene"]["cleanupAssets"]
+    assert (asset["x"], asset["y"], asset["width"], asset["height"]) == (40.5, 7, 30, 12.25)
+    assert asset["opacity"] == 0.4
 
 
 @patch("worker.page_scene_renderer.minio_client")

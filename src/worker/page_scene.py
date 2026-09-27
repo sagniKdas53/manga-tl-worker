@@ -10,7 +10,7 @@ from typing import Any
 
 CONTRACT_VERSION = "page-scene/v1"
 # SHA-256 of `contracts/page-scene-v1.schema.json`; no parent-path runtime import.
-CONTRACT_SCHEMA_SHA256 = "f8662a9be0501ef9d9d044eabb332fd60be3bf61e84a18b8b47d12e64ae804ad"
+CONTRACT_SCHEMA_SHA256 = "89560c23c8aeef2c3676b691c483ca75a4fe3d27e4b765522d761f8a43976630"
 
 
 class PageSceneValidationError(ValueError):
@@ -177,8 +177,26 @@ def validate_page_scene(document: Any) -> PageSceneArtifact:
             or asset_kinds.get(patch_asset_id) != "cleanup_patch"
         ):
             raise PageSceneValidationError("cleanup is not source/asset authorized")
-        _validate_replacement_request(actions, cleanup_owner_ids)
+        opacity = cleanup.get("opacity", 1)
+        if not isinstance(opacity, (int, float)) or isinstance(opacity, bool) or not 0 <= opacity <= 1:
+            raise PageSceneValidationError("cleanup opacity must be a number in [0, 1]")
+        # Contract rule 7 (R7): an owner-less cleanup is a patch the user kept after its region
+        # went away; a manual_cleanup object authorizes it instead of a policy (checked below).
+        if cleanup_owner_ids:
+            _validate_replacement_request(actions, cleanup_owner_ids)
         cleanup_owners[cleanup_id] = cleanup_owner_ids
+    manual_cleanup_ids: set[str] = set()
+    for item in objects:
+        if not isinstance(item, dict) or item.get("kind") != "manual_cleanup":
+            continue
+        referenced = item.get("cleanup_ids")
+        if not isinstance(referenced, list) or any(
+            not isinstance(cleanup_id, str) or cleanup_id not in cleanup_owners for cleanup_id in referenced
+        ):
+            raise PageSceneValidationError("manual cleanup references a missing cleanup")
+        manual_cleanup_ids.update(referenced)
+    if any(not owners and cleanup_id not in manual_cleanup_ids for cleanup_id, owners in cleanup_owners.items()):
+        raise PageSceneValidationError("an owner-less cleanup must be named by a manual_cleanup object")
     for item in objects:
         if not isinstance(item, dict):
             raise PageSceneValidationError("invalid object")

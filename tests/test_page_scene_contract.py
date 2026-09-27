@@ -39,7 +39,12 @@ def patch(document, operation):
 
 
 def test_shared_valid_scenes_validate():
-    for name in ("logical-valid.json", "resolved-valid.json", "overlap-preserve-valid.json"):
+    for name in (
+        "logical-valid.json",
+        "resolved-valid.json",
+        "overlap-preserve-valid.json",
+        "inpainting-edits-valid.json",
+    ):
         assert (
             PageSceneRenderRequest(contract_version="page-scene/v1", page_scene=load(name)).page_scene[
                 "contract_version"
@@ -52,7 +57,7 @@ def test_shared_valid_scenes_validate():
 def test_shared_invalid_scenes_reject():
     with pytest.raises(PageSceneValidationError):
         validate_page_scene(load("non-finite-geometry.json"))
-    for case_file in ("invalid-cases.json", "resolved-invalid-cases.json"):
+    for case_file in ("invalid-cases.json", "resolved-invalid-cases.json", "inpainting-invalid-cases.json"):
         cases = load(case_file)
         for case in cases["cases"]:
             scene = load(cases["base_fixture"])

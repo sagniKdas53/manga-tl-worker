@@ -140,6 +140,8 @@ def render_page_scene(job_data: dict[str, Any]) -> dict[str, Any]:
                 "height": bounds["height"],
                 "zIndex": index,
                 "visible": True,
+                # Contract rule 7 (R7): the editor's opacity; absent means opaque.
+                "opacity": cleanup.get("opacity", 1),
             }
         )
 
