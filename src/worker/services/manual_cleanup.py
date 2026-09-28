@@ -27,7 +27,9 @@ from worker.services.cleanup_reconstruct import (
 )
 from worker.services.pixel_stats import pixel_spread
 
-MANUAL_MODES = ("auto", "aot", "telea", "flat")
+# "restore" is the editor's eraser over an automatic patch: the original page goes back exactly
+# where the user marked, so it is neither tidied nor repainted, and it reads the bare source.
+MANUAL_MODES = ("auto", "aot", "telea", "flat", "restore")
 GENERATOR_ID = "manual-mask+telea-aotgan-flat/v1"
 GENERATOR_SHA256 = hashlib.sha256(GENERATOR_ID.encode()).hexdigest()
 
@@ -107,8 +109,9 @@ def reconstruct_manual(
 ) -> CleanupResult:
     """Repaint the marked area of `page_bgr` (already composited). `mask` sits at page (x, y).
 
-    The patch is cut to the tidied mask's box and is transparent outside it. Raises ValueError on
-    an empty or off-page mark, or a flat fill with no colour.
+    The patch is cut to the tidied mask's box and is transparent outside it. For "restore",
+    `page_bgr` is the bare source and the mark is copied as drawn. Raises ValueError on an empty
+    or off-page mark, or a flat fill with no colour.
     """
     config = config if config is not None else CleanupConfig()
     if mode not in MANUAL_MODES:
@@ -130,12 +133,16 @@ def reconstruct_manual(
     mx1, my1 = min(x + mark_w, cx1), min(y + mark_h, cy1)
     if mx1 > mx0 and my1 > my0:
         crop_mask[my0 - cy0 : my1 - cy0, mx0 - cx0 : mx1 - cx0] = mask[my0 - y : my1 - y, mx0 - x : mx1 - x]
-    crop_mask = tidy_mask(crop_mask)
+    if mode != "restore":
+        crop_mask = tidy_mask(crop_mask)
     if not crop_mask.any():
         raise ValueError("the mark is empty")
 
     diagnostics: list[str] = []
-    if mode == "flat":
+    if mode == "restore":
+        method = "restore"
+        reconstructed = crop.copy()
+    elif mode == "flat":
         method = "flat"
         reconstructed = crop.copy()
         reconstructed[crop_mask] = fill_bgr

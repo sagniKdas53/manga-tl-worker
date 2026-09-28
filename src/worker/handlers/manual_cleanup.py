@@ -4,7 +4,7 @@ Payload, beside the usual job identity:
 - `imageUrl`, `sourceSha256`: the immutable source, verified as the cleanup job does;
 - `manualMask`: `{sha256, x, y, width, height}`, a PNG under the page's `scene-assets/` prefix whose
   alpha marks the area, sized exactly `width` x `height` at page (x, y);
-- `method`: auto | aot | telea | flat, and `fillColor` (#rrggbb) for flat;
+- `method`: auto | aot | telea | flat | restore, and `fillColor` (#rrggbb) for flat;
 - `underlay`: the visible patches the export draws, in paint order, as
   `{path, x, y, width, height, opacity}`. The repaint runs on the page they make.
 
@@ -107,9 +107,11 @@ def _load_underlay(entries: object) -> list[UnderlayPatch]:
 def _repaint(job_data: dict, page_id: str) -> dict:
     """Everything that can fail, returning the callback's asset fields."""
     image = _download_verified_source(job_data)
-    image = composite_underlay(image, _load_underlay(job_data.get("underlay")))
-    mark, x, y = _load_mark(page_id, job_data.get("manualMask"))
     method = str(job_data.get("method") or "auto").strip().lower()
+    # A restore puts the original back, so it starts from the bare source, not the drawn page.
+    if method != "restore":
+        image = composite_underlay(image, _load_underlay(job_data.get("underlay")))
+    mark, x, y = _load_mark(page_id, job_data.get("manualMask"))
     record_progress()
     # The same node-wide lock as OCR and cleanup: AOT on this host must not run twice at once.
     with acquire_lock("ocr", node_scoped=True):

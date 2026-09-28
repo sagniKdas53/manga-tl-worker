@@ -85,6 +85,20 @@ def test_auto_repaints_a_flat_area_with_telea_and_the_speck_is_gone():
     assert patch_image[..., :3][patch_image[..., 3] > 0].min() > 150
 
 
+def test_restore_puts_the_source_back_exactly_where_marked_and_fills_no_holes():
+    page = np.zeros((40, 40, 3), dtype=np.uint8)
+    page[:, :, 2] = np.arange(40, dtype=np.uint8)[None, :] * 5  # a gradient no repaint would reproduce
+    mark = np.zeros((10, 10), dtype=bool)
+    mark[1:9, 1:9] = True
+    mark[4:6, 4:6] = False  # a hole the user left on purpose
+    result = reconstruct_manual(page, mark, 10, 10, mode="restore")
+    assert result.bounds == {"x": 11, "y": 11, "width": 8, "height": 8}
+    patch_image = _decode(result.patch_png)
+    assert patch_image[3, 3, 3] == 0, "the hole stays unpainted"
+    assert tuple(patch_image[0, 0]) == (0, 0, 55, 255), "the source pixel at page (11, 11)"
+    assert result.diagnostics[0] == "manual repaint: restore (mode=restore)"
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
@@ -168,6 +182,36 @@ def test_the_job_repaints_on_the_underlay_and_calls_back_complete():
         3,
         "lease-1",
     )
+
+
+def test_a_restore_job_reads_the_source_not_the_underlay():
+    source = _png(np.full((20, 20, 3), 200, dtype=np.uint8))
+    mask = np.zeros((3, 4, 4), dtype=np.uint8)
+    mask[..., 3] = 255
+    mask_png = _png(mask)
+    mask_sha = hashlib.sha256(mask_png).hexdigest()
+    store = {f"scene-assets/page-1/{mask_sha}.png": mask_png}
+    job = _job(
+        source,
+        mask_sha,
+        method="restore",
+        fillColor=None,
+        underlay=[{"path": "scene-assets/page-1/under.png", "x": 0, "y": 0, "width": 20, "height": 20}],
+    )
+    with (
+        patch("worker.handlers.cleanup.requests.get", return_value=MagicMock(content=source, status_code=200)),
+        patch("worker.handlers.manual_cleanup.requests.post") as post,
+        patch("worker.handlers.manual_cleanup.minio_client") as reads,
+        patch("worker.handlers.cleanup.minio_client") as writes,
+        patch("worker.handlers.manual_cleanup.acquire_lock"),
+    ):
+        reads.get_object.side_effect = _objects(store)  # the underlay path is absent: reading it would fail
+        process_manual_cleanup(job)
+
+    payload = post.call_args.kwargs["json"]
+    assert payload["status"] == "complete", payload.get("diagnostics")
+    patch_png = writes.put_object.call_args_list[1].args[2].getvalue()  # mask first, then patch
+    assert tuple(_decode(patch_png)[1, 1]) == (200, 200, 200, 255), "source pixels, not a repaint"
 
 
 def test_a_mask_that_does_not_match_its_digest_calls_back_failed():
