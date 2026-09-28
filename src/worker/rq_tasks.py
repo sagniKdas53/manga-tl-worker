@@ -40,6 +40,7 @@ def check_stale_job(queue_name, job_data):
         "queue:panel-detection",
         "queue:ocr",
         "queue:cleanup",
+        "queue:manual-cleanup",
         "queue:layout",
         "queue:translation",
         "queue:render",
@@ -250,6 +251,18 @@ def process_job_rq(queue_name, job_data):
             # a transport-successful callback is not permission to overwrite that decision.
             logger.info(
                 "[RQ Worker] Job %s (cleanup) callback accepted in %.1fs; backend owns its outcome",
+                job_id,
+                time.perf_counter() - started,
+            )
+            return
+        elif queue_name == "queue:manual-cleanup":
+            from worker.handlers.manual_cleanup import process_manual_cleanup
+
+            process_manual_cleanup(job_data)
+            # Like cleanup: the accepted callback commits the job's terminal state, including a
+            # FAILED one for a repaint that could not be done.
+            logger.info(
+                "[RQ Worker] Job %s (manual-cleanup) callback accepted in %.1fs; backend owns its outcome",
                 job_id,
                 time.perf_counter() - started,
             )

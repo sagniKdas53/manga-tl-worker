@@ -212,6 +212,7 @@ async def capabilities():
             "queue:panel-detection",
             "queue:ocr",
             "queue:cleanup",
+            "queue:manual-cleanup",
             "queue:layout",
             "queue:translation",
             "queue:render",

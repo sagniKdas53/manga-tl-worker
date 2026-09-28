@@ -93,6 +93,7 @@ ALLOW_UNAUTHENTICATED_API = os.environ.get("ALLOW_UNAUTHENTICATED_WORKER_API", "
 
 HEAVY_QUEUES = {
     "queue:cleanup",
+    "queue:manual-cleanup",
     "queue:panel-detection",
     "queue:ocr",
     "queue:qa-re-ocr",
