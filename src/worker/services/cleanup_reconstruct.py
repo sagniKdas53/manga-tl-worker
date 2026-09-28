@@ -25,7 +25,8 @@ from worker.services.pixel_stats import pixel_spread
 
 logger = logging.getLogger(__name__)
 
-GENERATOR_ID = "ctd-seg+telea-aotgan-cleanup/v2-single-ctd"
+# v3: the mask also takes the leftover ink CTD half-missed next to it (`CleanupConfig.ink_grow`).
+GENERATOR_ID = "ctd-seg+telea-aotgan-cleanup/v3-leftover-ink"
 GENERATOR_SHA256 = hashlib.sha256(GENERATOR_ID.encode()).hexdigest()
 
 # How the background under erased lettering is rebuilt (System Settings → cleanup mode, per
@@ -72,6 +73,22 @@ class CleanupConfig:
     # validation (median 6.1%, 9/21 over 10%, 4/21 over 27%). No longer read on the runtime path.
     residual_ink_max_pct: float = 15.0
     aot_max_side: int = 1024
+    # Leftover-ink growth (2026-09-28, page-19 experiment): lettering CTD half-misses -- stroke
+    # ends, the white outline around glyphs, a long dash -- sits just outside the mask, and AOT
+    # grows it inward into black or white blobs. On a flat background (a ring 3-12px around the
+    # mask, >=80% within 20 of its median colour) every shape inside the region box that differs
+    # from that colour by more than 60, in either direction, and reaches within 16px of the mask
+    # joins the mask whole before the one paint. Shapes touching the region box's edge (the bubble
+    # outline) or larger than 5% of the box are left alone. A darker-only test was tried and made
+    # white blobs from the outlines; a second CTD pass saw none of this.
+    ink_grow: bool = True
+    ink_ring_px: tuple[int, int] = (3, 12)
+    ink_ring_tolerance: int = 20
+    ink_ring_flat_share: float = 0.80
+    ink_contrast: int = 60
+    ink_reach_px: int = 16
+    ink_max_box_share: float = 0.05
+    ink_min_px: int = 30
 
 
 @dataclass(frozen=True)
@@ -169,6 +186,64 @@ def _dilate(mask_bool: np.ndarray, px: int) -> np.ndarray:
         return mask_bool
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * px + 1, 2 * px + 1))
     return cv2.dilate(mask_bool.astype(np.uint8), kernel).astype(bool)
+
+
+def _flat_ring_colour(crop_bgr: np.ndarray, mask_bool: np.ndarray, config: CleanupConfig) -> np.ndarray | None:
+    """The one colour of the untouched ring around the mask, or None when the ring is not flat."""
+    inner, outer = config.ink_ring_px
+    ring = _dilate(mask_bool, outer) & ~_dilate(mask_bool, inner)
+    pixels = crop_bgr[ring].astype(np.int16)
+    if len(pixels) < 50:
+        return None
+    median = np.median(pixels, axis=0)
+    near = np.abs(pixels - median).max(axis=1) <= config.ink_ring_tolerance
+    if float(near.mean()) < config.ink_ring_flat_share:
+        return None
+    return np.median(pixels[near], axis=0).astype(np.int16)
+
+
+def _grow_by_leftover_ink(
+    crop_bgr: np.ndarray,
+    mask_bool: np.ndarray,
+    crop_x0: int,
+    crop_y0: int,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    config: CleanupConfig,
+) -> tuple[np.ndarray, int]:
+    """Add the lettering CTD left just outside the mask; see `CleanupConfig.ink_grow`.
+
+    Returns the (possibly) grown mask and how many leftover-ink pixels joined it.
+    """
+    background = _flat_ring_colour(crop_bgr, mask_bool, config)
+    if background is None:
+        return mask_bool, 0
+    crop_h, crop_w = mask_bool.shape
+    bx0, by0 = max(0, int(x) - crop_x0), max(0, int(y) - crop_y0)
+    bx1, by1 = min(crop_w, int(x + width) - crop_x0), min(crop_h, int(y + height) - crop_y0)
+    if bx1 <= bx0 or by1 <= by0:
+        return mask_bool, 0
+    box = np.zeros_like(mask_bool)
+    box[by0:by1, bx0:bx1] = True
+    contrast = np.abs(crop_bgr.astype(np.int16) - background).max(axis=2) > config.ink_contrast
+    candidates = box & ~mask_bool & contrast
+    reach = _dilate(mask_bool, config.ink_reach_px)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(candidates.astype(np.uint8), connectivity=8)
+    max_area = config.ink_max_box_share * (bx1 - bx0) * (by1 - by0)
+    keep = np.zeros(count, dtype=bool)
+    for label in np.unique(labels[candidates & reach]):
+        if label == 0:
+            continue
+        sx, sy, sw, sh, area = stats[label]
+        on_box_edge = sx <= bx0 or sy <= by0 or sx + sw >= bx1 or sy + sh >= by1
+        keep[label] = not on_box_edge and area <= max_area
+    ink = keep[labels]
+    ink_px = int(ink.sum())
+    if ink_px < config.ink_min_px:
+        return mask_bool, 0
+    return mask_bool | _dilate(ink, config.mask_dilate_px), ink_px
 
 
 def _reconstruct_telea(crop_bgr: np.ndarray, mask_bool: np.ndarray) -> np.ndarray:
@@ -321,9 +396,14 @@ def reconstruct_region(
         )
 
     dilated_mask = _dilate(gated_mask, config.mask_dilate_px)
+    diagnostics: list[str] = []
+    ink_px = 0
+    if config.ink_grow:
+        dilated_mask, ink_px = _grow_by_leftover_ink(crop, dilated_mask, crop_x0, crop_y0, x, y, width, height, config)
+        if ink_px:
+            diagnostics.append(f"leftover ink added to the mask: {ink_px}px")
     coverage_pct = 100.0 * float(dilated_mask.mean())
 
-    diagnostics: list[str] = []
     interior = crop[dilated_mask]
     spread = pixel_spread(interior) if len(interior) else 0.0
     t = time.perf_counter()
@@ -341,7 +421,7 @@ def reconstruct_region(
     inpaint_s = time.perf_counter() - t
     diagnostics.append(f"reconstruction method: {method} (mode={mode}, pixel_spread={spread:.1f})")
 
-    steps = f"ctd={ctd_s:.1f}s mask={coverage_pct:.1f}% {method}={inpaint_s:.1f}s"
+    steps = f"ctd={ctd_s:.1f}s mask={coverage_pct:.1f}% ink+={ink_px}px {method}={inpaint_s:.1f}s"
 
     t = time.perf_counter()
     result = CleanupResult(
