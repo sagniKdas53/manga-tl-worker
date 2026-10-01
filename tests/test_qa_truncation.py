@@ -204,10 +204,13 @@ def test_vlm_refuses_to_judge_bytes_that_are_not_the_bound_artifact(mock_minio):
     from worker.handlers.qa import _read_render_artifact
 
     job = bound_qa_job({"imageId": "img1"}, rendered=b"final")
-    mock_minio.get_object.return_value.read.return_value = b"initial"
+    response = mock_minio.get_object.return_value
+    response.read.return_value = b"initial"
     with pytest.raises(ValueError):
         _read_render_artifact(job["renderArtifact"])
-    mock_minio.get_object.return_value.read.return_value = b"final"
+    assert (response.close.call_count, response.release_conn.call_count) == (1, 1), "released on a mismatch"
+    response.read.return_value = b"final"
     assert _read_render_artifact(job["renderArtifact"]) == b"final"
+    assert (response.close.call_count, response.release_conn.call_count) == (2, 2), "released on success"
     with pytest.raises(ValueError):
         _read_render_artifact(None)

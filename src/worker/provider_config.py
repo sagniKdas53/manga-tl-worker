@@ -146,15 +146,13 @@ class ProviderConfigLoader:
         touch the file's mtime, so an edit to providers.json still wins on the next
         ``reload_if_changed()`` — the refresh then rebases onto the edited file on its next run.
         """
-        self.raw_data = document
+        # Built off to the side and published with one assignment each: the catalog refresh runs
+        # this on a background thread while jobs read `providers` (resolve_key, QA's default
+        # model), and a map cleared then refilled in place let a job see a provider missing.
+        # A fresh map also drops providers deleted from the file.
+        providers: dict[str, ProviderConfig] = {}
 
-        # Reload has to drop providers that were deleted from the file, not just overwrite the ones
-        # that remain — the loop below only ever adds.
-        self.providers = {}
-        self.version = self.raw_data.get("version", 1)
-        self.defaults = self.raw_data.get("defaults", {})
-
-        providers_raw = self.raw_data.get("providers", {})
+        providers_raw = document.get("providers", {})
         for name, pdata in providers_raw.items():
             key_env_var = pdata.get("keyEnvVar")
             api_key = ""
@@ -220,7 +218,12 @@ class ProviderConfigLoader:
                 defaults=defaults_dict,
                 active=active,
             )
-            self.providers[name] = prov_config
+            providers[name] = prov_config
+
+        self.raw_data = document
+        self.version = document.get("version", 1)
+        self.defaults = document.get("defaults", {})
+        self.providers = providers
 
         logger.info(
             f"Successfully loaded providers.json v{self.version} ({len(self.providers)} providers, "

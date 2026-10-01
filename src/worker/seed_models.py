@@ -26,7 +26,7 @@ def _sha256(path: str) -> str:
             for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
                 digest.update(chunk)
     except OSError as exc:
-        raise SeedModelsError(f"cannot read YOLO model at {path}: {exc}") from exc
+        raise SeedModelsError(f"cannot read model file at {path}: {exc}") from exc
     return digest.hexdigest()
 
 
@@ -85,11 +85,17 @@ def _verify_aot() -> None:
         raise SeedModelsError("AOT ONNX Runtime session initialized to None")
 
 
+def verify_cleanup_models() -> None:
+    """CTD and AOT, which every automatic cleanup needs. Every worker serves heavy work (at least
+    one heavy slot), so a worker missing either would accept jobs and fail each cleanup."""
+    _verify_ctd()
+    _verify_aot()
+
+
 def seed_models(languages: Sequence[str], *, skip_local_ocr: bool = False) -> list[tuple[str, str]]:
     """Verify YOLO, CTD and AOT, and initialize one local OCR reader for each requested language."""
     _verify_yolo()
-    _verify_ctd()
-    _verify_aot()
+    verify_cleanup_models()
     if skip_local_ocr or _disabled(os.environ.get("DISABLE_LOCAL_OCR")):
         return []
 
@@ -131,7 +137,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--skip-local-ocr",
         action="store_true",
-        help="verify only the pinned YOLO model and skip local OCR model initialization",
+        help="verify the pinned YOLO, CTD and AOT models and skip local OCR model initialization",
     )
     return parser
 
@@ -144,7 +150,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"model seeding failed: {exc}")
         return 1
     if args.skip_local_ocr or _disabled(os.environ.get("DISABLE_LOCAL_OCR")):
-        print("model seeding succeeded: YOLO verified; local OCR skipped")
+        print("model seeding succeeded: YOLO, CTD and AOT verified; local OCR skipped")
     else:
         details = ", ".join(f"{language}={backend}" for language, backend in seeded)
         print(f"model seeding succeeded: {details}")

@@ -107,14 +107,15 @@ PROMPT_VERSION = "batch-v3"
 #
 # Narrower than scripts/quality/reference_compare.py's REFUSAL on purpose: that one counts
 # refusals after the fact, this one throws translations away, and manga dialogue is full of
-# "I can't..." and "Sorry...". What separates a refusal is the object: it cannot *help / assist /
-# translate / provide*, or it names the content or a policy. The three strings typeset onto
+# "I can't..." and "Sorry...". What separates a refusal is the object: it cannot *help with /
+# assist / translate / provide*, or it names the content or a policy. A bare "help" is not enough:
+# "I can't help it" and "I can't help but laugh" are how 仕方ない and its kin come out. The three strings typeset onto
 # sample222 in the g5 run were "[Explicit sexual content involving ... -- redacted.]".
 REFUSAL_PATTERN = re.compile(
     r"\[[^\]]*\bredacted\b[^\]]*\]"
     r"|^\s*\[?\s*(?:explicit|exploitative|graphic) (?:sexual |adult )?(?:content|material|advertisement)\b"
     r"|\b(?:i can(?:'|no)?t|i cannot|i(?:'m| am) (?:unable|not able) to)\s+"
-    r"(?:help|assist|translate|provide|produce|comply|fulfil|fulfill|generate|process)\b"
+    r"(?:help\s+(?:you\s+)?with|assist|translate|provide|produce|comply|fulfil|fulfill|generate|process)\b"
     r"|\bas an ai\b"
     r"|\b(?:content|usage|safety) polic(?:y|ies)\b"
     r"|\bviolates? (?:the |our |my )?(?:guidelines|terms)\b"
@@ -246,7 +247,10 @@ def should_typeset_region(region):
         # justify painting a new plate over artwork. OCR digits, Latin fragments, and mixed-script
         # guesses such as sample47's `大GG` are visual marks, not English dialogue to typeset.
         source_script = re.fullmatch(
-            r"[\s\u3040-\u30FF\u3400-\u9FFF\uF900-\uFAFF\uAC00-\uD7AF\uFF66-\uFF9F々〆ヶー！？?!…。、・「」『』（）]+",
+            # With the marks that end ordinary lines (ねえ～, はぁ…♡), and the `.` and `~` OCR
+            # often reads for … and ～.
+            r"[\s\u3040-\u30FF\u3400-\u9FFF\uF900-\uFAFF\uAC00-\uD7AF\uFF66-\uFF9F"
+            r"々〆ヶー―～〜~♡♥♪.！？?!…。、・「」『』（）]+",
             str(region.get("text", "")),
         )
         if not source_script:

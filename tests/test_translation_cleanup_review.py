@@ -50,3 +50,34 @@ def test_rejected_region_never_reaches_provider():
     assert [r["regionId"] for r in payload["translations"]] == ["valid"]
     assert [r["id"] for r in provider.call_args.args[0]] == ["valid"]
     assert payload["policy"]["skipped"] == [{"regionId": "gone", "policyAction": "review", "policyReason": "rejected"}]
+
+
+def test_an_unusable_ocr_target_is_listed_as_skipped_not_sent_as_its_own_translation():
+    """A region the quality filter drops is absent from the translations (the backend gives it a
+    hidden row); it used to come back with its Japanese as the "translation"."""
+    regions = [
+        {"id": "tiny", "text": "あ", "detectedLanguage": "ja", "confidence": 0.99},
+        {"id": "valid", "text": "文字", "detectedLanguage": "ja", "confidence": 0.99},
+    ]
+    with patch("worker.handlers.translation.should_translate_region", side_effect=lambda r: r["id"] != "tiny"):
+        response = MagicMock(status_code=200)
+        response.json.return_value = {"ocrRegions": regions, "conversations": []}
+        with (
+            patch("worker.handlers.translation.requests.get", return_value=response),
+            patch("worker.handlers.translation.requests.post") as post,
+            patch("worker.handlers.translation.chunk_regions_by_conversation", side_effect=lambda rs, *_: [rs]),
+            patch("worker.handlers.translation.translate_batch_llm", return_value={}) as provider,
+            patch(
+                "worker.handlers.translation.parse_and_validate_batch",
+                side_effect=lambda _raw, batch, *_a, **_k: {r["id"]: {"translatedText": "Text"} for r in batch},
+            ),
+            patch("worker.handlers.translation.is_valid_translation", return_value=True),
+        ):
+            process_translation({"imageId": "image", "pageId": "page"})
+    payload = post.call_args.kwargs["json"]
+
+    assert [r["regionId"] for r in payload["translations"]] == ["valid"]
+    assert [r["id"] for r in provider.call_args.args[0]] == ["valid"]
+    assert payload["policy"]["skipped"] == [
+        {"regionId": "tiny", "policyAction": "review", "policyReason": "quality-filter"}
+    ]

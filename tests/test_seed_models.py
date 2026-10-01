@@ -43,6 +43,7 @@ def test_languages_route_to_rapidocr(monkeypatch, tmp_path):
 
 def test_none_reader_fails(monkeypatch, tmp_path):
     _fake_yolo(monkeypatch, tmp_path)
+    monkeypatch.setattr(seed_models, "_disabled", lambda value: False)
     monkeypatch.setattr("worker.model_manager.get_local_ocr_backend", lambda: "paddle")
 
     class Manager:
@@ -96,3 +97,18 @@ def test_help_is_available_without_ml_imports():
     )
     assert result.returncode == 0
     assert "--skip-local-ocr" in result.stdout
+
+
+def test_server_startup_refuses_a_worker_without_its_cleanup_models(monkeypatch):
+    """`python app.py` seeds through app.seed_models, not this CLI; it must check CTD and AOT too,
+    or a worker missing them turns healthy and fails every cleanup."""
+    import app
+
+    monkeypatch.setattr("worker.services.bubble_detector.get_ort_session", lambda: object())
+
+    def missing():
+        raise seed_models.SeedModelsError("CTD glyph-mask model is missing at /opt/models/ctd_seg_dyn.onnx")
+
+    monkeypatch.setattr(seed_models, "_verify_ctd", missing)
+    with pytest.raises(seed_models.SeedModelsError, match="CTD glyph-mask model is missing"):
+        app.seed_models()

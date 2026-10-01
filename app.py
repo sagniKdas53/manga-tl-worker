@@ -22,6 +22,18 @@ def seed_models():
         logger.error(f"[Worker] Critical Error: YOLO model verification failed: {e}")
         raise e
 
+    # The server starts here, not through `python -m worker.seed_models`, so the cleanup models
+    # are checked here too: without them the worker turned healthy and failed every cleanup.
+    from worker.seed_models import verify_cleanup_models
+
+    try:
+        logger.info("[Worker] Verifying CTD glyph-mask and AOT inpainting models...")
+        verify_cleanup_models()
+        logger.info("[Worker] CTD and AOT models verified successfully.")
+    except Exception as e:
+        logger.error(f"[Worker] Critical Error: cleanup model verification failed: {e}")
+        raise e
+
     disable_local_ocr = os.environ.get("DISABLE_LOCAL_OCR", "").strip().lower() in ("true", "1", "yes")
     if not disable_local_ocr:
         try:

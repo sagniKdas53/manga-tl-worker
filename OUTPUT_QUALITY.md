@@ -14,6 +14,6 @@ PYTHONPATH=src ../.venv/bin/python -m worker.seed_models --help
 python -m worker.seed_models --languages ja ko zh
 ```
 
-Set `YOLO_MODEL_PATH` explicitly for host use. Its file must match `YOLO_PINNED_CHECKSUM`; the CLI rejects missing/mismatched files before initializing ONNX Runtime. OCR readers use the existing catalog/language routing and may download weights when caches are empty. A `None` reader fails the command. `--skip-local-ocr` or `DISABLE_LOCAL_OCR=true` verifies only YOLO. The parent `scripts/dev_setup.py` prepares the dev Compose mounts and private credentials; see its `docs/dev-box-setup.md`.
+Set `YOLO_MODEL_PATH`, `CTD_MODEL_PATH` and `AOT_MODEL_PATH` explicitly for host use. Each file must match its pinned checksum (`YOLO_PINNED_CHECKSUM`, `CTD_PINNED_CHECKSUM`, `AOT_PINNED_CHECKSUM`); the CLI rejects a missing or mismatched file before initializing ONNX Runtime. OCR readers use the existing catalog/language routing and may download weights when caches are empty. A `None` reader fails the command. `--skip-local-ocr` or `DISABLE_LOCAL_OCR=true` still verifies YOLO, CTD and AOT, and skips only the OCR readers. The parent `scripts/dev_setup.py` prepares the dev Compose mounts and private credentials; see its `docs/dev-box-setup.md`.
 
 No OCR/grouping/render quality algorithm was changed as part of this setup work. Cache warmup is not evidence that the output-quality gates pass.

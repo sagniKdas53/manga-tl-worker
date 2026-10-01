@@ -152,11 +152,13 @@ def test_the_job_repaints_on_the_underlay_and_calls_back_complete():
     mask_sha = hashlib.sha256(mask_png).hexdigest()
     underlay = np.zeros((1, 1, 4), dtype=np.uint8)
     underlay[...] = (0, 0, 0, 255)
-    store = {f"scene-assets/page-1/{mask_sha}.png": mask_png, "scene-assets/page-1/under.png": _png(underlay)}
+    underlay_png = _png(underlay)
+    under_path = f"scene-assets/page-1/{hashlib.sha256(underlay_png).hexdigest()}.png"
+    store = {f"scene-assets/page-1/{mask_sha}.png": mask_png, under_path: underlay_png}
     job = _job(
         source,
         mask_sha,
-        underlay=[{"path": "scene-assets/page-1/under.png", "x": 0, "y": 0, "width": 20, "height": 20}],
+        underlay=[{"path": under_path, "x": 0, "y": 0, "width": 20, "height": 20}],
     )
     with (
         patch("worker.handlers.cleanup.requests.get", return_value=MagicMock(content=source, status_code=200)),
@@ -227,6 +229,30 @@ def test_a_mask_that_does_not_match_its_digest_calls_back_failed():
     payload = post.call_args.kwargs["json"]
     assert payload["status"] == "failed"
     assert "does not match its sha256" in payload["diagnostics"][0]
+
+
+@pytest.mark.parametrize(
+    ("mask_sha", "underlay_path", "message"),
+    [
+        (f"../page-2/{'a' * 64}", None, "manual mask sha256 is not a sha256 hex digest"),
+        ("a" * 64, f"scene-assets/page-2/{'b' * 64}.png", "is not one of this page's patches"),
+        ("a" * 64, "scene-assets/page-1/../page-2/x.png", "is not one of this page's patches"),
+    ],
+)
+def test_a_job_naming_an_object_outside_its_page_reads_nothing_and_calls_back_failed(mask_sha, underlay_path, message):
+    source = _png(np.full((20, 20, 3), 200, dtype=np.uint8))
+    underlay = None if underlay_path is None else [{"path": underlay_path, "x": 0, "y": 0, "width": 1, "height": 1}]
+    with (
+        patch("worker.handlers.cleanup.requests.get", return_value=MagicMock(content=source, status_code=200)),
+        patch("worker.handlers.manual_cleanup.requests.post") as post,
+        patch("worker.handlers.manual_cleanup.minio_client") as reads,
+    ):
+        process_manual_cleanup(_job(source, mask_sha, method="auto", fillColor=None, underlay=underlay))
+
+    reads.get_object.assert_not_called()
+    payload = post.call_args.kwargs["json"]
+    assert payload["status"] == "failed"
+    assert message in payload["diagnostics"][0]
 
 
 def test_an_accepted_manual_cleanup_callback_leaves_the_terminal_state_to_the_backend():

@@ -294,7 +294,12 @@ def _read_render_artifact(artifact):
     """Read and verify exactly the immutable PNG a VLM is about to judge."""
     artifact = _artifact_fields(artifact)
     response = minio_client.get_object("manga-library", artifact["storagePath"])
-    rendered_bytes = response.read()
+    try:
+        rendered_bytes = response.read()
+    finally:
+        # Back to the pool on every path: one leaked connection per QA job starves MinIO's pool.
+        response.close()
+        response.release_conn()
     if len(rendered_bytes) != artifact["byteLength"]:
         raise ValueError("QA render artifact byte length mismatch")
     if hashlib.sha256(rendered_bytes).hexdigest() != artifact["sha256"]:
@@ -792,61 +797,13 @@ You MUST return a JSON object containing a "results" key with an array of object
         raise
 
     # The VLM sees the complete page and every successful translation-layer element. It decides
-    # which candidate SFX/gibberish must be hidden after visual inspection.
-    regions_metadata_vlm = []
-    for r in qa_regions:
-        regions_metadata_vlm.append(
-            {
-                "regionId": r["id"],
-                "ocrText": r["text"],
-                "ocrScore": r.get("ocrScore") or r.get("confidence") or 1.0,
-                "translatedText": r.get("translatedText") or "",
-                "translationScore": r.get("translationScore") or 1.0,
-                "x": r["bboxX"],
-                "y": r["bboxY"],
-                "w": r["bboxW"],
-                "h": r["bboxH"],
-                "readingOrder": r.get("bubbleReadingOrder") or 0,
-            }
-        )
-
-    prompt_vlm = f"""You are an expert Japanese-to-English manga translator and typesetting reviewer. Given the original Japanese manga page (left) and the English typeset page (right), verify: (1) OCR accuracy by comparing visible Japanese text against transcription, (2) Translation quality and natural English, (3) Typesetting quality — text fitting, overflow, readability.
-
-We have seeded each text region with its OCR confidence (ocrScore) and translation confidence (translationScore). Keep these previous scores in mind when evaluating the overall results.
-
-For each region in the provided metadata, evaluate and check if:
-1. Text overflows the speech bubble/mask boundaries.
-2. Text overlaps with panel borders or other text.
-3. Translation flow is awkward, or the English translation does not match the original Japanese text.
-4. The OCR transcription was bad/inaccurate:
-   - If you can deduce the correct text from the image, flag with ocrBad=true and provide correctedSourceText.
-   - If the OCR text is garbage and you CANNOT deduce it or read it, flag needsReOcr=true.
-   - If the region is completely unfixable or obscured, flag needsManualIntervention=true.
-5. The reading order/bubble sequence is incorrect (flag with orderBad=true and provide suggestedReadingOrderIndex).
-
-Status categories:
-- "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed.
-- "direct_fix": If you have a better translation, output it directly. You must supply "directFix" object with correctedText or suggestedFontSize. You MUST also provide detailed reasoning in "qaFeedback".
-- "reject_sfx": If the region is a sound effect (SFX) or gibberish that shouldn't be translated, set this status (downstream will hide the element).
-- "failed": Major translation error or layout issue requiring a translation/typesetting re-run. Specify "qaFeedback" with detailed correction notes. Your output must be strictly better. Do not send back the exact same text if flagging an error.
-
-IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
-
-IMPORTANT: Every result MUST include both a "directFix" object and an "escalation" object. They are
-never omitted. When a field does not apply, send its empty value rather than leaving it out —
-empty string for text fields, false for flags, 0 for numbers.
-  - "directFix" always carries: correctedText, suggestedFontSize
-  - "escalation" always carries: ocrBad, correctedSourceText, needsReOcr, needsManualIntervention,
-    orderBad, suggestedReadingOrderIndex
-The ocrBad / needsReOcr / needsManualIntervention / orderBad flags described above live inside
-"escalation". Describing a problem only in "qaFeedback" prose has no effect — the flags are what
-route the fix. In particular, if the OCR text is unreadable, set escalation.needsReOcr to true;
-asking for a re-OCR in prose alone will instead re-run the translation over the same bad text.
-
-Region Metadata:
-{json.dumps(regions_metadata_vlm, ensure_ascii=False, indent=2)}
-
-You MUST return a JSON object containing a "results" key with an array of objects conforming to the requested schema. No other text."""
+    # which candidate SFX/gibberish must be hidden after visual inspection, and -- as in VLM mode --
+    # what each uncertain region (`cleanup_review`: cleanup found no glyphs) really is. Without
+    # those verdicts the backend keeps such a region's text hidden for good.
+    uncertain_regions = [r for r in ocr_regions if r.get("qaStatus") == "cleanup_review"]
+    uuid_by_label = _region_labels(ocr_regions)
+    label_by_uuid = {uuid: label for label, uuid in uuid_by_label.items()}
+    prompt_vlm = _vlm_qa_prompt(qa_regions, uncertain_regions, label_by_uuid)
 
     vlm_api_key = QA_CONFIG.resolve_key(provider)
     routing_strategy = job_data.get("routingStrategy") or "lowest-cost"
@@ -855,7 +812,9 @@ You MUST return a JSON object containing a "results" key with an array of object
     def attempt_vlm(prov, model_override=None):
         user_model = model_override or job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
         # AUDIT-Q3: see attempt_llm — same phantom cache key, same hardcoded (hit=False).
-        return _qa_cloud_vlm(prov, vlm_api_key, user_model, prompt_vlm, combined_base64, routing_strategy)
+        return _qa_cloud_vlm(
+            prov, vlm_api_key, user_model, prompt_vlm, combined_base64, routing_strategy, QA_VLM_JSON_SCHEMA
+        )
 
     if provider:
         user_model = job_data.get("qaVlmModel") or QA_CONFIG.vlm_model
@@ -876,25 +835,22 @@ You MUST return a JSON object containing a "results" key with an array of object
 
     if not qa_response_vlm and local_vlm_model and (is_explicit_local or not disable_local):
         try:
-            qa_response_vlm = try_local_vlm_vision(local_vlm_model, prompt_vlm, combined_base64, QA_JSON_SCHEMA)
+            qa_response_vlm = try_local_vlm_vision(local_vlm_model, prompt_vlm, combined_base64, QA_VLM_JSON_SCHEMA)
         except Exception as e:
             logger.error(f"[QA] VLM QA via Local VLM failed: {e}")
 
     results_vlm = []
-    if qa_response_vlm:
-        try:
-            cleaned = qa_response_vlm.strip()
-            if cleaned.startswith("```"):
-                lines = cleaned.splitlines()
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                cleaned = "\n".join(lines).strip()
-            parsed = json.loads(cleaned)
-            results_vlm = parsed.get("results") or []
-        except Exception as e:
-            logger.error(f"[QA] Failed to parse VLM response: {e}. Raw response: {log_payload(qa_response_vlm)}")
+    uncertain_checks = []
+    parsed_vlm = _parse_qa_response(qa_response_vlm)
+    if parsed_vlm is not None:
+        raw_results, raw_checks = parsed_vlm
+        results_vlm = _normalize_qa_items(raw_results, uuid_by_label)
+        uncertain_ids = {str(r["id"]) for r in uncertain_regions}
+        uncertain_checks = [
+            check
+            for check in _unique_by_region(_normalize_qa_items(raw_checks, uuid_by_label))
+            if check.get("regionId") in uncertain_ids and check.get("kind") in UNCERTAIN_KINDS
+        ]
 
     accounting = _qa_accounting(job_data, results_vlm, qa_regions, render_result=render_result)
     results_vlm = _sanitize_qa_results(results_vlm, qa_regions, label="VLM")
@@ -911,6 +867,7 @@ You MUST return a JSON object containing a "results" key with an array of object
         "imageId": image_id,
         "pageId": job_data.get("pageId"),
         "qaResults": results_vlm,
+        "uncertainChecks": uncertain_checks,
         **accounting,
     }
     from worker.utils.rate_limit import build_cost_payload, format_cost, get_job_costs

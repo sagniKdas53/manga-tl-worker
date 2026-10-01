@@ -80,9 +80,10 @@ def process_translation(job_data):
     # established OCR → translation → visual-QA pipeline: ordinary unreviewed dialogue and
     # candidate SFX must reach QA so QA can reject/hide only the elements it identifies.
     #
-    # Explicit source-preserving user choices remain authoritative.  They alone are omitted
-    # from provider work and the callback because the legacy backend would otherwise create a
-    # visible layer element for pixels the user chose to preserve/explain.
+    # Explicit source-preserving user choices remain authoritative: they are omitted from provider
+    # work and the callback because the legacy backend would otherwise create a visible layer
+    # element for pixels the user chose to preserve/explain. Rejected regions and unusable OCR
+    # targets are omitted the same way; all three are listed under `policy.skipped`.
     resolved_translations = {}
     unmatched_regions = []
     policy_skipped = {}
@@ -106,9 +107,11 @@ def process_translation(job_data):
         if policy.user_override in {"preserve", "explain"}:
             policy_skipped[r["id"]] = policy
         elif not should_translate_region(r):
-            # This quality filter is distinct from policy: it retains the source text and avoids
-            # provider work for an unusable OCR target.
-            resolved_translations[r["id"]] = {"translatedText": r["text"]}
+            # An unusable OCR target (too small, unreadable): no provider work, and absent from the
+            # translations. The backend gives every region missing from the callback a hidden,
+            # textless row (coordinator.rs `add_untranslated_region_rows`); sending the source text
+            # back as its "translation", as this once did, drew Japanese over the Japanese.
+            cleanup_skipped.append({"regionId": r["id"], "policyAction": "review", "policyReason": "quality-filter"})
         else:
             unmatched_regions.append(r)
 
@@ -120,7 +123,7 @@ def process_translation(job_data):
             )
         )
     if cleanup_skipped:
-        logger.info("%sSkipping %d rejected region(s)", req_prefix, len(cleanup_skipped))
+        logger.info("%sSkipping %d rejected or unusable region(s)", req_prefix, len(cleanup_skipped))
 
     translation_chunk_count = 0
 
@@ -342,9 +345,10 @@ def process_translation(job_data):
     resolved_model = last_call.get("model") or job_data.get("tlModel") or TL_CONFIG.llm_model
     model_identifier = f"{resolved_provider}/{resolved_model}"
 
-    # Only explicitly source-preserving regions are absent from the legacy callback. Unreviewed
-    # candidates deliberately remain: the coordinator creates their layer elements, then visual
-    # QA can reject SFX/gibberish and re-render the page without them.
+    # Only translation targets are in the callback. Source-preserved, rejected and quality-filtered
+    # regions are listed under `policy.skipped` instead. Unreviewed candidates deliberately remain:
+    # the coordinator creates their layer elements, then visual QA can reject SFX/gibberish and
+    # re-render the page without them.
     translations = []
     for r in unmatched_regions:
         rid = r["id"]

@@ -14,6 +14,7 @@ cleanup, so a failure shows up as a failed job instead of a silent no-op.
 
 import hashlib
 import logging
+import re
 
 import cv2
 import numpy as np
@@ -31,6 +32,8 @@ from worker.services.manual_cleanup import (
 from worker.utils.lock import acquire_lock
 
 logger = logging.getLogger(__name__)
+
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 
 BUCKET = "manga-library"
 
@@ -57,12 +60,23 @@ def _number(value: object, what: str) -> float:
     return float(value)
 
 
+def _page_asset_key(page_id: str, sha: object, what: str) -> str:
+    """`scene-assets/{page_id}/{sha}.png`, refusing any sha that is not a lowercase hex digest.
+
+    The job names objects by digest; anything else (`../other-page/...`) would reach outside this
+    page's prefix, and the digest check after the read would not stop it.
+    """
+    if not isinstance(sha, str) or not _SHA256.fullmatch(sha):
+        raise ValueError(f"{what} is not a sha256 hex digest")
+    return f"scene-assets/{page_id}/{sha}.png"
+
+
 def _load_mark(page_id: str, spec: object) -> tuple[np.ndarray, int, int]:
     """The marked area as a boolean array, and where it sits on the page."""
     if not isinstance(spec, dict) or not isinstance(spec.get("sha256"), str):
         raise ValueError("manual cleanup job is missing manualMask")
     sha = spec["sha256"]
-    payload = _read_object(f"scene-assets/{page_id}/{sha}.png")
+    payload = _read_object(_page_asset_key(page_id, sha, "manual mask sha256"))
     if hashlib.sha256(payload).hexdigest() != sha:
         raise ValueError("manual mask does not match its sha256")
     image = _decode_png(payload, "manual mask")
@@ -78,7 +92,7 @@ def _load_mark(page_id: str, spec: object) -> tuple[np.ndarray, int, int]:
     return marked, int(_number(spec.get("x"), "mask x")), int(_number(spec.get("y"), "mask y"))
 
 
-def _load_underlay(entries: object) -> list[UnderlayPatch]:
+def _load_underlay(page_id: str, entries: object) -> list[UnderlayPatch]:
     if entries is None:
         return []
     if not isinstance(entries, list):
@@ -87,6 +101,12 @@ def _load_underlay(entries: object) -> list[UnderlayPatch]:
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
             raise ValueError("manual cleanup underlay entry has no path")
+        # The backend names each visible patch by its page-scoped path; a clone copies its
+        # source's patches under its own page id, so nothing legitimate lies outside it.
+        prefix, path = f"scene-assets/{page_id}/", entry["path"]
+        digest = path.removeprefix(prefix).removesuffix(".png") if path.startswith(prefix) else ""
+        if not _SHA256.fullmatch(digest) or path != f"{prefix}{digest}.png":
+            raise ValueError(f"underlay path {path!r} is not one of this page's patches")
         image = _decode_png(_read_object(entry["path"]), f"underlay patch {entry['path']}")
         if image.ndim != 3 or image.shape[2] != 4:
             raise ValueError(f"underlay patch {entry['path']} has no alpha channel")
@@ -110,7 +130,7 @@ def _repaint(job_data: dict, page_id: str) -> dict:
     method = str(job_data.get("method") or "auto").strip().lower()
     # A restore puts the original back, so it starts from the bare source, not the drawn page.
     if method != "restore":
-        image = composite_underlay(image, _load_underlay(job_data.get("underlay")))
+        image = composite_underlay(image, _load_underlay(page_id, job_data.get("underlay")))
     mark, x, y = _load_mark(page_id, job_data.get("manualMask"))
     record_progress()
     # The same node-wide lock as OCR and cleanup: AOT on this host must not run twice at once.

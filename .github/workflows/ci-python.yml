@@ -82,8 +82,12 @@ jobs:
       # worker finds them at ../contracts; this standalone checkout has no parent, so fetch just
       # that directory from the manga-tl branch of the same name, or main once it has merged.
       - name: Fetch the page-scene contract from manga-tl
+        # Through the environment, not a template: a branch name is the PR author's to choose, and
+        # a template expansion would paste it into the script before bash parses it.
+        env:
+          CONTRACT_REF: ${{ github.head_ref || github.ref_name }}
         run: |
-          ref="${{ github.head_ref || github.ref_name }}"
+          ref="$CONTRACT_REF"
           clone() {
             git clone --quiet --depth 1 --filter=blob:none --sparse "$@" \
               https://github.com/sagniKdas53/manga-tl.git "$RUNNER_TEMP/manga-tl"

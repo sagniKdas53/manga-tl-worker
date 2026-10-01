@@ -94,6 +94,9 @@ def test_unenclosed_non_source_script_marks_are_not_typeset():
     assert not should_typeset_region({"text": "0", "bubbleId": "direct_text_1", "confidence": 0.95})
     assert not should_typeset_region({"text": "大GG", "bubbleId": "direct_text_2", "confidence": 0.65})
     assert should_typeset_region({"text": "もう家に帰して！", "bubbleId": "direct_text_3", "confidence": 0.95})
+    # Ordinary line endings are source script too.
+    for line in ["ねえ～", "はぁ…♡", "ふふ♪", "まって〜", "あの―", "ええ...", "やだ~"]:
+        assert should_typeset_region({"text": line, "bubbleId": "direct_text_4", "confidence": 0.95}), line
 
 
 def test_both_halves_are_required_before_dropping_a_region():
@@ -154,5 +157,8 @@ def test_a_refusal_is_not_a_valid_translation():
         "No way, I'm not doing that.",
         "I won't do this anymore!",
         "I can't continue like this...",
+        "I can't help it.",
+        "I can't help but laugh.",
+        "I can't help myself around you!",
     ]:
         assert is_valid_translation("ごめん、今日は行けない", line), line

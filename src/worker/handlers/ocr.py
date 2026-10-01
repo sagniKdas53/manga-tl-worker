@@ -105,12 +105,24 @@ def grouping_config(reading_direction, threshold_ratio=None):
     )
 
 
+# What OCR itself says about a fragment. Its fragment id hashes exactly these, so the id must not
+# move when the pipeline later annotates the dict (`_capture_index`, `fragmentId`, `bubble_idx`...):
+# an id that changed with OCR_CAPTURE_DIR set could not link a capture to the persisted records.
+_FRAGMENT_SOURCE_KEYS = ("text", "detectedLanguage", "confidence", "x", "y", "width", "height", "sourceQuad")
+
+
+def _source_fields(fragment):
+    return {key: fragment[key] for key in _FRAGMENT_SOURCE_KEYS if key in fragment}
+
+
 def partition_unmatched_fragments_by_panel(fragments, panels):
     """Return unmatched fragments in their smallest containing source panel.
 
     Direct-text proximity is meaningful only inside one visual container. Choosing the
-    smallest containing panel keeps nested UI cards distinct from their enclosing game screen;
-    no matching panel is deliberately isolated from every other unmatched fragment.
+    smallest containing panel keeps nested UI cards distinct from their enclosing game screen.
+    Fragments inside no panel share one partition (key ``None``) and are grouped by proximity
+    among themselves, never with a fragment inside a panel: on a page with no detected panels,
+    a full-page illustration, that is every fragment, and its multi-line captions must still join.
     """
     partitions = defaultdict(list)
     for fragment in fragments:
@@ -134,8 +146,14 @@ def partition_unmatched_fragments_by_panel(fragments, panels):
     return partitions
 
 
-def attach_live_owner_decisions(regions, candidate_groups, detector_masks):
-    """Persist F01's decision with every member of each normal-runtime component."""
+def attach_live_owner_decisions(regions, candidate_groups, detector_masks, persist_groups=None):
+    """Persist F01's decision with every member of each normal-runtime component.
+
+    Every group is evaluated, but only the first ``persist_groups`` (all, by default) write their
+    decision into the members' provenance. The owner veto evaluates one component against the
+    rest as singletons; writing those singletons' decisions would overwrite what earlier
+    components recorded.
+    """
 
     raw_quads = [
         region.get("sourceQuad") or (region.get("ownershipProvenance") or {}).get("sourceQuad") for region in regions
@@ -149,7 +167,8 @@ def attach_live_owner_decisions(regions, candidate_groups, detector_masks):
         detector_masks=detector_masks,
         scale_transform={"ocr_to_source": {"scale_x": 1.0, "scale_y": 1.0}},
     )
-    for decision, component in zip(decisions, candidate_groups, strict=True):
+    persisted = candidate_groups if persist_groups is None else candidate_groups[:persist_groups]
+    for decision, component in zip(decisions[: len(persisted)], persisted, strict=True):
         decision_value = decision.to_dict()
         for index in component:
             provenance = regions[index].get("ownershipProvenance")
@@ -168,7 +187,7 @@ def owner_aware_grouping_context(base_context, detector_masks):
 
     def owner_veto(component, regions):
         candidate_groups = [component] + [[index] for index in range(len(regions)) if index not in component]
-        decision = attach_live_owner_decisions(regions, candidate_groups, detector_masks)[0].to_dict()
+        decision = attach_live_owner_decisions(regions, candidate_groups, detector_masks, persist_groups=1)[0].to_dict()
         return None if decision["state"] == "assigned" else decision["reason"]
 
     return GroupingContext(
@@ -929,7 +948,7 @@ def process_ocr(job_data):
                 recognition=[
                     {"text": fragment["text"], "confidence": fragment["confidence"]} for fragment in raw_fragments
                 ],
-                regions=raw_fragments,
+                regions=[_source_fields(fragment) for fragment in raw_fragments],
             )
             for fragment, feature in zip(raw_fragments, raw_features, strict=True):
                 fragment["fragmentId"] = feature["id"]
@@ -1725,10 +1744,7 @@ def process_ocr(job_data):
         if capture_dir:
             try:
                 capture_regions = (
-                    [
-                        {key: value for key, value in region.items() if key != "_capture_index"}
-                        for region in raw_fragments
-                    ]
+                    [_source_fields(region) for region in raw_fragments]
                     if is_yolo_active
                     else [
                         {
@@ -1750,7 +1766,10 @@ def process_ocr(job_data):
                 capture = capture_observed_ocr_grouping(
                     source_id=f"{image_id}:{page_id or 'unknown-page'}",
                     raw_quads=capture_raw_quads,
-                    scale_transform={"ocr_to_source": {"scale_x": ocr_upscale, "scale_y": ocr_upscale}},
+                    # The quads are already source pixels (scaled by ocr_upscale when read), as the
+                    # live owner decisions assume; a second scale widened every gap the capture
+                    # allowed on a downscaled page.
+                    scale_transform={"ocr_to_source": {"scale_x": 1.0, "scale_y": 1.0}},
                     detector_masks=capture_detector_masks,
                     recognition=capture_recognition,
                     regions=capture_regions,

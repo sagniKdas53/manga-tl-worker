@@ -400,3 +400,46 @@ def test_hybrid_incomplete_llm_pass_applies_no_fixes(
     final = final_call.kwargs["json"]
     assert final["qaResponseIntegrity"]["complete"] is True
     assert sorted(final["qaTargetIds"]) == ["region-a", "region-b"]
+
+
+@patch("worker.handlers.qa.try_cloud_ai_vision")
+@patch("worker.handlers.qa.try_cloud_ai")
+@patch("worker.page_scene_renderer.render_page_scene")
+@patch("worker.handlers.qa.download_image")
+@patch("worker.handlers.qa.minio_client")
+@patch("worker.handlers.qa.requests.get")
+@patch("worker.handlers.qa.requests.post")
+@patch("worker.handlers.qa.QA_CONFIG")
+def test_hybrid_vlm_pass_classifies_uncertain_cleanup_regions(
+    mock_qa_config, mock_post, mock_get, mock_minio, mock_download, mock_render, mock_try_llm, mock_try_vlm
+):
+    """A `cleanup_review` region stays hidden until vision QA says what it is. Hybrid's VLM pass
+    must ask, as VLM mode does, or under qaMode=hybrid that dialogue stays hidden for good."""
+    mock_qa_config.provider = "gemini"
+    mock_qa_config.resolve_key.return_value = "fake-key"
+    region = {"text": "src", "bboxX": 0, "bboxY": 0, "bboxW": 10, "bboxH": 10, "translatedText": "en"}
+    regions = [
+        {"id": "region-a", "bubbleReadingOrder": 1, **region},
+        {"id": "region-u", "bubbleReadingOrder": 2, "qaStatus": "cleanup_review", **region},
+    ]
+    mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"ocrRegions": regions}))
+    mock_try_llm.return_value = json.dumps({"results": [{"regionId": "region-a", "qaStatus": "passed"}]})
+    mock_post.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"imageId": "image-uuid-1"}))
+    mock_render.return_value = render_result(get_dummy_image_bytes())
+    mock_download.return_value = get_dummy_image_bytes()
+    mock_minio.get_object.return_value.read.return_value = get_dummy_image_bytes()
+    # The prompt names regions by the Reader's numbers: 1 is region-a, 2 the uncertain one.
+    mock_try_vlm.return_value = json.dumps(
+        {
+            "results": [{"regionId": "1", "qaStatus": "passed", "qaScore": 1}],
+            "uncertainChecks": [{"regionId": "2", "kind": "dialogue", "reason": "a caption"}],
+        }
+    )
+
+    process_qa(bound_qa_job({"imageId": "image-uuid-1", "qaMode": "hybrid"}))
+
+    sent = [*mock_try_vlm.call_args.args, *mock_try_vlm.call_args.kwargs.values()]
+    assert any(isinstance(arg, str) and "UNCERTAIN REGIONS" in arg for arg in sent), "the prompt asks about it"
+    final = mock_post.call_args_list[-1].kwargs["json"]
+    assert [r["regionId"] for r in final["qaResults"]] == ["region-a"]
+    assert final["uncertainChecks"] == [{"regionId": "region-u", "kind": "dialogue", "reason": "a caption"}]

@@ -252,3 +252,58 @@ def test_every_grouping_call_in_the_handler_uses_the_job_threshold():
     calls = [line.strip() for line in source.splitlines() if "grouping_config(" in line]
     assert calls, "process_ocr no longer builds a grouping configuration"
     assert all("merge_threshold" in call for call in calls), calls
+
+
+def test_each_component_keeps_its_own_owner_decision_when_a_bubble_holds_two():
+    """The veto runs once per component and evaluates the others as singletons. Only the judged
+    component may write its decision; the last call used to overwrite every earlier one."""
+    fragments = [
+        _provenanced_fragment(0, 10, 10),
+        _provenanced_fragment(1, 10, 35),
+        _provenanced_fragment(2, 10, 300),
+    ]
+    context = owner_aware_grouping_context(
+        None,
+        [{"format": "polygon", "id": "bubble-0", "points": [[0, 0], [100, 0], [100, 400], [0, 400]]}],
+    )
+
+    groups = group_fragments(
+        fragments,
+        GroupingConfig(threshold_ratio=1.0, reading_direction="ltr", orientation="vote"),
+        context,
+    )
+
+    assert groups == [[0, 1], [2]]
+    decisions = [fragment["ownershipProvenance"]["ownerDecision"] for fragment in fragments]
+    assert decisions[0]["owner_id"] == decisions[1]["owner_id"], "the merged pair keeps its shared owner"
+    assert decisions[0]["reason"] != "single-fragment-owner"
+
+
+def test_a_fragment_id_does_not_move_when_the_pipeline_annotates_the_fragment():
+    """With OCR_CAPTURE_DIR set the fragment carries `_capture_index` before its id is computed,
+    and the capture file re-hashes it after `fragmentId`/`ownershipProvenance` are attached. Both
+    must give the id production persisted, or a capture cannot be linked to its records."""
+    from worker.handlers.ocr import _source_fields
+    from worker.services.ownership_features import capture_fragment_features
+
+    plain = _provenanced_fragment(0, 10, 10)
+    for key in ("fragmentId", "ownershipProvenance"):
+        plain.pop(key)
+    plain["sourceQuad"] = [[10, 10], [70, 10], [70, 30], [10, 30]]
+    annotated = plain | {
+        "_capture_index": 0,
+        "fragmentId": "fragment-x",
+        "ownershipProvenance": {"id": "fragment-x"},
+        "bubble_idx": 3,
+    }
+
+    def fragment_id(fragment):
+        return capture_fragment_features(
+            source_id="img:page",
+            raw_quads=[fragment["sourceQuad"]],
+            recognition=[{"text": fragment["text"], "confidence": fragment["confidence"]}],
+            regions=[_source_fields(fragment)],
+        )[0]["id"]
+
+    assert fragment_id(annotated) == fragment_id(plain)
+    assert _source_fields(plain) == plain, "nothing OCR itself reported is dropped"
