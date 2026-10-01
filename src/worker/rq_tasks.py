@@ -166,6 +166,17 @@ class JobHeartbeat:
         self.thread.join(timeout=1)
 
 
+def _superseded_callback(error: BaseException) -> bool:
+    """A 409 from one of the backend's result callbacks: the attempt is not current."""
+    response = getattr(error, "response", None)
+    return (
+        isinstance(error, requests.HTTPError)
+        and response is not None
+        and response.status_code == 409
+        and "/jobs/callback/" in str(getattr(response, "url", "") or "")
+    )
+
+
 def _seconds_since(iso_timestamp) -> float | None:
     if not isinstance(iso_timestamp, str) or not iso_timestamp:
         return None
@@ -295,7 +306,13 @@ def process_job_rq(queue_name, job_data):
             f"[RQ Worker] Error processing job from {queue_name} after {time.perf_counter() - started:.1f}s"
         )
 
-        if attempt < max_attempts:
+        if _superseded_callback(e):
+            # The backend answered our result with 409: this attempt is not the current one (its
+            # input was superseded, or the result was already applied). A retry would redo the
+            # same work -- a whole CTD pass for cleanup -- and be refused the same way.
+            logger.warning(f"[RQ Worker] Job {job_id}: callback refused as not current (409); not retrying")
+            update_job_status(job_id, "FAILED", str(e), attempt)
+        elif attempt < max_attempts:
             logger.error(
                 f"[RQ Worker] Job {job_id} failed on attempt {attempt}/{max_attempts}. "
                 f"Marking as PENDING for retry by backend."

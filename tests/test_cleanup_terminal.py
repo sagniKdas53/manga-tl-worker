@@ -72,3 +72,36 @@ def test_cleanup_transport_exception_uses_bounded_pending_retry_and_closes_heart
     assert status_calls[-1][1] == ("cleanup callback unavailable", 2)
     heartbeat.thread.start.assert_called_once_with()
     heartbeat.close.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("http://backend/tlhub/api/internal/jobs/callback/cleanup", ["PROCESSING", "FAILED"]),
+        # A 409 from anything but a result callback is not a verdict on the attempt.
+        ("http://backend/tlhub/api/pages/p1/rendered", ["PROCESSING", "PENDING"]),
+    ],
+)
+def test_a_callback_refused_as_not_current_is_not_retried(url, expected):
+    """CodeRabbit on #152: a 409 means the attempt was superseded or already applied; retrying
+    redid a whole CTD pass only to be refused again."""
+    response = requests.Response()
+    response.status_code = 409
+    response.url = url
+    refused = requests.HTTPError("409 Client Error: Conflict", response=response)
+    statuses = []
+
+    def record_status(job_id, status, *args, **kwargs):
+        statuses.append(status)
+        return True
+
+    with (
+        patch("worker.rq_tasks.check_stale_job", return_value=False),
+        patch("worker.rq_tasks.requests.get", return_value=_pending_response()),
+        patch("worker.rq_tasks.update_job_status", side_effect=record_status),
+        patch("worker.rq_tasks.JobHeartbeat", return_value=MagicMock()),
+        patch("worker.handlers.cleanup.process_cleanup", side_effect=refused),
+    ):
+        process_job_rq("queue:cleanup", _job())
+
+    assert statuses == expected
