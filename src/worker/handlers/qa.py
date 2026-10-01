@@ -401,6 +401,27 @@ def _sanitize_qa_results(results, ocr_regions, label="LLM"):
     return kept
 
 
+# Policy (user, 2026-08-13; enforced here since 2026-10-02): sound effects are never typeset. The
+# rule used to read "a sound effect or gibberish that shouldn't be translated" while the translator
+# is told to give every SFX an English sound word, and QA was never told which regions the layout
+# classifier took for SFX. It judged "SLUR" a good sound word and passed it: 32 of 36 SFX on one
+# chapter were typeset, on flat plates, because SFX get no cleanup.
+REJECT_SFX_RULE = (
+    '- "reject_sfx": Sound effects are never typeset; they stay as the artist drew them. Set this '
+    "for every region that is a sound effect or onomatopoeia drawn as part of the artwork (impacts, "
+    "motion, ambient noise, heartbeats, breaths or moans drawn outside a speech balloon), even when "
+    "its English sound word is accurate, and for gibberish that should not be translated. "
+    '"regionType" is the layout classifier\'s guess: "sfx" is usually right, but check it against '
+    'the page; a short interjection spoken inside a speech balloon ("Ah...", "Huh?") is dialogue, '
+    "not a sound effect. Downstream hides the element and keeps the original lettering."
+)
+
+
+def _region_type(region):
+    """The layout classifier's region type, as QA is told it."""
+    return region.get("regionType") or region.get("region_type") or "speech"
+
+
 def _translation_qa_regions(ocr_regions):
     """Return successful translation-layer elements for per-region QA.
 
@@ -592,6 +613,7 @@ def _process_qa_hybrid(job_data):
             {
                 "regionId": r["id"],
                 "ocrText": r["text"],
+                "regionType": _region_type(r),
                 "ocrScore": r.get("ocrScore") or r.get("confidence") or 1.0,
                 "translatedText": r.get("translatedText") or "",
                 "translationScore": r.get("translationScore") or 1.0,
@@ -616,7 +638,7 @@ For each region in the provided metadata, evaluate and check if:
 Status categories:
 - "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed.
 - "direct_fix": If you have a better translation, output it directly. You must supply "directFix" object with correctedText. You MUST also provide detailed reasoning in "qaFeedback".
-- "reject_sfx": If the region is a sound effect (SFX) or gibberish that shouldn't be translated, set this status (downstream will hide the element).
+{REJECT_SFX_RULE}
 - "failed": Translation error requiring a translation re-run. Specify "qaFeedback" with detailed correction notes/feedback to guide the re-translation. Your output must be strictly better. Do not send back the exact same text if flagging an error.
 
 IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
@@ -1013,6 +1035,7 @@ def _process_qa_llm(job_data):
             {
                 "regionId": r["id"],
                 "ocrText": r["text"],
+                "regionType": _region_type(r),
                 "ocrScore": r.get("ocrScore") or r.get("confidence") or 1.0,
                 "translatedText": r.get("translatedText") or "",
                 "translationScore": r.get("translationScore") or 1.0,
@@ -1037,7 +1060,7 @@ For each region in the provided metadata, evaluate and check if:
 Status categories:
 - "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed.
 - "direct_fix": If you have a better translation, output it directly. You must supply "directFix" object with correctedText. You MUST also provide detailed reasoning in "qaFeedback".
-- "reject_sfx": If the region is a sound effect (SFX) or gibberish that shouldn't be translated, set this status (downstream will hide the element).
+{REJECT_SFX_RULE}
 - "failed": Translation error requiring a translation re-run. Specify "qaFeedback" with detailed correction notes/feedback to guide the re-translation. Your output must be strictly better. Do not send back the exact same text if flagging an error.
 
 IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
@@ -1163,6 +1186,7 @@ def _vlm_qa_prompt(targets, uncertain, label_by_uuid):
         {
             "regionId": label_by_uuid[str(r["id"])],
             "ocrText": r["text"],
+            "regionType": _region_type(r),
             "ocrScore": r.get("ocrScore") or r.get("confidence") or 1.0,
             "translatedText": r.get("translatedText") or "",
             "translationScore": r.get("translationScore") or 1.0,
@@ -1223,7 +1247,7 @@ For each region in the provided metadata, evaluate and check if:
 Status categories ("qaStatus"):
 - "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed.
 - "direct_fix": If you have a better translation, output it directly. You must supply "directFix" object with correctedText or suggestedFontSize. You MUST also provide detailed reasoning in "qaFeedback".
-- "reject_sfx": If the region is a sound effect (SFX) or gibberish that shouldn't be translated, set this status (downstream will hide the element).
+{REJECT_SFX_RULE}
 - "failed": Major translation error or layout issue requiring a translation/typesetting re-run. Specify "qaFeedback" with detailed correction notes. Your output must be strictly better. Do not send back the exact same text if flagging an error.
 
 IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
