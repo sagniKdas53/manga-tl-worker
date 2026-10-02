@@ -157,6 +157,20 @@ def render_page_scene(job_data: dict[str, Any]) -> dict[str, Any]:
         style = item["style"]
         font_ids.add(style["font_id"])
         transform = item["transform"]
+        renderer_style = {
+            "fontFamily": style["font_id"],
+            "fill": style["fill"],
+            "stroke": style["stroke"],
+            "weight": style["weight"],
+            "padding": style["padding"],
+            # System Settings' safety share. The frozen scene contract has no field for
+            # it, so it rides on the render job (the backend sends it on every job).
+            "safetyPercent": safety_percent,
+        }
+        # Contract rule 8: the user's typography, passed on only when the scene carries it.
+        for scene_key, renderer_key in (("font_size", "fontSize"), ("font_style", "fontStyle"), ("shape", "shape")):
+            if style.get(scene_key) is not None:
+                renderer_style[renderer_key] = style[scene_key]
         text_objects.append(
             {
                 "objectId": item["object_id"],
@@ -170,16 +184,7 @@ def render_page_scene(job_data: dict[str, Any]) -> dict[str, Any]:
                 },
                 "writingMode": item["writing_mode"],
                 "alignment": item["alignment"],
-                "style": {
-                    "fontFamily": style["font_id"],
-                    "fill": style["fill"],
-                    "stroke": style["stroke"],
-                    "weight": style["weight"],
-                    "padding": style["padding"],
-                    # System Settings' safety share. The frozen scene contract has no field for
-                    # it, so it rides on the render job (the backend sends it on every job).
-                    "safetyPercent": safety_percent,
-                },
+                "style": renderer_style,
                 "visible": item["visible"],
                 "zIndex": item["z_index"],
             }

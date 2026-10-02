@@ -25,6 +25,10 @@ def test_the_vision_prompt_names_each_regions_type_and_states_the_policy():
     assert REJECT_SFX_RULE in prompt
     assert "never typeset" in REJECT_SFX_RULE
     assert "even when its English sound word is accurate" in REJECT_SFX_RULE
+    # 2026-10-02: an SFX without a patch is not drawn before QA keeps it, so QA must not fail it
+    # (and buy a paid retry) for English it cannot see on the page.
+    assert "not drawn on the page yet" in REJECT_SFX_RULE
+    assert "never fail one for its English missing from the page" in REJECT_SFX_RULE
 
 
 def test_a_region_without_a_type_reads_as_speech():

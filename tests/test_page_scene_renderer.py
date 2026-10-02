@@ -358,3 +358,58 @@ def test_the_safety_share_is_part_of_the_render_input_identity():
     a = _render_input_digest("s" * 64, "t" * 64, ["u" * 64], 100)
     b = _render_input_digest("s" * 64, "t" * 64, ["u" * 64], 90)
     assert a != b, "a different safety share draws a different page"
+
+
+def _text_object(style_extra: dict) -> dict:
+    return {
+        "object_id": "text-1",
+        "kind": "automatic_text",
+        "owner_id": "o1",
+        "cleanup_ids": ["c1"],
+        "text": "Which one do you think it'll be today?",
+        "allowed_container_id": None,
+        "transform": {"x": 10, "y": 20, "width": 300, "height": 400, "rotation_degrees": 0},
+        "writing_mode": "horizontal-tb",
+        "alignment": "center",
+        "style": {
+            "font_id": "comic-neue",
+            "fill": "#000000",
+            "stroke": "#ffffff",
+            "weight": 700,
+            "padding": 4,
+            **style_extra,
+        },
+        "visible": True,
+        "z_index": 1,
+    }
+
+
+@patch("worker.page_scene_renderer.minio_client")
+@patch("worker.page_scene_renderer.download_image")
+@patch("worker.page_scene_renderer.requests")
+def test_the_editors_size_shape_and_italic_reach_the_renderer(mock_requests, mock_download, mock_minio):
+    """Contract rule 8 (2026-10-02): page 30's export auto-fitted a line the user had set to 152."""
+    source, patch = b"source", b"patch-png-bytes"
+    document = _scene_with_cleanup(source, patch)
+    document["objects"] = [_text_object({"font_size": 152, "font_style": "italic", "shape": "elliptical"})]
+    _run_with_renderer(mock_requests, mock_download, source, document, {"patch-1": "http://assets/patch"}, patch)
+
+    (text,) = mock_requests.post.call_args.kwargs["json"]["scene"]["textObjects"]
+    assert (text["style"]["fontSize"], text["style"]["fontStyle"], text["style"]["shape"]) == (
+        152,
+        "italic",
+        "elliptical",
+    )
+
+
+@patch("worker.page_scene_renderer.minio_client")
+@patch("worker.page_scene_renderer.download_image")
+@patch("worker.page_scene_renderer.requests")
+def test_pipeline_text_sends_no_typography_so_its_render_is_unchanged(mock_requests, mock_download, mock_minio):
+    source, patch = b"source", b"patch-png-bytes"
+    document = _scene_with_cleanup(source, patch)
+    document["objects"] = [_text_object({})]
+    _run_with_renderer(mock_requests, mock_download, source, document, {"patch-1": "http://assets/patch"}, patch)
+
+    (text,) = mock_requests.post.call_args.kwargs["json"]["scene"]["textObjects"]
+    assert not {"fontSize", "fontStyle", "shape"} & set(text["style"])

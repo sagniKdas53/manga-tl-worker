@@ -413,7 +413,10 @@ REJECT_SFX_RULE = (
     "its English sound word is accurate, and for gibberish that should not be translated. "
     '"regionType" is the layout classifier\'s guess: "sfx" is usually right, but check it against '
     'the page; a short interjection spoken inside a speech balloon ("Ah...", "Huh?") is dialogue, '
-    "not a sound effect. Downstream hides the element and keeps the original lettering."
+    "not a sound effect. Downstream hides the element and keeps the original lettering. "
+    'A "regionType": "sfx" region is not drawn on the page yet, so its English is only in this '
+    "data: never fail one for its English missing from the page. If you keep it, it is cleaned and "
+    "drawn afterwards."
 )
 
 

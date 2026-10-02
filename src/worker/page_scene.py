@@ -10,7 +10,7 @@ from typing import Any
 
 CONTRACT_VERSION = "page-scene/v1"
 # SHA-256 of `contracts/page-scene-v1.schema.json`; no parent-path runtime import.
-CONTRACT_SCHEMA_SHA256 = "89560c23c8aeef2c3676b691c483ca75a4fe3d27e4b765522d761f8a43976630"
+CONTRACT_SCHEMA_SHA256 = "45ec0b9ad1f637a216d7ae4d1bb58178f98c84105d184fcbb8b6d79b40e448e1"
 
 
 class PageSceneValidationError(ValueError):
@@ -25,6 +25,20 @@ class PageSceneArtifact:
 
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _validate_editor_typography(style: Any) -> None:
+    """Contract rule 8 (2026-10-02): the optional editor typography on a text object's style."""
+    if not isinstance(style, dict):
+        return
+    if "font_size" in style:
+        size = style["font_size"]
+        if not isinstance(size, (int, float)) or isinstance(size, bool) or not math.isfinite(size) or size <= 0:
+            raise PageSceneValidationError("style.font_size must be a positive number")
+    if "font_style" in style and style["font_style"] not in ("normal", "italic"):
+        raise PageSceneValidationError("style.font_style must be normal or italic")
+    if "shape" in style and style["shape"] not in ("rectangular", "elliptical"):
+        raise PageSceneValidationError("style.shape must be rectangular or elliptical")
 
 
 def logical_scene_digest(document: dict[str, Any]) -> str:
@@ -214,6 +228,7 @@ def validate_page_scene(document: Any) -> PageSceneArtifact:
                 or transform["height"] <= 0
             ):
                 raise PageSceneValidationError("invalid object transform")
+            _validate_editor_typography(item.get("style"))
         if item.get("kind") != "automatic_text":
             continue
         owner_id = item.get("owner_id")
