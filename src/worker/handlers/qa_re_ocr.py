@@ -121,7 +121,9 @@ def process_qa_re_ocr(job_data):
 
     try:
         callback_url = f"{CALLBACK_URL}/qa-re-ocr"
-        res = requests.post(callback_url, json=callback_payload, headers=backend_headers())
+        res = requests.post(callback_url, json=callback_payload, headers=backend_headers(), timeout=(5, 30))
+        res.raise_for_status()
         logger.debug(f"[QA Re-OCR] Callback status code: {res.status_code}")
     except Exception as e:
         logger.error(f"[QA Re-OCR] Failed to post callback: {e}")
+        raise

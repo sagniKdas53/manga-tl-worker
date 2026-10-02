@@ -524,3 +524,81 @@ def test_model_identifier_unchanged_when_one_model_reads_the_page(
     identifier = mock_post.call_args[1]["json"]["modelIdentifier"]
     assert identifier.endswith(" + primary/model"), identifier
     assert identifier.count("+") == 1, identifier
+
+
+@patch("worker.handlers.ocr.download_image")
+@patch("worker.handlers.ocr.detect_bubbles_yolo")
+@patch("worker.handlers.ocr.try_cloud_ai_vision_batch")
+@patch("worker.handlers.ocr.model_manager")
+@patch("worker.handlers.ocr.requests.get")
+@patch("worker.handlers.ocr.requests.post")
+@patch("worker.handlers.ocr.OCR_CONFIG")
+@patch.dict(os.environ, {"DISABLE_LOCAL_OCR": "true"})
+def test_process_ocr_unmatched_fragments_are_emitted_once_per_panel_partition(
+    mock_ocr_config,
+    mock_post,
+    mock_get,
+    mock_model_manager,
+    mock_try_cloud_vlm,
+    mock_detect_yolo,
+    mock_download,
+):
+    """Tracker R2: sample61 came back as 214 regions for 63 boxes.
+
+    With no bubbles every fragment is unmatched and is partitioned by panel. The emit loop sat
+    inside the partition loop while the merged list accumulated across partitions, so partition
+    k's regions were emitted (P - k + 1) times. Three panels with one fragment each must give
+    three regions, not 3 + 2 + 1 = 6.
+    """
+    mock_ocr_config.provider = "gemini"
+    mock_ocr_config.resolve_key.return_value = "fake-gemini-key"
+    mock_ocr_config.vlm_model = "gemini-1.5-flash"
+
+    mock_detector = MagicMock()
+    mock_model_manager.get_paddle_ocr_detector.return_value = mock_detector
+    mock_detector.predict.return_value = [
+        {
+            "dt_polys": [
+                [[10, 10], [50, 10], [50, 40], [10, 40]],  # panel 0
+                [[80, 10], [120, 10], [120, 40], [80, 40]],  # panel 1
+                [[150, 10], [190, 10], [190, 40], [150, 40]],  # panel 2
+            ],
+            "rec_texts": [],
+            "rec_scores": [],
+        }
+    ]
+    mock_download.return_value = get_dummy_image_bytes()
+    mock_detect_yolo.return_value = []
+    mock_try_cloud_vlm.return_value = json.dumps(
+        {
+            "results": [
+                {"id": "region_0", "text": "one"},
+                {"id": "region_1", "text": "two"},
+                {"id": "region_2", "text": "three"},
+            ]
+        }
+    )
+
+    mock_image_info = {
+        "id": "image-uuid-1",
+        "panels": [
+            {"id": "p0", "bboxX": 0, "bboxY": 0, "bboxW": 66, "bboxH": 200, "readingOrder": 0},
+            {"id": "p1", "bboxX": 67, "bboxY": 0, "bboxW": 66, "bboxH": 200, "readingOrder": 1},
+            {"id": "p2", "bboxX": 134, "bboxY": 0, "bboxW": 66, "bboxH": 200, "readingOrder": 2},
+        ],
+    }
+    mock_get_res = MagicMock()
+    mock_get_res.status_code = 200
+    mock_get_res.json.return_value = mock_image_info
+    mock_get.return_value = mock_get_res
+    mock_post_res = MagicMock()
+    mock_post_res.status_code = 200
+    mock_post.return_value = mock_post_res
+
+    process_ocr({"imageId": "image-uuid-1"})
+
+    args, _kwargs = mock_try_cloud_vlm.call_args
+    assert [crop["id"] for crop in args[3]] == ["region_0", "region_1", "region_2"]
+    payload = mock_post.call_args[1]["json"]
+    assert sorted(r["text"] for r in payload["regions"]) == ["one", "three", "two"]
+    assert sorted(r["bubbleId"] for r in payload["regions"]) == ["direct_text_0", "direct_text_1", "direct_text_2"]

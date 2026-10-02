@@ -60,7 +60,9 @@ def process_panel_detection(job_data):
         "panels": panels,
     }
     try:
-        res = requests.post(f"{CALLBACK_URL}/panel", json=callback_payload, headers=backend_headers())
+        res = requests.post(f"{CALLBACK_URL}/panel", json=callback_payload, headers=backend_headers(), timeout=(5, 30))
+        res.raise_for_status()
         logger.debug(f"[Panel Detection] Callback status code: {res.status_code}")
     except Exception as e:
         logger.error(f"[Panel Detection] Failed to post callback to backend: {e}")
+        raise

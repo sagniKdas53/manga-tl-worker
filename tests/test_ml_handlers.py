@@ -45,6 +45,15 @@ def test_process_layout_success(mock_llen, mock_post, mock_get):
     assert len(payload["regionTypes"]) == 1
     assert payload["regionTypes"][0]["regionId"] == "r1"
     assert "conversations" in payload
+    assert payload["regionTypes"][0] == {
+        "regionId": "r1",
+        "regionType": "caption",
+        "policyKind": "caption",
+        "policyAction": "review",
+        "policyReason": "classifier-evidence-requires-review",
+        "policyOverride": None,
+        "policyUncertain": True,
+    }
 
 
 @patch("worker.handlers.layout.requests.get")

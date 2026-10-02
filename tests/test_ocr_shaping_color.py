@@ -205,23 +205,57 @@ def test_dominant_colour_names_the_colour_not_the_average():
     assert r > 200 and g > 180 and b < 90, f"expected the lit yellow, got {color}"
 
 
-def test_an_unenclosed_region_always_gets_a_shape_even_when_the_colour_was_easy():
-    """The bug this encodes: right colour, wrong shape.
+def test_a_container_with_no_mask_still_gets_a_synthesized_shape():
+    """Inside a detected container the older rule holds: right colour, wrong shape was the bug.
 
-    After R1 rejects a balloon there is no mask, but the *border* of the text box can still sample
-    flat -- sample10's 待って sits on a burst, so the yellow comes back cleanly. Returning that
-    colour with no polygon left the renderer painting the element's own box, which is the sliver
-    the glyphs occupy, so the source lettering still showed around the edges. No mask in means a
-    synthesized shape out, however the colour was found.
+    The *border* of the text box can sample flat -- sample10's 待って sits on a burst, so the
+    yellow comes back cleanly -- but a colour with no polygon left the renderer painting the
+    element's own box, the sliver the glyphs occupy. No mask in means a synthesized shape out.
     """
     from worker.handlers.ocr import cover_fill_for_region
 
     img = np.full((400, 400, 3), 200, dtype=np.uint8)  # a flat background the border test likes
     cv2.rectangle(img, (150, 150), (250, 250), (255, 255, 255), -1)  # the glyphs' white stroke
 
-    color, shape = cover_fill_for_region(img, None, 150, 150, 100, 100)
+    color, shape = cover_fill_for_region(img, None, 150, 150, 100, 100, container_detected=True)
 
     assert color is not None
     assert shape is not None and len(shape) > 4, "no mask in, so a synthesized shape must come out"
     xs = [p[0] for p in shape]
     assert min(xs) < 150 and max(xs) > 250, "the shape must be bigger than the text it covers"
+
+
+def test_free_standing_text_on_artwork_gets_a_colour_but_no_plate():
+    """Tracker R2 / AUDIT-R19. The caption on the shaded wall used to come back with a beige
+    rounded plate a third wider than its glyphs. Without a container the answer is the local
+    colour -- for the halo stroke -- and no polygon at all: the text is drawn over the source."""
+    from worker.handlers.ocr import cover_fill_for_region
+
+    img = np.zeros((300, 300, 3), dtype=np.uint8)
+    for row in range(300):  # the same shaded gradient as the covered-region test above
+        img[row, :] = (20 + row // 8, max(0, 250 - int(row * 0.8)), max(0, 255 - int(row * 0.7)))
+    rect = [[90, 90], [210, 90], [210, 210], [90, 210]]
+    assert detect_background_color_poly(img, rect) is None, "precondition: no flat colour here"
+
+    color, shape = cover_fill_for_region(img, rect, 90, 90, 120, 120, container_detected=False)
+
+    assert color is not None and color.startswith("#")
+    assert shape is None
+
+
+def test_free_standing_text_on_a_flat_ground_keeps_the_honest_rectangle():
+    """A flat bbox is erased by its own median over its own extent -- the one patch that is a
+    repair rather than an addition -- and the rectangle is exactly the glyph extent, never padded."""
+    from worker.handlers.ocr import cover_fill_for_region
+
+    img = np.full((200, 200, 3), 240, dtype=np.uint8)
+    rect = [[40, 40], [160, 40], [160, 160], [40, 160]]
+
+    color, shape = cover_fill_for_region(img, rect, 40, 40, 120, 120, container_detected=False)
+    assert color == "#f0f0f0"
+    assert shape == rect
+
+    # With no mask at all the bbox becomes that rectangle rather than a padded plate.
+    color, shape = cover_fill_for_region(img, None, 40, 40, 120, 120, container_detected=False)
+    assert color == "#f0f0f0"
+    assert shape == rect

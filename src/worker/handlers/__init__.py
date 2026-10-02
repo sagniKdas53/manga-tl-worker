@@ -1,4 +1,5 @@
 # Worker handlers sub-package
+from .cleanup import process_cleanup
 from .layout import process_layout
 from .ocr import process_ocr
 from .panel import process_panel_detection
@@ -11,6 +12,7 @@ from .translation import process_translation
 
 __all__ = [
     "perform_redo_ocr",
+    "process_cleanup",
     "process_layout",
     "process_ocr",
     "process_panel_detection",

@@ -51,7 +51,9 @@ def classify_region_type(region, panel, image_width, image_height):
     Returns one of: 'speech', 'narration', 'sfx', 'caption', 'sign'
     """
     text = region.get("text", "")
-    confidence = region.get("confidence") or 1.0
+    confidence = region.get("confidence")
+    if confidence is None:
+        confidence = 1.0
     region.get("bboxX") or region.get("x", 0)  # type: ignore
     ry = region.get("bboxY") or region.get("y", 0)
     rw = region.get("bboxW") or region.get("width", 1)

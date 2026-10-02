@@ -17,7 +17,12 @@ requests==2.34.2
 opencv-python==5.0.0.93; sys_platform == "linux" and (platform_machine == "aarch64" or platform_machine == "arm64")
 opencv-python-headless==5.0.0.93; sys_platform != "linux" or (platform_machine != "aarch64" and platform_machine != "arm64")
 psutil==7.2.2
-onnxruntime==1.30.0
+# x86-64 Linux runs the local ONNX models (YOLO, CTD, AOT) on Intel's OpenVINO execution provider:
+# same masks, about 1.5x faster than stock ORT once denormals are flushed (services/onnx_session.py). The two
+# packages ship the same `onnxruntime` module, so exactly one of them may be installed. The
+# OpenVINO build has no Linux arm64 wheel; arm64 (RapidOCR) keeps the stock package.
+onnxruntime-openvino==1.24.1; sys_platform == "linux" and platform_machine == "x86_64"
+onnxruntime==1.30.0; sys_platform != "linux" or platform_machine != "x86_64"
 rq==2.12.0
 fastapi==0.141.1
 uvicorn[standard]==0.53.0
@@ -30,4 +35,3 @@ ruff==0.16.7
 pyright==1.1.414
 pydantic==2.13.5
 # Hyphenation dictionaries for the renderer's line breaking (D7). Pure Python, no native deps.
-pyphen==0.18.1

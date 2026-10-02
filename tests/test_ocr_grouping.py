@@ -229,3 +229,125 @@ def test_process_ocr_different_shapes(
     assert check_bbox_present(poly_bbox(circle_poly)), "Circular mask was not preserved"
     assert check_bbox_present(poly_bbox(ellipse_poly)), "Elliptical mask was not preserved"
     assert check_bbox_present(poly_bbox(pentagon_poly)), "Pentagonal mask was not preserved"
+
+
+@patch("worker.handlers.ocr.redis_client")
+@patch("worker.handlers.ocr.requests.post")
+@patch("worker.handlers.ocr.requests.get")
+@patch("worker.handlers.ocr.download_image")
+@patch("worker.handlers.ocr.downscale_for_ocr")
+@patch("worker.handlers.ocr.parse_paddle_ocr_results")
+@patch("worker.handlers.ocr.model_manager.get_paddle_ocr_reader")
+@patch("worker.handlers.ocr.detect_bubbles_yolo")
+def test_process_ocr_failed_local_split_never_grants_the_fused_mask(
+    mock_detect_bubbles_yolo,
+    mock_get_paddle_ocr_reader,
+    mock_parse_paddle_ocr_results,
+    mock_downscale_for_ocr,
+    mock_download_image,
+    mock_requests_get,
+    mock_requests_post,
+    mock_redis,
+):
+    mock_download_image.return_value = b"dummy"
+    mock_downscale_for_ocr.return_value = (np.full((1000, 1000, 3), 255, dtype=np.uint8), 1.0)
+    mock_get_paddle_ocr_reader.return_value = MagicMock()
+    mock_parse_paddle_ocr_results.return_value = [
+        ([[100, 100], [160, 100], [160, 130], [100, 130]], "top", 0.99),
+        ([[800, 800], [860, 800], [860, 830], [800, 830]], "bottom", 0.99),
+    ]
+    fused_polygon = [[0, 0], [1000, 0], [1000, 1000], [0, 1000]]
+    mock_detect_bubbles_yolo.return_value = [
+        {
+            "bbox": [0, 0, 1000, 1000],
+            "confidence": 0.9,
+            "mask_polygon": fused_polygon,
+            "safe_rect": [0, 0, 1000, 1000],
+        }
+    ]
+    image_info = MagicMock()
+    image_info.status_code = 200
+    image_info.json.return_value = {"panels": []}
+    mock_requests_get.return_value = image_info
+    response = MagicMock()
+    response.status_code = 200
+    mock_requests_post.return_value = response
+
+    with patch("worker.handlers.ocr.get_split_polygon", return_value=None):
+        process_ocr(
+            {
+                "imageId": "split-failure",
+                "imageUrl": "http://dummy",
+                "sourceLanguage": "ja",
+                "readingDirection": "rtl",
+            }
+        )
+
+    payload = mock_requests_post.call_args.kwargs["json"]
+    regions = payload["regions"]
+    assert len(regions) == 2
+    assert all(region["maskPolygon"] is None for region in regions)
+    assert all(region["backgroundColor"] is None for region in regions)
+    assert all(
+        region["ownershipProvenance"]["containerResolution"] == "review-local-split-failed" for region in regions
+    )
+    assert all(region["ownershipProvenance"]["sourceQuad"] != fused_polygon for region in regions)
+
+
+@patch("worker.handlers.ocr.redis_client")
+@patch("worker.handlers.ocr.requests.post")
+@patch("worker.handlers.ocr.requests.get")
+@patch("worker.handlers.ocr.download_image")
+@patch("worker.handlers.ocr.downscale_for_ocr")
+@patch("worker.handlers.ocr.parse_paddle_ocr_results")
+@patch("worker.handlers.ocr.model_manager.get_paddle_ocr_reader")
+@patch("worker.handlers.ocr.detect_bubbles_yolo")
+def test_process_ocr_persists_assigned_live_owner_without_capture_mode(
+    mock_detect_bubbles_yolo,
+    mock_get_paddle_ocr_reader,
+    mock_parse_paddle_ocr_results,
+    mock_downscale_for_ocr,
+    mock_download_image,
+    mock_requests_get,
+    mock_requests_post,
+    mock_redis,
+):
+    mock_download_image.return_value = b"dummy"
+    mock_downscale_for_ocr.return_value = (np.full((200, 200, 3), 255, dtype=np.uint8), 1.0)
+    mock_get_paddle_ocr_reader.return_value = MagicMock()
+    mock_parse_paddle_ocr_results.return_value = [
+        ([[20, 20], [100, 20], [100, 40], [20, 40]], "first", 0.99),
+        ([[20, 45], [100, 45], [100, 65], [20, 65]], "second", 0.99),
+    ]
+    polygon = [[0, 0], [180, 0], [180, 180], [0, 180]]
+    mock_detect_bubbles_yolo.return_value = [
+        {
+            "bbox": [0, 0, 180, 180],
+            "confidence": 0.9,
+            "mask_polygon": polygon,
+            "safe_rect": [0, 0, 180, 180],
+        }
+    ]
+    image_info = MagicMock()
+    image_info.status_code = 200
+    image_info.json.return_value = {"panels": []}
+    mock_requests_get.return_value = image_info
+    response = MagicMock()
+    response.status_code = 200
+    mock_requests_post.return_value = response
+
+    process_ocr(
+        {
+            "imageId": "assigned-live-owner",
+            "imageUrl": "http://dummy",
+            "sourceLanguage": "ja",
+            "readingDirection": "ltr",
+        }
+    )
+
+    regions = mock_requests_post.call_args.kwargs["json"]["regions"]
+    assert len(regions) == 1
+    fragments = regions[0]["ownershipProvenance"]["fragments"]
+    decisions = [fragment["provenance"]["ownerDecision"] for fragment in fragments]
+    assert all(decision["state"] == "assigned" for decision in decisions)
+    assert decisions[0]["owner_id"] == decisions[1]["owner_id"]

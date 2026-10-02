@@ -24,6 +24,15 @@ from worker.utils.rate_limit import enforce_rate_limit, record_llm_call
 # QA verdict for ~16 regions runs well under this.
 DEFAULT_MAX_OUTPUT_TOKENS = 8192
 
+# OpenRouter-routed reasoning models (deepseek-v4-pro measured here) reason unboundedly with no
+# budget sent: 74-81% of a normal call's output tokens on 2026-09-21, and on one page 8073/8192
+# tokens went to reasoning with finish=length -- no content at all, four retries, 17.5 minutes for
+# one page. `reasoning.max_tokens` keeps reasoning on (per the user's call -- capping, not
+# disabling) while bounding it; OpenRouter requires the overall max_tokens to exceed this, so it
+# stays well under DEFAULT_MAX_OUTPUT_TOKENS, leaving headroom comfortably above the ~1200 tokens
+# of actual content a translation/QA chunk has needed in practice.
+REASONING_MAX_TOKENS = 4096
+
 
 class TransientAPIError(Exception):
     """Raised on retryable HTTP errors (429, 5xx, timeouts)."""
@@ -37,6 +46,22 @@ class PermanentAPIError(Exception):
     """Raised on non-retryable HTTP errors (400, 401, 403, etc.)."""
 
     pass
+
+
+class ContentRefusedError(PermanentAPIError):
+    """The upstream's content filter refused the input; the same request will be refused again."""
+
+
+# Markers of an upstream moderation refusal inside an HTTP 400 body. Alibaba (the only OpenRouter
+# host for qwen3.7-flash) answers `data_inspection_failed` for images and prompt text it flags,
+# non-deterministically across identical requests. It is a 400, so it used to be mistaken for an
+# unsupported json_schema and retried once in json_object mode -- refused again, one call wasted.
+_CONTENT_REFUSAL_MARKERS = ("data_inspection_failed", "inappropriate content", "content_policy", "content policy")
+
+
+def is_content_refusal(body: str) -> bool:
+    lowered = body.lower()
+    return any(marker in lowered for marker in _CONTENT_REFUSAL_MARKERS)
 
 
 @dataclass
@@ -294,6 +319,9 @@ class LLMClient:
                     if self.provider == "openrouter":
                         payload["plugins"] = [{"id": "response-healing"}]
 
+            if self.provider == "openrouter":
+                payload["reasoning"] = {"max_tokens": REASONING_MAX_TOKENS}
+
         return payload
 
     def _inject_routing_and_caching(self, payload: dict):
@@ -351,9 +379,14 @@ class LLMClient:
             cooldown_time = self._register_rate_limit(response.headers.get("Retry-After"))
             raise TransientAPIError(f"Rate limited (429), cooldown: {cooldown_time}s", status_code=429)
 
+        if response.status_code == 400 and is_content_refusal(response.text):
+            raise ContentRefusedError(f"Content refused by upstream filter (400) — {response.text[:300]}")
+
         if response.status_code == 400 and not self._degraded_format:
             if payload.get("response_format", {}).get("type") == "json_schema":
-                logger.warning(f"{self.req_prefix}400 with json_schema — degrading to json_object")
+                logger.warning(
+                    f"{self.req_prefix}400 with json_schema — degrading to json_object: {response.text[:300]}"
+                )
                 payload["response_format"] = {"type": "json_object"}
                 self._degraded_format = True
                 raise TransientAPIError("Degrading json_schema to json_object", status_code=400)
@@ -437,6 +470,9 @@ class LLMClient:
             total_tokens = prompt_tokens + completion_tokens
             # Anthropic spells it "max_tokens"; normalize onto the OpenAI vocabulary.
             finish_reason = "length" if data.get("stop_reason") == "max_tokens" else "stop"
+            # Anthropic does not break reasoning out of output_tokens; only whether it happened.
+            reasoning_tokens = None
+            reasoning_present = any(b.get("type") == "thinking" for b in data.get("content", []))
         else:
             choices = data.get("choices", [])
             # `or ""` rather than a .get default: providers send an explicit null content alongside
@@ -451,6 +487,14 @@ class LLMClient:
             details = usage.get("prompt_tokens_details") or {}
             cached_tokens = details.get("cached_tokens") or 0
             cache_write_tokens = details.get("cache_write_tokens") or 0
+            # OpenRouter (and OpenAI-shaped providers with reasoning models) report how much of
+            # completion_tokens was spent thinking. A translation batch that hit finish=length with
+            # 8073/8192 reasoning tokens (2026-09-21) was invisible here until the truncation.
+            completion_details = usage.get("completion_tokens_details") or {}
+            reasoning_tokens = completion_details.get("reasoning_tokens")
+            reasoning_present = bool(reasoning_tokens) or bool(
+                choices[0].get("message", {}).get("reasoning") if choices else None
+            )
             # Present only because _inject_routing_and_caching asks for it; absent on providers
             # that do not report a cost, which is what the estimator fallback is for.
             authoritative_cost = usage.get("cost")
@@ -459,7 +503,16 @@ class LLMClient:
             model_resolved = data.get("model") or ""
 
         logger.info(f"{self.req_prefix}Provider={self.provider} Model={self.model} Time={elapsed:.2f}s")
-        logger.info(f"{self.req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens}")
+        reasoning_str = (
+            f"{reasoning_tokens}"
+            if reasoning_tokens is not None
+            else ("present, uncounted" if reasoning_present else "0")
+        )
+        logger.info(
+            f"{self.req_prefix}Tokens in={prompt_tokens} out={completion_tokens} total={total_tokens} "
+            f"reasoning={reasoning_str} finish={finish_reason or 'unknown'} "
+            f"({completion_tokens / max(elapsed, 0.001):.0f} tok/s)"
+        )
 
         if finish_reason == "length":
             logger.warning(

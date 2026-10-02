@@ -31,6 +31,26 @@ def test_provider_config_loader():
     assert "url" in registry["openrouter"]
 
 
+def test_a_reload_never_shows_a_reader_an_empty_or_partial_provider_map(monkeypatch):
+    """The catalog refresh reloads on a background thread while jobs read `providers`."""
+    import worker.provider_config as provider_config
+
+    loader = ProviderConfigLoader()
+    before = loader.providers
+    seen = []
+    real = provider_config.interpolate_env_vars
+
+    def watch(value):
+        # Called once per provider while the new map is being built.
+        seen.append(loader.providers)
+        return real(value)
+
+    monkeypatch.setattr(provider_config, "interpolate_env_vars", watch)
+    loader.apply_document(loader.raw_data)
+    assert seen and all(observed is before for observed in seen), "readers kept the old map mid-reload"
+    assert loader.providers is not before and set(loader.providers) == set(before)
+
+
 def test_publish_config_to_redis():
     loader = ProviderConfigLoader()
     mock_redis = MagicMock()

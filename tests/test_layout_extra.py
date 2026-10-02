@@ -32,6 +32,13 @@ def test_classify_region_type():
     assert classify_region_type(reg_narration, panel, 1000, 1000) == "narration"
 
 
+def test_zero_ocr_confidence_is_not_treated_as_missing():
+    """OCR confidence 0 is valid evidence, so the low-confidence sign rule must see it."""
+    panel = {"bboxX": 0, "bboxY": 0, "bboxW": 1000, "bboxH": 1000}
+    region = {"text": "店", "bboxW": 10, "bboxH": 10, "confidence": 0.0}
+    assert classify_region_type(region, panel, 1000, 1000) == "sign"
+
+
 def test_group_conversations():
     regions = [
         {
