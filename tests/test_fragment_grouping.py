@@ -249,6 +249,49 @@ def test_gate_still_applies_to_boxes_that_only_clip_corners():
     assert group_fragments(corner, cfg, ctx) == [[0], [1]]
 
 
+# 4Oct ch. 1 p. 17 (the user's screenshot), YOLO balloon 5: a narrow spiky shout balloon holding
+# two columns of one sentence, 9 px apart. Its solidity (0.85) arms the gate, and the deepest point
+# anywhere in the balloon is 102 px from the outline -- so no pair inside it can clear one
+# character (100 px). The gap between the columns measured 74 px.
+P17_COLUMNS = [
+    {"x": 817, "y": 129, "width": 100, "height": 493},  # 私を倒しなさい
+    {"x": 926, "y": 129, "width": 89, "height": 658},  # 秧秧と付き合いたいなら
+]
+P17_CONTEXT = GroupingContext(clearance=lambda p, q: 74.5, solidity=0.855)
+
+
+def test_a_narrow_balloon_vetoes_its_own_adjacent_columns_by_default():
+    cfg = GroupingConfig(threshold_ratio=0.35, orientation="vote", waist_gate=1.0)
+    assert group_fragments(P17_COLUMNS, cfg, P17_CONTEXT) == [[0], [1]]
+
+
+def test_adjacent_lines_too_close_for_a_balloon_wall_are_exempt_from_the_gate():
+    cfg = GroupingConfig(threshold_ratio=0.35, orientation="vote", waist_gate=1.0, waist_adjacent_line_gap=0.2)
+    assert group_fragments(P17_COLUMNS, cfg, P17_CONTEXT) == [[0, 1]]
+
+
+def test_the_adjacent_line_exemption_still_vetoes_a_real_gap():
+    """TWO_COLUMNS are a quarter character apart: room for a wall, so the gate still decides."""
+    cfg = GroupingConfig(threshold_ratio=2.0, waist_gate=1.0, waist_adjacent_line_gap=0.2)
+    ctx = GroupingContext(clearance=lambda p, q: 0.0, solidity=0.5)
+    assert _grouped(cfg, ctx) == [[0], [1]]
+
+
+def test_the_adjacent_line_exemption_still_vetoes_lines_that_only_clip_corners():
+    """sample9, YOLO balloon 3: the gate's one correct veto on the hand-labelled pages.
+
+    って ends a column of the balloon above; it touches 何ニヤニヤ with no gap, but the two share
+    a tenth of their length, so they are not lines of one block.
+    """
+    clipping = [
+        {"x": 859, "y": 1167, "width": 66, "height": 100},  # って
+        {"x": 831, "y": 1257, "width": 39, "height": 157},  # 何ニヤニヤ
+    ]
+    cfg = GroupingConfig(threshold_ratio=0.35, orientation="vote", waist_gate=1.0, waist_adjacent_line_gap=0.2)
+    ctx = GroupingContext(clearance=lambda p, q: 31.0, solidity=0.805)
+    assert group_fragments(clipping, cfg, ctx) == [[0], [1]]
+
+
 def test_gate_can_only_withhold_merges_never_create_them():
     """Over the random corpus, gated grouping is always a refinement of ungated grouping."""
     rng = random.Random(7)

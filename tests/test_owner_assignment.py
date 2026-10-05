@@ -160,3 +160,76 @@ def test_single_fragment_owner_does_not_require_container_or_style():
 def test_rejects_a_candidate_group_that_loses_or_duplicates_a_fragment():
     with pytest.raises(ValueError, match="partition every fragment exactly once"):
         _decision(groups=[[0, 0]])
+
+
+# AUDIT-R21, 4Oct ch. 1 p. 3 (the user's screenshot): seven OCR pieces of one balloon, as detected.
+# OCR broke two columns in two -- ブラ | イダルなんて and アイ | ドルを -- so sorted by x, each top
+# piece's neighbour is the *next* column and the lateral-overlap check vetoes the whole balloon.
+_SPLIT_COLUMNS = [
+    ("でしょう：", 1628, 501, 118, 498),
+    ("縁が無かった", 1708, 487, 152, 633),
+    ("していなければ", 1811, 491, 142, 726),
+    ("アイ", 1936, 508, 104, 207),
+    ("ブラ", 2026, 501, 114, 235),
+    ("ドルを", 1919, 677, 135, 332),
+    ("イダルなんて", 2002, 670, 162, 626),
+]
+_SPLIT_COLUMNS_BALLOON = {
+    "id": "bubble-2",
+    "format": "polygon",
+    "points": [[1593, 60], [2435, 60], [2435, 1357], [1593, 1357]],
+}
+
+
+def _joined_decision(quads, *, join_split_lines, masks=None):
+    return assign_captured_owners(
+        fragment_ids=[f"fragment-{index}" for index in range(len(quads))],
+        raw_quads=quads,
+        recognition=[{} for _ in quads],
+        regions=[{} for _ in quads],
+        candidate_groups=[list(range(len(quads)))],
+        detector_masks=masks if masks is not None else [_CONTAINER],
+        scale_transform={"ocr_to_source": {"scale_x": 1.0, "scale_y": 1.0}},
+        join_split_lines=join_split_lines,
+    )[0]
+
+
+def _split_columns():
+    return [_quad(x, y, width=w, height=h) for _, x, y, w, h in _SPLIT_COLUMNS]
+
+
+def test_a_column_broken_in_two_vetoes_its_balloon_by_default():
+    decision = _joined_decision(_split_columns(), join_split_lines=False, masks=[_SPLIT_COLUMNS_BALLOON])
+
+    assert decision.state == "unknown"
+    assert decision.reason == "insufficient-lateral-line-overlap"
+
+
+def test_joining_a_columns_pieces_first_keeps_the_balloon_one_owner():
+    decision = _joined_decision(_split_columns(), join_split_lines=True, masks=[_SPLIT_COLUMNS_BALLOON])
+
+    assert decision.state == "assigned"
+    assert decision.reason == "validated-container-continuous-lines"
+    continuity = decision.diagnostics["line_continuity"]
+    assert continuity["orientation"] == "vertical"
+    # Seven pieces, five columns: each broken column became one line.
+    assert continuity["line_count"] == 5
+
+
+def test_side_by_side_columns_are_not_joined_into_one_line():
+    """Neighbouring columns share their height, not their width; joining runs along the line only."""
+    columns = [_quad(60 + 30 * index, 60, width=26, height=180) for index in range(3)]
+    decision = _joined_decision(columns, join_split_lines=True)
+
+    assert decision.state == "assigned"
+    assert decision.diagnostics["line_continuity"]["line_count"] == 3
+
+
+def test_pieces_of_one_column_far_apart_are_not_joined_over_the_gap():
+    """Joining must not hide a gap: two pieces of one column far apart along it stay two lines."""
+    quads = [_quad(100, 20, width=26, height=60), _quad(100, 200, width=26, height=60)]
+    decision = _joined_decision(quads, join_split_lines=True)
+
+    # Not joined, so still two lines in one column, which share no length: vetoed as before.
+    assert decision.state == "unknown"
+    assert decision.reason == "insufficient-lateral-line-overlap"

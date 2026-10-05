@@ -63,6 +63,7 @@ def assign_captured_owners(
     candidate_groups: Sequence[Sequence[int]],
     detector_masks: Sequence[Any],
     scale_transform: Mapping[str, Any],
+    join_split_lines: bool = False,
 ) -> list[OwnerDecision]:
     """Assign only evidence-backed text owners for captured OCR grouping candidates.
 
@@ -70,6 +71,10 @@ def assign_captured_owners(
     `_MIN_QUAD_INSIDE_FRACTION` of every member's quad), coherent oriented-line geometry, and a
     finite OCR-to-source scale. Available declared source style can veto
     contradictory fragments; absent style remains an explicit unknown feature, not a split.
+
+    `join_split_lines` (AUDIT-R21, off by default) joins the pieces OCR broke one line into
+    before the line-continuity checks, so a column read as ブラ | イダルなんて is one line rather
+    than two that each fail to overlap their neighbour.
     """
     count = len(fragment_ids)
     if len(raw_quads) != count or len(recognition) != count or len(regions) != count:
@@ -136,7 +141,7 @@ def assign_captured_owners(
             decisions.append(_unknown(fragment_group_ids, "different-source-styles", diagnostics))
             continue
 
-        continuity = _line_continuity(evidence, source_scale)
+        continuity = _line_continuity(evidence, source_scale, join_split_lines=join_split_lines)
         diagnostics["line_continuity"] = continuity
         if not continuity["continuous"]:
             decisions.append(_unknown(fragment_group_ids, str(continuity["reason"]), diagnostics))
@@ -357,7 +362,58 @@ def _signed_area(points: Sequence[tuple[float, float]]) -> float:
     )
 
 
-def _line_continuity(members: Sequence[_FragmentEvidence], source_scale: float) -> dict[str, Any]:
+# Two pieces are one line when they share at least this much of the narrower piece's line width
+# (the same share `fragment_grouping` uses for "one block") ...
+_SPLIT_LINE_CROSS_SHARE = 0.5
+# ... and the white space between them along the line is at most this many line widths. OCR breaks
+# a column where two glyphs sit close; on 4Oct p. 3 the pieces even overlap. A larger gap is a real
+# gap, and the continuity check must still see it.
+_SPLIT_LINE_MAX_GAP = 0.5
+
+
+def _join_line_pieces(
+    boxes: Sequence[tuple[float, float, float, float]], horizontal: bool
+) -> list[tuple[float, float, float, float]]:
+    """Union the boxes of pieces that lie on one line, until no two remaining boxes qualify.
+
+    Neighbouring columns share their *height*, not their width, so this never joins two lines of
+    one balloon; it only undoes a break OCR made inside one line.
+    """
+    lines = list(boxes)
+    joined = True
+    while joined:
+        joined = False
+        for first in range(len(lines)):
+            for second in range(first + 1, len(lines)):
+                if _same_line(lines[first], lines[second], horizontal):
+                    a, b = lines[first], lines[second]
+                    lines[first] = (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+                    del lines[second]
+                    joined = True
+                    break
+            if joined:
+                break
+    return lines
+
+
+def _same_line(a: tuple[float, float, float, float], b: tuple[float, float, float, float], horizontal: bool) -> bool:
+    # Note the module's naming: `_along_interval` is the axis lines are stacked on (x for columns),
+    # so it spans a line's width; `_cross_interval` runs the length of a line.
+    a_width_span, b_width_span = _along_interval(a, horizontal), _along_interval(b, horizontal)
+    a_width, b_width = a_width_span[1] - a_width_span[0], b_width_span[1] - b_width_span[0]
+    if a_width <= 0 or b_width <= 0:
+        return False
+    shared = min(a_width_span[1], b_width_span[1]) - max(a_width_span[0], b_width_span[0])
+    if shared / min(a_width, b_width) < _SPLIT_LINE_CROSS_SHARE:
+        return False
+    a_length_span, b_length_span = _cross_interval(a, horizontal), _cross_interval(b, horizontal)
+    gap = max(a_length_span[0], b_length_span[0]) - min(a_length_span[1], b_length_span[1])
+    return gap <= _SPLIT_LINE_MAX_GAP * (a_width + b_width) / 2
+
+
+def _line_continuity(
+    members: Sequence[_FragmentEvidence], source_scale: float, *, join_split_lines: bool = False
+) -> dict[str, Any]:
     widths = [member.bbox[2] - member.bbox[0] for member in members]
     heights = [member.bbox[3] - member.bbox[1] for member in members]
     horizontal_votes = sum(
@@ -382,21 +438,26 @@ def _line_continuity(members: Sequence[_FragmentEvidence], source_scale: float) 
     if angle_delta > _MAX_ANGLE_DELTA_DEGREES:
         return {"continuous": False, "reason": "incoherent-oriented-lines", "max_angle_delta": angle_delta}
 
-    ordered = sorted(members, key=lambda member: _center(member.bbox)[1 if horizontal else 0])
+    boxes = [member.bbox for member in members]
+    if join_split_lines:
+        boxes = _join_line_pieces(boxes, horizontal)
+        widths = [box[2] - box[0] for box in boxes]
+        heights = [box[3] - box[1] for box in boxes]
+    ordered = sorted(boxes, key=lambda box: _center(box)[1 if horizontal else 0])
     cross_lengths = heights if horizontal else widths
     along_lengths = widths if horizontal else heights
     threshold = (sum(cross_lengths) / len(cross_lengths)) * _MAX_LINE_GAP_MULTIPLIER * source_scale
     gaps: list[float] = []
     overlaps: list[float] = []
     for previous, current in pairwise(ordered):
-        previous_cross_start, previous_cross_end = _cross_interval(previous.bbox, horizontal)
-        current_cross_start, current_cross_end = _cross_interval(current.bbox, horizontal)
+        previous_cross_start, previous_cross_end = _cross_interval(previous, horizontal)
+        current_cross_start, current_cross_end = _cross_interval(current, horizontal)
         overlap = max(0.0, min(previous_cross_end, current_cross_end) - max(previous_cross_start, current_cross_start))
         overlap_share = overlap / min(
             previous_cross_end - previous_cross_start, current_cross_end - current_cross_start
         )
-        _, previous_along_end = _along_interval(previous.bbox, horizontal)
-        current_along_start, _ = _along_interval(current.bbox, horizontal)
+        _, previous_along_end = _along_interval(previous, horizontal)
+        current_along_start, _ = _along_interval(current, horizontal)
         gap = max(0.0, current_along_start - previous_along_end)
         gaps.append(gap)
         overlaps.append(overlap_share)
@@ -408,7 +469,7 @@ def _line_continuity(members: Sequence[_FragmentEvidence], source_scale: float) 
             }
         if gap > threshold:
             return {"continuous": False, "reason": "line-gap-too-large", "gap": gap, "max_gap": threshold}
-    return {
+    result: dict[str, Any] = {
         "continuous": True,
         "orientation": "horizontal" if horizontal else "vertical",
         "max_angle_delta": angle_delta,
@@ -417,6 +478,9 @@ def _line_continuity(members: Sequence[_FragmentEvidence], source_scale: float) 
         "gap_limit": threshold,
         "mean_along_length": sum(along_lengths) / len(along_lengths),
     }
+    if join_split_lines:
+        result["line_count"] = len(boxes)
+    return result
 
 
 def _major_axis_angle(quad: Sequence[tuple[float, float]]) -> float | None:

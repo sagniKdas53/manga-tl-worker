@@ -29,8 +29,10 @@ from worker.config import (
     COVER_FILL_RING_FRACTION,
     OCR_COMPONENT_MAX_AREA_FRACTION,
     OCR_CONFIG,
+    OCR_JOIN_SPLIT_LINES,
     OCR_MERGE_THRESHOLD,
     OCR_ORIENTATION,
+    OCR_WAIST_ADJACENT_LINE_GAP,
     OCR_WAIST_GATE,
     OCR_WAIST_MAX_SOLIDITY,
     YOLO_MASK_EROSION,
@@ -101,6 +103,7 @@ def grouping_config(reading_direction, threshold_ratio=None):
         orientation=OCR_ORIENTATION,
         waist_gate=OCR_WAIST_GATE if OCR_WAIST_GATE > 0 else None,
         waist_max_solidity=OCR_WAIST_MAX_SOLIDITY,
+        waist_adjacent_line_gap=OCR_WAIST_ADJACENT_LINE_GAP if OCR_WAIST_ADJACENT_LINE_GAP > 0 else None,
         component_max_area_fraction=(OCR_COMPONENT_MAX_AREA_FRACTION if OCR_COMPONENT_MAX_AREA_FRACTION > 0 else None),
     )
 
@@ -146,13 +149,15 @@ def partition_unmatched_fragments_by_panel(fragments, panels):
     return partitions
 
 
-def attach_live_owner_decisions(regions, candidate_groups, detector_masks, persist_groups=None):
+def attach_live_owner_decisions(
+    regions, candidate_groups, detector_masks, persist_groups=None, join_split_lines=OCR_JOIN_SPLIT_LINES
+):
     """Persist F01's decision with every member of each normal-runtime component.
 
     Every group is evaluated, but only the first ``persist_groups`` (all, by default) write their
     decision into the members' provenance. The owner veto evaluates one component against the
     rest as singletons; writing those singletons' decisions would overwrite what earlier
-    components recorded.
+    components recorded. ``join_split_lines`` is passed to the owner decision (AUDIT-R21).
     """
 
     raw_quads = [
@@ -166,6 +171,7 @@ def attach_live_owner_decisions(regions, candidate_groups, detector_masks, persi
         candidate_groups=candidate_groups,
         detector_masks=detector_masks,
         scale_transform={"ocr_to_source": {"scale_x": 1.0, "scale_y": 1.0}},
+        join_split_lines=join_split_lines,
     )
     persisted = candidate_groups if persist_groups is None else candidate_groups[:persist_groups]
     for decision, component in zip(decisions[: len(persisted)], persisted, strict=True):
@@ -177,7 +183,7 @@ def attach_live_owner_decisions(regions, candidate_groups, detector_masks, persi
     return decisions
 
 
-def owner_aware_grouping_context(base_context, detector_masks):
+def owner_aware_grouping_context(base_context, detector_masks, join_split_lines=OCR_JOIN_SPLIT_LINES):
     """Attach one F01 decision to each live component and veto unproven joins.
 
     The runtime fragments already carry stable source-space quads and IDs. The bubble detector
@@ -187,7 +193,9 @@ def owner_aware_grouping_context(base_context, detector_masks):
 
     def owner_veto(component, regions):
         candidate_groups = [component] + [[index] for index in range(len(regions)) if index not in component]
-        decision = attach_live_owner_decisions(regions, candidate_groups, detector_masks, persist_groups=1)[0].to_dict()
+        decision = attach_live_owner_decisions(
+            regions, candidate_groups, detector_masks, persist_groups=1, join_split_lines=join_split_lines
+        )[0].to_dict()
         return None if decision["state"] == "assigned" else decision["reason"]
 
     return GroupingContext(

@@ -42,6 +42,10 @@ class GroupingConfig:
             outline. `None` disables it, which is the shipped behaviour.
         waist_max_solidity: Only apply the veto to masks below this solidity. A convex mask has no
             waist, and forcing the measurement on one produces noise, not signal.
+        waist_adjacent_line_gap: Exempt from the veto two lines that run side by side (sharing
+            ``BLOCK_OVERLAP_SHARE`` of the shorter one's length) with less than this many
+            characters of white space between them: too little room for two balloon outlines.
+            ``None`` (the shipped behaviour) applies the veto to them. AUDIT-R21, 4Oct p. 17.
         component_max_members: Maximum members allowed in one connected component. ``None`` keeps
             frozen legacy behaviour; a bounded component is deliberately split to unresolved
             singleton candidates rather than silently retaining a bridge merge.
@@ -58,6 +62,7 @@ class GroupingConfig:
     orientation: str = "reading_direction"
     waist_gate: float | None = None
     waist_max_solidity: float = DEFAULT_WAIST_MAX_SOLIDITY
+    waist_adjacent_line_gap: float | None = None
     component_max_members: int | None = None
     component_max_area_fraction: float | None = None
 
@@ -283,6 +288,13 @@ def _waist_veto(config: GroupingConfig, context: GroupingContext | None):
         char_size = max(r1["width"], r2["width"]) if vertical else max(r1["height"], r2["height"])
         if char_size <= 0:
             return False
+        # The same argument for lines that do not quite touch. On 4Oct p. 17 a narrow shout
+        # balloon holds two columns 9 px apart; the deepest point in the whole balloon is about
+        # one character from its outline, so the gate could never pass any pair inside it.
+        if config.waist_adjacent_line_gap is not None and _adjacent_lines(
+            r1, r2, vertical, config.waist_adjacent_line_gap * char_size
+        ):
+            return False
         p, q = _nearest_points(r1, r2)
         assert context.clearance is not None
         return context.clearance(p, q) < config.waist_gate * char_size
@@ -313,6 +325,24 @@ def _boxes_overlap(r1: dict, r2: dict) -> bool:
     x_share = x_overlap / max(1, min(r1["width"], r2["width"]))
     y_share = y_overlap / max(1, min(r1["height"], r2["height"]))
     return max(x_share, y_share) >= BLOCK_OVERLAP_SHARE
+
+
+def _adjacent_lines(r1: dict, r2: dict, vertical: bool, max_gap: float) -> bool:
+    """Two lines side by side, sharing most of their length, closer than ``max_gap`` pixels.
+
+    For columns the length runs along y and the gap is measured across x; for horizontal lines
+    the other way round. A pair that only clips corners (sample9's って against 何ニヤニヤ, a
+    tenth of their length shared) is not adjacent lines, so the gate still decides it.
+    """
+    if vertical:
+        start, extent, across, breadth = "y", "height", "x", "width"
+    else:
+        start, extent, across, breadth = "x", "width", "y", "height"
+    shared = min(r1[start] + r1[extent], r2[start] + r2[extent]) - max(r1[start], r2[start])
+    if shared / max(1, min(r1[extent], r2[extent])) < BLOCK_OVERLAP_SHARE:
+        return False
+    gap = max(r1[across], r2[across]) - min(r1[across] + r1[breadth], r2[across] + r2[breadth])
+    return gap < max_gap
 
 
 def _nearest_points(r1: dict, r2: dict) -> tuple[tuple[float, float], tuple[float, float]]:
