@@ -390,7 +390,9 @@ def _join_line_pieces(
         joined = False
         for first in range(len(lines)):
             for second in range(first + 1, len(lines)):
-                if _same_line(lines[first][0], lines[second][0], horizontal):
+                # Compare the pieces, not the unions: a column drifting a few pixels per piece
+                # moves its union's centre off the next piece (CodeRabbit on worker #53).
+                if any(_same_line(boxes[a], boxes[b], horizontal) for a in lines[first][1] for b in lines[second][1]):
                     (a, a_members), (b, b_members) = lines[first], lines[second]
                     box = (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
                     lines[first] = (box, a_members + b_members)

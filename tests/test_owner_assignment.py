@@ -292,6 +292,14 @@ def test_columns_of_two_stacked_balloons_are_not_joined_as_one_broken_column():
     ]
 
 
+def test_a_column_broken_in_three_with_a_slight_drift_joins_as_one_line():
+    """The same drift on the owner side: the third piece must match a member, not the union."""
+    pieces = [(0.0, 0.0, 40.0, 60.0), (5.0, 60.0, 45.0, 120.0), (10.0, 120.0, 50.0, 180.0)]
+
+    (line,) = _join_line_pieces(pieces, horizontal=False)
+    assert sorted(line[1]) == [0, 1, 2]
+
+
 def _box(quad):
     return (quad[0][0], quad[0][1], quad[2][0], quad[2][1])
 

@@ -148,6 +148,16 @@ def test_line_order_reads_a_tilted_sign_line_by_line():
     assert _one_group(sign, line_reading_order=True) == "キュアット探偵事所"
 
 
+def test_line_order_follows_a_column_that_drifts_a_little_per_piece():
+    """CodeRabbit on worker #53: matching against the growing union, not the members, lost the third.
+
+    Three equal pieces of one column, each 5 px right of the last: the first two join, the union's
+    centre moves, and the third failed the centre test against it, so it sorted first (rtl).
+    """
+    column = [_piece("一", 0, 0, 40, 60), _piece("二", 5, 60, 40, 60), _piece("三", 10, 120, 40, 60)]
+    assert _one_group(column, line_reading_order=True) == "一二三"
+
+
 def test_line_order_keeps_plain_columns_right_to_left():
     regions = [_piece("一", 200, 10, 30, 120), _piece("二", 160, 14, 30, 110), _piece("三", 120, 12, 30, 90)]
     assert _one_group(regions, line_reading_order=True) == _one_group(regions) == "一二三"

@@ -80,15 +80,24 @@ def _line_reading_order(comp, regions, grouping):
     """
     vertical = resolve_vertical([regions[index] for index in comp], grouping)
     across, across_size, along = ("x", "width", "y") if vertical else ("y", "height", "x")
+
+    def span(index):
+        start = regions[index][across]
+        return start, start + regions[index][across_size]
+
+    def same_line(a, b):
+        narrower = max(1, min(a[1] - a[0], b[1] - b[0]))
+        shared = min(a[1], b[1]) - max(a[0], b[0])
+        centre_offset = abs((a[0] + a[1]) - (b[0] + b[1])) / 2
+        return shared >= _SAME_LINE_SHARE * narrower and centre_offset <= _SAME_LINE_MAX_CENTRE_OFFSET * narrower
+
     lines = []  # [start, end, members] across the line
     for index in sorted(comp, key=lambda i: regions[i][across]):
-        start = regions[index][across]
-        end = start + regions[index][across_size]
+        start, end = span(index)
+        # Match a member, not the line's union: a column that drifts a few pixels per piece moves
+        # its union's centre away from the next piece (CodeRabbit on worker #53).
         for line in lines:
-            narrower = max(1, min(end - start, line[1] - line[0]))
-            shared = min(end, line[1]) - max(start, line[0])
-            centre_offset = abs((start + end) - (line[0] + line[1])) / 2
-            if shared >= _SAME_LINE_SHARE * narrower and centre_offset <= _SAME_LINE_MAX_CENTRE_OFFSET * narrower:
+            if any(same_line((start, end), span(member)) for member in line[2]):
                 line[0], line[1] = min(start, line[0]), max(end, line[1])
                 line[2].append(index)
                 break
