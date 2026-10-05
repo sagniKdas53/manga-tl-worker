@@ -1783,6 +1783,7 @@ def process_ocr(job_data):
                     regions=capture_regions,
                     grouping=grouping_config(reading_direction, merge_threshold),
                     observed_groups=capture_groups,
+                    join_split_lines=OCR_JOIN_SPLIT_LINES,
                 )
                 capture.write(Path(capture_dir) / f"{page_id or image_id}.json")
             except Exception:

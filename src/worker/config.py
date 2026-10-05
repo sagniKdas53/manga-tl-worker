@@ -510,14 +510,18 @@ OCR_COMPONENT_MAX_AREA_FRACTION = float(os.environ.get("OCR_COMPONENT_MAX_AREA_F
 # AUDIT-R21: join the pieces OCR broke one line into before the owner veto's continuity test.
 # When a column is read as ブラ | イダルなんて, the top piece's neighbour is the next column, the
 # lateral-overlap check fails, and the whole balloon is split into one region per piece (4Oct
-# ch. 1 p. 3: seven regions for one sentence).
-OCR_JOIN_SPLIT_LINES = os.environ.get("OCR_JOIN_SPLIT_LINES", "false").strip().lower() in ("1", "true", "yes")
+# ch. 1 p. 3: seven regions for one sentence). On by default since 2026-10-05; "false" restores
+# the old veto. Over the 2026-08-09 hand labels it changes nothing; every balloon it changed on
+# the dev stack's 4Oct and Tests pages became the one text unit it is.
+OCR_JOIN_SPLIT_LINES = os.environ.get("OCR_JOIN_SPLIT_LINES", "true").strip().lower() in ("1", "true", "yes")
 
 # AUDIT-R21: two lines side by side (sharing half their length) closer than this many characters
 # are exempt from the clearance veto -- there is no room for two balloon outlines between them.
 # A narrow balloon (4Oct p. 17, 254 px wide) is under one character deep everywhere, so the veto
-# split its two columns 9 px apart. 0 disables (the veto then applies to them, as before).
-OCR_WAIST_ADJACENT_LINE_GAP = float(os.environ.get("OCR_WAIST_ADJACENT_LINE_GAP", "0"))
+# split its two columns 9 px apart. 0 disables (the veto then applies to them, as before). 0.2
+# keeps the veto's one correct catch on the hand labels (sample9, corners clipping) and the
+# quarter-character gap its own tests treat as room for a wall.
+OCR_WAIST_ADJACENT_LINE_GAP = float(os.environ.get("OCR_WAIST_ADJACENT_LINE_GAP", "0.2"))
 
 
 def is_usable_model(model):
