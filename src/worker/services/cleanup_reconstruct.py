@@ -19,15 +19,24 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from worker.config import AOT_MODEL_PATH, AOT_PINNED_CHECKSUM, BACKGROUND_FILL_MAX_SPREAD, CTD_CONF_THRESHOLD
+from worker.config import (
+    AOT_MODEL_PATH,
+    AOT_PINNED_CHECKSUM,
+    BACKGROUND_FILL_MAX_SPREAD,
+    CLEANUP_HALO_GROW,
+    CTD_CONF_THRESHOLD,
+)
 from worker.services.glyph_mask import segment_crop, threshold_mask
 from worker.services.pixel_stats import pixel_spread
 
 logger = logging.getLogger(__name__)
 
 # v3: the mask also takes the leftover ink CTD half-missed next to it (`CleanupConfig.ink_grow`).
-GENERATOR_ID = "ctd-seg+telea-aotgan-cleanup/v3-leftover-ink"
+# v4: and the outline or glow band round lettering on artwork (`CleanupConfig.halo_grow`).
+GENERATOR_ID = "ctd-seg+telea-aotgan-cleanup/v4-halo"
 GENERATOR_SHA256 = hashlib.sha256(GENERATOR_ID.encode()).hexdigest()
+# With `halo_grow` off (CLEANUP_HALO_GROW=false) the output is v3's, so the patch says so.
+GENERATOR_ID_NO_HALO = "ctd-seg+telea-aotgan-cleanup/v3-leftover-ink"
 
 # How the background under erased lettering is rebuilt (System Settings → cleanup mode, per
 # chapter/series override). "auto" routes by pixel_spread: TELEA on flat interiors, AOT-GAN on
@@ -37,11 +46,12 @@ GENERATOR_SHA256 = hashlib.sha256(GENERATOR_ID.encode()).hexdigest()
 RECONSTRUCTION_MODES = ("auto", "telea", "aot")
 
 
-def generator_sha256_for(mode: str) -> str:
+def generator_sha256_for(mode: str, halo_grow: bool = True) -> str:
     """A patch records its recipe. "auto" keeps the pre-selector identity."""
+    generator_id = GENERATOR_ID if halo_grow else GENERATOR_ID_NO_HALO
     if mode == "auto":
-        return GENERATOR_SHA256
-    return hashlib.sha256(f"{GENERATOR_ID};mode={mode}".encode()).hexdigest()
+        return hashlib.sha256(generator_id.encode()).hexdigest()
+    return hashlib.sha256(f"{generator_id};mode={mode}".encode()).hexdigest()
 
 
 _aot_session = None
@@ -89,6 +99,47 @@ class CleanupConfig:
     ink_reach_px: int = 16
     ink_max_box_share: float = 0.05
     ink_min_px: int = 30
+    # Halo growth (2026-10-04, 56 pages of outlined and glowing text): text on artwork often has a
+    # white (or coloured) outline or glow 6-12px wide, and the mask above stops 3-7px short of its
+    # edge. AOT/TELEA then paint inward from a white border and leave white blobs in the glyphs'
+    # shape. `ink_grow` cannot help, because it needs a flat ring and artwork is not flat. The
+    # band is grown only when it looks like an outline, measured against the local background
+    # (a TELEA fill from `halo_bg_px` out): enough of the 0-3px ring round the mask is off that
+    # background, one colour dominates it, the colour's coverage falls off within `halo_max_width_px`
+    # (a plate or label keeps going: `halo_max_tail`) and ends at about the same distance all round
+    # (a plate that ends 1px from one glyph and 9px from another is a shape of its own:
+    # `halo_max_edge_spread_px`). Then the pixels nearer that colour than the background join the
+    # mask, out to where its coverage drops under `halo_reach_share` of the near rings, plus
+    # `halo_reach_pad_px`, never past `halo_reach_max_px`, within the region box + `halo_box_margin_px`.
+    halo_grow: bool = CLEANUP_HALO_GROW  # env CLEANUP_HALO_GROW=false turns it off
+    halo_box_margin_px: int = 10
+    halo_bg_px: int = 20
+    # The background fill is the whole cost (4s on a 2192x1301 crop at native size), and it only has
+    # to be roughly right, so it runs on a copy whose long side is at most this, then is scaled back.
+    halo_bg_max_side: int = 512
+    # Skip the fill when both rings round the mask (0-3px and the last 5px before `halo_bg_px`) are
+    # within this of one colour for this share of their pixels: a plain balloon. On 2026-10-05 it
+    # skipped 34% of 2,388 corpus regions and lost one fire, which made no visible difference.
+    halo_plain_tolerance: int = 24
+    halo_plain_share: float = 0.97
+    halo_contrast: int = 40
+    halo_min_share: float = 0.10
+    halo_min_consistency: float = 0.60
+    # Outlines and glows round manga lettering are white (or black). A pale tinted band hugging
+    # the text is a label or a small balloon cut to fit it: on 261 corpus pages (2026-10-05) every
+    # fire that erased art had a tinted band (lightness 0.74-0.83, chroma 32-117), every good fire a
+    # neutral one (chroma <= 14, lightness >= 0.89 or <= 0.09).
+    halo_max_chroma: int = 25
+    halo_min_light: float = 0.85
+    halo_max_dark: float = 0.20
+    halo_min_near: float = 0.25
+    halo_max_tail: float = 0.10
+    halo_max_width_px: int = 8
+    halo_max_edge_spread_px: float = 3.5
+    halo_reach_share: float = 0.10
+    halo_reach_pad_px: int = 2
+    halo_reach_max_px: int = 12
+    halo_final_dilate_px: int = 2
 
 
 @dataclass(frozen=True)
@@ -244,6 +295,119 @@ def _grow_by_leftover_ink(
     if ink_px < config.ink_min_px:
         return mask_bool, 0
     return mask_bool | _dilate(ink, config.mask_dilate_px), ink_px
+
+
+def _connected_to(candidates: np.ndarray, mask_bool: np.ndarray) -> np.ndarray:
+    """The candidate pixels in a component that touches the mask."""
+    _count, labels = cv2.connectedComponents((candidates | mask_bool).astype(np.uint8), connectivity=8)
+    return candidates & np.isin(labels, np.unique(labels[mask_bool]))
+
+
+def _dominant_colour(pixels: np.ndarray) -> np.ndarray:
+    """Median of the larger of two colour clusters, so a ring that is half outline and half balloon
+    does not average into a colour neither has. Deterministic: seeded from the two extremes."""
+    pts = pixels.astype(np.float32)
+    first = pts[np.abs(pts - np.median(pts, axis=0)).max(axis=1).argmax()]
+    centres = np.stack([first, pts[np.abs(pts - first).max(axis=1).argmax()]])
+    labels = np.zeros(len(pts), dtype=np.intp)
+    for _ in range(10):
+        labels = np.abs(pts[:, None, :] - centres[None]).max(axis=2).argmin(axis=1)
+        for k in (0, 1):
+            if (labels == k).any():
+                centres[k] = pts[labels == k].mean(axis=0)
+    big = int(np.bincount(labels, minlength=2).argmax())
+    return np.median(pixels[labels == big], axis=0)
+
+
+def _local_background(crop_bgr: np.ndarray, hole_bool: np.ndarray, max_side: int) -> np.ndarray:
+    """What the crop would look like without the lettering: a TELEA fill of the hole, run on a
+    copy no longer than `max_side` and scaled back up."""
+    h, w = hole_bool.shape
+    scale = min(1.0, max_side / max(h, w))
+    small_w, small_h = max(1, round(w * scale)), max(1, round(h * scale))
+    small = cv2.resize(crop_bgr, (small_w, small_h), interpolation=cv2.INTER_AREA)
+    small_hole = cv2.resize(hole_bool.astype(np.uint8) * 255, (small_w, small_h), interpolation=cv2.INTER_NEAREST)
+    filled = cv2.inpaint(small, small_hole, max(1, round(5 * scale)), cv2.INPAINT_TELEA)
+    filled = cv2.resize(filled, (w, h), interpolation=cv2.INTER_LINEAR)
+    return np.where(hole_bool[..., None], filled, crop_bgr).astype(np.int16)
+
+
+def _grow_by_halo(
+    crop_bgr: np.ndarray,
+    mask_bool: np.ndarray,
+    crop_x0: int,
+    crop_y0: int,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    config: CleanupConfig,
+) -> tuple[np.ndarray, int]:
+    """Add the outline or glow band left round the mask; see `CleanupConfig.halo_grow`.
+
+    Returns the (possibly) grown mask and how many pixels joined it.
+    """
+    crop_h, crop_w = mask_bool.shape
+    margin = config.halo_box_margin_px
+    box = np.zeros_like(mask_bool)
+    box[
+        max(0, int(y) - crop_y0 - margin) : min(crop_h, int(y + height) - crop_y0 + margin),
+        max(0, int(x) - crop_x0 - margin) : min(crop_w, int(x + width) - crop_x0 + margin),
+    ] = True
+    pixels = crop_bgr.astype(np.int16)
+    distance = cv2.distanceTransform((~mask_bool).astype(np.uint8), cv2.DIST_L2, 5)
+    inner = (distance > 0) & (distance <= 3) & box
+    if inner.sum() < 50:
+        return mask_bool, 0
+    # Lettering in a plain balloon: the ring hugging the mask and the ring `halo_bg_px` out are one
+    # flat colour, the same one, so nothing can be off the background. Skipping here saves the
+    # background fill, which is most of this step's cost.
+    outer = (distance > config.halo_bg_px - 5) & (distance <= config.halo_bg_px) & box
+    if outer.sum() >= 50:
+        flat = np.median(pixels[outer], axis=0)
+        near_flat = np.abs(pixels - flat).max(axis=2) <= config.halo_plain_tolerance
+        if min(near_flat[inner].mean(), near_flat[outer].mean()) >= config.halo_plain_share:
+            return mask_bool, 0
+
+    background = _local_background(crop_bgr, _dilate(mask_bool, config.halo_bg_px), config.halo_bg_max_side)
+    off_background = np.abs(pixels - background).max(axis=2)
+    off = inner & (off_background > config.halo_contrast)
+    if off.sum() < 40 or off.sum() < config.halo_min_share * inner.sum():
+        return mask_bool, 0
+    halo = _dominant_colour(pixels[off])
+    off_halo = np.abs(pixels - halo).max(axis=2)
+    if float((off_halo[off] <= 30).mean()) < config.halo_min_consistency:
+        return mask_bool, 0
+    lightness = (float(halo.max()) + float(halo.min())) / 510.0
+    neutral = float(halo.max()) - float(halo.min()) <= config.halo_max_chroma
+    if not neutral or config.halo_max_dark < lightness < config.halo_min_light:
+        return mask_bool, 0
+
+    # How much of each 1px ring past the mask carries the band's colour.
+    like = (off_halo < off_background) & (off_halo <= config.halo_contrast)
+    rings = [box & (distance > d - 1) & (distance <= d) for d in range(1, config.halo_bg_px + 1)]
+    coverage = np.array([(like & ring).sum() / max(1, ring.sum()) for ring in rings])
+    near = float(coverage[:3].mean())
+    tail = float(coverage[9:12].mean())
+    below = np.flatnonzero(coverage < 0.25 * near)
+    band_width = int(below[0]) if len(below) else len(coverage)
+    if near < config.halo_min_near or tail > config.halo_max_tail or band_width > config.halo_max_width_px:
+        return mask_bool, 0
+
+    # An outline or glow ends at about the same distance all round; a plate does not.
+    band = _connected_to(like & (distance <= config.halo_reach_max_px) & box & ~mask_bool, mask_bool)
+    edge = band & ~cv2.erode((band | mask_bool).astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+    if edge.sum() < 20:
+        return mask_bool, 0
+    q25, q75 = np.percentile(distance[edge], [25, 75])
+    if q75 - q25 > config.halo_max_edge_spread_px:
+        return mask_bool, 0
+
+    reached = [d for d in range(1, config.halo_reach_max_px + 1) if coverage[d - 1] >= config.halo_reach_share * near]
+    reach = min(config.halo_reach_max_px, (max(reached) if reached else 0) + config.halo_reach_pad_px)
+    grown = mask_bool | _connected_to((off_halo < off_background) & (distance <= reach) & box & ~mask_bool, mask_bool)
+    grown = (_dilate(grown, config.halo_final_dilate_px) & (box | mask_bool)) | mask_bool
+    return grown, int((grown & ~mask_bool).sum())
 
 
 def _reconstruct_telea(crop_bgr: np.ndarray, mask_bool: np.ndarray) -> np.ndarray:
@@ -402,12 +566,21 @@ def reconstruct_region(
         dilated_mask, ink_px = _grow_by_leftover_ink(crop, dilated_mask, crop_x0, crop_y0, x, y, width, height, config)
         if ink_px:
             diagnostics.append(f"leftover ink added to the mask: {ink_px}px")
+    halo_px = 0
+    if config.halo_grow:
+        dilated_mask, halo_px = _grow_by_halo(crop, dilated_mask, crop_x0, crop_y0, x, y, width, height, config)
+        if halo_px:
+            diagnostics.append(f"halo added to the mask: {halo_px}px")
     coverage_pct = 100.0 * float(dilated_mask.mean())
 
     interior = crop[dilated_mask]
     spread = pixel_spread(interior) if len(interior) else 0.0
     t = time.perf_counter()
-    if mode == "telea" or (mode == "auto" and spread <= config.spread_threshold):
+    # A grown halo means the lettering sits on artwork (the band differs from the background behind
+    # it), but the mask's interior is now glyph + outline, which reads as flat. TELEA smears the art
+    # into a mask that size; AOT rebuilds it. Measured on the halo regions of 2026-10-04: AOT alone
+    # leaves the white blobs, halo + TELEA smears, only halo + AOT comes out clean.
+    if mode == "telea" or (mode == "auto" and not halo_px and spread <= config.spread_threshold):
         method = "telea"
         reconstructed = _reconstruct_telea(crop, dilated_mask)
     else:
@@ -421,14 +594,14 @@ def reconstruct_region(
     inpaint_s = time.perf_counter() - t
     diagnostics.append(f"reconstruction method: {method} (mode={mode}, pixel_spread={spread:.1f})")
 
-    steps = f"ctd={ctd_s:.1f}s mask={coverage_pct:.1f}% ink+={ink_px}px {method}={inpaint_s:.1f}s"
+    steps = f"ctd={ctd_s:.1f}s mask={coverage_pct:.1f}% ink+={ink_px}px halo+={halo_px}px {method}={inpaint_s:.1f}s"
 
     t = time.perf_counter()
     result = CleanupResult(
         mask_png=_encode_mask_png(dilated_mask),
         patch_png=_encode_patch_png(reconstructed, dilated_mask),
         bounds={"x": crop_x0, "y": crop_y0, "width": crop_w, "height": crop_h},
-        generator_sha256=generator_sha256_for(mode),
+        generator_sha256=generator_sha256_for(mode, config.halo_grow),
         diagnostics=diagnostics,
     )
     logger.info(
