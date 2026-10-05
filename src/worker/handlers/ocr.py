@@ -32,6 +32,7 @@ from worker.config import (
     OCR_JOIN_SPLIT_LINES,
     OCR_MERGE_THRESHOLD,
     OCR_ORIENTATION,
+    OCR_SPLIT_VETOED_AT_BREAKS,
     OCR_WAIST_ADJACENT_LINE_GAP,
     OCR_WAIST_GATE,
     OCR_WAIST_MAX_SOLIDITY,
@@ -52,7 +53,7 @@ from worker.services.layout import bubble_compare
 from worker.services.merge_regions import merge_ocr_regions
 from worker.services.ocr import parse_paddle_ocr_results, parse_rapid_ocr_results
 from worker.services.ocr_capture import capture_observed_ocr_grouping
-from worker.services.owner_assignment import assign_captured_owners
+from worker.services.owner_assignment import assign_captured_owners, split_at_line_breaks
 from worker.services.ownership_features import capture_fragment_features
 from worker.services.panel_detection import detect_text_containers
 from worker.services.pixel_stats import pixel_spread as _pixel_spread
@@ -183,12 +184,18 @@ def attach_live_owner_decisions(
     return decisions
 
 
-def owner_aware_grouping_context(base_context, detector_masks, join_split_lines=OCR_JOIN_SPLIT_LINES):
+def owner_aware_grouping_context(
+    base_context,
+    detector_masks,
+    join_split_lines=OCR_JOIN_SPLIT_LINES,
+    split_at_breaks=OCR_SPLIT_VETOED_AT_BREAKS,
+):
     """Attach one F01 decision to each live component and veto unproven joins.
 
     The runtime fragments already carry stable source-space quads and IDs. The bubble detector
     supplies the only candidate container for this grouping call. A rejected decision can only
-    split a component; it never promotes a merge or cleanup authority.
+    split a component; it never promotes a merge or cleanup authority. With ``split_at_breaks``
+    a rejected component is first cut where its lines break, and each run is decided again.
     """
 
     def owner_veto(component, regions):
@@ -198,11 +205,20 @@ def owner_aware_grouping_context(base_context, detector_masks, join_split_lines=
         )[0].to_dict()
         return None if decision["state"] == "assigned" else decision["reason"]
 
+    def owner_split(component, regions):
+        quads = [
+            regions[index].get("sourceQuad") or (regions[index].get("ownershipProvenance") or {}).get("sourceQuad")
+            for index in component
+        ]
+        parts = split_at_line_breaks(quads, join_split_lines=join_split_lines)
+        return None if parts is None else [[component[local] for local in part] for part in parts]
+
     return GroupingContext(
         clearance=base_context.clearance if base_context is not None else None,
         solidity=base_context.solidity if base_context is not None else 1.0,
         owner_veto=owner_veto,
         page_area=base_context.page_area if base_context is not None else None,
+        owner_split=owner_split if split_at_breaks else None,
     )
 
 

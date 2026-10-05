@@ -23,7 +23,7 @@ from worker.services.fragment_grouping import (
     resolve_vertical,
     union_area,
 )
-from worker.services.owner_assignment import assign_captured_owners
+from worker.services.owner_assignment import assign_captured_owners, split_at_line_breaks
 
 
 def _legacy_components(regions, reading_direction, threshold_ratio):
@@ -407,6 +407,72 @@ def _owner_decision_veto(regions, masks, recognition):
         return None if decision.state == "assigned" else decision.reason
 
     return veto
+
+
+# chrome-box TELEA p. 2, balloon 1: two columns of one sentence and the handwritten aside 良くないけど.
+TELEA_ASIDE = [
+    {"x": 2562, "y": 1347, "width": 124, "height": 1183},
+    {"x": 2454, "y": 1347, "width": 104, "height": 767},
+    {"x": 2334, "y": 1986, "width": 148, "height": 576},
+]
+TELEA_BALLOON = [
+    {"id": "bubble-1", "format": "polygon", "points": [[2300, 1300], [2720, 1300], [2720, 2600], [2300, 2600]]}
+]
+
+
+def _joined_owner_veto(regions, masks):
+    quads = [_quad(region) for region in regions]
+
+    def veto(component, _grouping_regions):
+        decision = assign_captured_owners(
+            fragment_ids=[f"fragment-{index}" for index in component],
+            raw_quads=[quads[index] for index in component],
+            recognition=[{} for _ in component],
+            regions=[regions[index] for index in component],
+            candidate_groups=[list(range(len(component)))],
+            detector_masks=masks,
+            scale_transform={"ocr_to_source": {"scale_x": 1.0, "scale_y": 1.0}},
+            join_split_lines=True,
+        )[0]
+        return None if decision.state == "assigned" else decision.reason
+
+    def split(component, _grouping_regions):
+        parts = split_at_line_breaks([quads[index] for index in component], join_split_lines=True)
+        return None if parts is None else [[component[local] for local in part] for part in parts]
+
+    return veto, split
+
+
+def test_a_vetoed_component_falls_to_singletons_without_a_split_hook():
+    veto, _ = _joined_owner_veto(TELEA_ASIDE, TELEA_BALLOON)
+    grouped = group_fragments(
+        TELEA_ASIDE, GroupingConfig(threshold_ratio=2.0, orientation="vote"), GroupingContext(owner_veto=veto)
+    )
+
+    assert sorted(grouped) == [[0], [1], [2]]
+
+
+def test_a_vetoed_component_keeps_the_runs_its_split_hook_proves():
+    veto, split = _joined_owner_veto(TELEA_ASIDE, TELEA_BALLOON)
+    grouped = group_fragments(
+        TELEA_ASIDE,
+        GroupingConfig(threshold_ratio=2.0, orientation="vote"),
+        GroupingContext(owner_veto=veto, owner_split=split),
+    )
+
+    assert sorted(sorted(group) for group in grouped) == [[0, 1], [2]]
+
+
+def test_a_run_the_owner_still_rejects_falls_to_singletons():
+    """The hook only proposes cuts; every part must pass the owner decision again."""
+    veto, split = _joined_owner_veto(TELEA_ASIDE, [])  # no container: no multi-piece owner at all
+    grouped = group_fragments(
+        TELEA_ASIDE,
+        GroupingConfig(threshold_ratio=2.0, orientation="vote"),
+        GroupingContext(owner_veto=veto, owner_split=split),
+    )
+
+    assert sorted(grouped) == [[0], [1], [2]]
 
 
 def test_actual_owner_decision_separates_an_a_b_c_bridge():

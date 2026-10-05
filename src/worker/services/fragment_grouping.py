@@ -83,12 +83,17 @@ class GroupingContext:
             split it into unresolved singleton candidates, or ``None`` to keep it. It cannot
             create a merge and is off by default.
         page_area: Source page area in pixels², for ``component_max_area_fraction``.
+        owner_split: Called on a component ``owner_veto`` rejected. Return the parts to try
+            instead of single pieces (index lists partitioning the component), or ``None``. Each
+            part goes through the veto again, so this can only propose cuts, never prove a merge.
+            Off by default: a vetoed component then splits into singletons, as before.
     """
 
     clearance: Callable[[tuple[float, float], tuple[float, float]], float] | None = None
     solidity: float = 1.0
     owner_veto: Callable[[list[int], list], str | None] | None = None
     page_area: float | None = None
+    owner_split: Callable[[list[int], list], list[list[int]] | None] | None = None
 
 
 # Floor for the halving in `_split_oversized`. Below a twentieth of a character the budget joins
@@ -160,6 +165,13 @@ def _bound_components(
             reason = "component-max-members"
         elif context is not None and context.owner_veto is not None:
             reason = context.owner_veto(component, regions)
+            if reason is not None and context.owner_split is not None and len(component) > 2:
+                parts = context.owner_split(component, regions)
+                if parts is not None and 1 < len(parts) < len(component):
+                    # Each part is smaller than the component, so the recursion ends; a part the
+                    # veto still rejects is split again, down to singletons at worst.
+                    bounded.extend(_bound_components(parts, regions, config, context))
+                    continue
         if reason is not None:
             bounded.extend([[index] for index in component])
         elif _oversized(component, regions, config, context):

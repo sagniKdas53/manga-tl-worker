@@ -369,31 +369,88 @@ _SPLIT_LINE_CROSS_SHARE = 0.5
 # a column where two glyphs sit close; on 4Oct p. 3 the pieces even overlap. A larger gap is a real
 # gap, and the continuity check must still see it.
 _SPLIT_LINE_MAX_GAP = 0.5
+# ... and their centre lines are at most this share of the narrower piece apart. OCR's pieces of
+# one column sit on one axis (4Oct p. 3: 0 and 1.5 px apart); the columns of two balloons stacked
+# end to end inside one YOLO blob do not (Tests ch. 6 p. 5: 14 px, a fifth of the column).
+_SPLIT_LINE_MAX_CENTRE_OFFSET = 0.15
 
 
 def _join_line_pieces(
     boxes: Sequence[tuple[float, float, float, float]], horizontal: bool
-) -> list[tuple[float, float, float, float]]:
+) -> list[tuple[tuple[float, float, float, float], list[int]]]:
     """Union the boxes of pieces that lie on one line, until no two remaining boxes qualify.
 
-    Neighbouring columns share their *height*, not their width, so this never joins two lines of
-    one balloon; it only undoes a break OCR made inside one line.
+    Returns each line's box with the indices of the pieces it holds. Neighbouring columns share
+    their *height*, not their width, so this never joins two lines of one balloon; it only undoes
+    a break OCR made inside one line.
     """
-    lines = list(boxes)
+    lines = [(box, [index]) for index, box in enumerate(boxes)]
     joined = True
     while joined:
         joined = False
         for first in range(len(lines)):
             for second in range(first + 1, len(lines)):
-                if _same_line(lines[first], lines[second], horizontal):
-                    a, b = lines[first], lines[second]
-                    lines[first] = (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+                if _same_line(lines[first][0], lines[second][0], horizontal):
+                    (a, a_members), (b, b_members) = lines[first], lines[second]
+                    box = (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+                    lines[first] = (box, a_members + b_members)
                     del lines[second]
                     joined = True
                     break
             if joined:
                 break
     return lines
+
+
+def _line_orientation(boxes: Sequence[tuple[float, float, float, float]]) -> bool | None:
+    """True for horizontal lines, False for columns, None when the boxes are square or mixed."""
+    horizontal_votes = sum((box[2] - box[0]) >= (box[3] - box[1]) * _MIN_ORIENTATION_ASPECT for box in boxes)
+    vertical_votes = sum((box[3] - box[1]) >= (box[2] - box[0]) * _MIN_ORIENTATION_ASPECT for box in boxes)
+    if bool(horizontal_votes) == bool(vertical_votes):
+        return None
+    return horizontal_votes > 0
+
+
+def split_at_line_breaks(raw_quads: Sequence[Any], *, join_split_lines: bool) -> list[list[int]] | None:
+    """Cut a candidate group where its line continuity breaks, keeping the runs on either side.
+
+    The owner veto used to answer any break by splitting the whole group into single pieces: on
+    chrome-box's TELEA p. 2 one handwritten aside set beside a two-column sentence (良くないけど)
+    cost the sentence its own grouping. Lines are ordered and compared exactly as
+    `_line_continuity` does, and a cut goes where it would reject: lateral overlap under
+    `_MIN_LATERAL_OVERLAP`, or a gap over `_MAX_LINE_GAP_MULTIPLIER` mean line widths.
+
+    Returns the parts as lists of indices into ``raw_quads``, or ``None`` when there is no break
+    to cut at, or no line geometry to order (invalid quads, square or mixed orientation). Each
+    part still has to pass the owner decision on its own.
+    """
+    quads = [_normalise_quad(raw) for raw in raw_quads]
+    if len(quads) < 2 or any(quad is None for quad in quads):
+        return None
+    boxes = []
+    for quad in quads:
+        assert quad is not None
+        xs, ys = [point[0] for point in quad], [point[1] for point in quad]
+        boxes.append((min(xs), min(ys), max(xs), max(ys)))
+    horizontal = _line_orientation(boxes)
+    if horizontal is None:
+        return None
+    lines = _join_line_pieces(boxes, horizontal) if join_split_lines else [(box, [i]) for i, box in enumerate(boxes)]
+    ordered = sorted(lines, key=lambda line: _center(line[0])[1 if horizontal else 0])
+    cross_lengths = [(box[3] - box[1]) if horizontal else (box[2] - box[0]) for box, _ in ordered]
+    threshold = (sum(cross_lengths) / len(cross_lengths)) * _MAX_LINE_GAP_MULTIPLIER
+    parts: list[list[int]] = [list(ordered[0][1])]
+    for (previous, _), (current, members) in pairwise(ordered):
+        previous_start, previous_end = _cross_interval(previous, horizontal)
+        current_start, current_end = _cross_interval(current, horizontal)
+        overlap = max(0.0, min(previous_end, current_end) - max(previous_start, current_start))
+        share = overlap / max(1e-9, min(previous_end - previous_start, current_end - current_start))
+        gap = max(0.0, _along_interval(current, horizontal)[0] - _along_interval(previous, horizontal)[1])
+        if share < _MIN_LATERAL_OVERLAP or gap > threshold:
+            parts.append(list(members))
+        else:
+            parts[-1].extend(members)
+    return parts if len(parts) > 1 else None
 
 
 def _same_line(a: tuple[float, float, float, float], b: tuple[float, float, float, float], horizontal: bool) -> bool:
@@ -405,6 +462,9 @@ def _same_line(a: tuple[float, float, float, float], b: tuple[float, float, floa
         return False
     shared = min(a_width_span[1], b_width_span[1]) - max(a_width_span[0], b_width_span[0])
     if shared / min(a_width, b_width) < _SPLIT_LINE_CROSS_SHARE:
+        return False
+    centre_offset = abs((a_width_span[0] + a_width_span[1]) - (b_width_span[0] + b_width_span[1])) / 2
+    if centre_offset > _SPLIT_LINE_MAX_CENTRE_OFFSET * min(a_width, b_width):
         return False
     a_length_span, b_length_span = _cross_interval(a, horizontal), _cross_interval(b, horizontal)
     gap = max(a_length_span[0], b_length_span[0]) - min(a_length_span[1], b_length_span[1])
@@ -440,7 +500,7 @@ def _line_continuity(
 
     boxes = [member.bbox for member in members]
     if join_split_lines:
-        boxes = _join_line_pieces(boxes, horizontal)
+        boxes = [box for box, _ in _join_line_pieces(boxes, horizontal)]
         widths = [box[2] - box[0] for box in boxes]
         heights = [box[3] - box[1] for box in boxes]
     ordered = sorted(boxes, key=lambda box: _center(box)[1 if horizontal else 0])

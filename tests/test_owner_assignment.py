@@ -2,8 +2,8 @@ import math
 
 import pytest
 
+from worker.services.owner_assignment import _join_line_pieces, assign_captured_owners, split_at_line_breaks
 from worker.services.owner_assignment import _point_in_polygon as _inside
-from worker.services.owner_assignment import assign_captured_owners
 
 _CONTAINER = {"id": "bubble-a", "format": "polygon", "points": [[0, 0], [300, 0], [300, 300], [0, 300]]}
 
@@ -223,6 +223,77 @@ def test_side_by_side_columns_are_not_joined_into_one_line():
 
     assert decision.state == "assigned"
     assert decision.diagnostics["line_continuity"]["line_count"] == 3
+
+
+# chrome-box TELEA chapter, p. 2 (the 良くないけど gate), as the live worker read it 2026-10-05.
+# Balloon 1: two columns of one sentence, and a handwritten aside set lower beside them.
+_ASIDE_BALLOON = [
+    (2562, 1347, 124, 1183),  # クソ兄貴のお手製フリップは
+    (2454, 1347, 104, 767),  # まだいいとして：
+    (2334, 1986, 148, 576),  # 良くないけど
+]
+# Balloon 4: two two-column blocks, the second set lower and to the left of the first.
+_STEPPED_BALLOON = [
+    (763, 1826, 104, 812),  # ジッパー式のバニーが
+    (659, 1830, 96, 700),  # 好きなんだけどさ
+    (523, 2386, 104, 1311),  # あれ引っかかったら痛そうだから
+    (415, 2382, 96, 1183),  # ボタンで手作りしてみたぞノ
+]
+
+
+def _as_sets(parts):
+    return sorted(sorted(part) for part in parts)
+
+
+def test_a_vetoed_balloon_splits_where_its_lines_break_not_into_single_pieces():
+    quads = [_quad(x, y, width=w, height=h) for x, y, w, h in _ASIDE_BALLOON]
+
+    assert _as_sets(split_at_line_breaks(quads, join_split_lines=True)) == [[0, 1], [2]]
+
+
+def test_two_stepped_blocks_in_one_balloon_split_into_the_two_blocks():
+    quads = [_quad(x, y, width=w, height=h) for x, y, w, h in _STEPPED_BALLOON]
+
+    assert _as_sets(split_at_line_breaks(quads, join_split_lines=True)) == [[0, 1], [2, 3]]
+
+
+def test_continuous_lines_have_no_break_to_split_at():
+    columns = [_quad(60 + 30 * index, 60, width=26, height=180) for index in range(3)]
+
+    assert split_at_line_breaks(columns, join_split_lines=True) is None
+
+
+def test_split_points_keep_a_broken_columns_pieces_together():
+    """The p. 3 balloon is continuous once its pieces are joined, so there is nothing to cut."""
+    assert split_at_line_breaks(_split_columns(), join_split_lines=True) is None
+
+
+def test_mixed_orientation_gives_no_split_points():
+    quads = [_quad(100, 20, width=26, height=180), _quad(140, 20, width=180, height=26)]
+
+    assert split_at_line_breaks(quads, join_split_lines=True) is None
+
+
+def test_columns_of_two_stacked_balloons_are_not_joined_as_one_broken_column():
+    """Tests ch. 6 p. 5: three echo balloons fused by YOLO, stacked top to bottom.
+
+    The middle balloon's 終わらせる ends 2 px into the bottom balloon's 速攻で and they share most
+    of their width, but a broken column's pieces sit on one centre line (4Oct p. 3: 0 and 1.5 px
+    apart); these are 14 px apart, a fifth of the column.
+    """
+    stacked = [
+        _quad(92, 172, width=68, height=274),  # 終わらせる (middle balloon)
+        _quad(96, 444, width=88, height=214),  # 速攻で (bottom balloon)
+    ]
+
+    assert _join_line_pieces([_box(quad) for quad in stacked], horizontal=False) == [
+        (_box(stacked[0]), [0]),
+        (_box(stacked[1]), [1]),
+    ]
+
+
+def _box(quad):
+    return (quad[0][0], quad[0][1], quad[2][0], quad[2][1])
 
 
 def test_pieces_of_one_column_far_apart_are_not_joined_over_the_gap():

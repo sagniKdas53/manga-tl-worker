@@ -515,6 +515,16 @@ OCR_COMPONENT_MAX_AREA_FRACTION = float(os.environ.get("OCR_COMPONENT_MAX_AREA_F
 # the dev stack's 4Oct and Tests pages became the one text unit it is.
 OCR_JOIN_SPLIT_LINES = os.environ.get("OCR_JOIN_SPLIT_LINES", "true").strip().lower() in ("1", "true", "yes")
 
+# AUDIT-R21: when the owner veto rejects a balloon's group, cut it where its lines break and keep
+# the runs on either side (each must pass the veto again) instead of splitting it into single
+# pieces. chrome-box TELEA p. 2: an aside set lower beside a two-column sentence (良くないけど)
+# split the sentence too. "false" restores single pieces.
+OCR_SPLIT_VETOED_AT_BREAKS = os.environ.get("OCR_SPLIT_VETOED_AT_BREAKS", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 # AUDIT-R21: two lines side by side (sharing half their length) closer than this many characters
 # are exempt from the clearance veto -- there is no room for two balloon outlines between them.
 # A narrow balloon (4Oct p. 17, 254 px wide) is under one character deep everywhere, so the veto
