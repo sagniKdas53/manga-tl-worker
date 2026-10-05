@@ -8,6 +8,7 @@ from worker.services.fragment_grouping import (
     GroupingConfig,
     GroupingContext,
     group_fragments,
+    resolve_vertical,
 )
 
 logger = logging.getLogger("translation")
@@ -61,6 +62,43 @@ def _split_cross_panel_components(components, regions):
         else:
             bounded.append(component)
     return bounded
+
+
+# Two pieces are on one line when they share at least this much of the narrower one's width across
+# the line -- the same share fragment_grouping uses for "one block" -- and their centre lines are
+# at most this share of the narrower width apart. OCR boxes can be far wider than the column pitch:
+# on Tests ch. 4 p. 64 neighbouring columns overlap by half with centres 90 px apart.
+_SAME_LINE_SHARE = 0.5
+_SAME_LINE_MAX_CENTRE_OFFSET = 0.15
+
+
+def _line_reading_order(comp, regions, grouping):
+    """Order a component's pieces line by line (GroupingConfig.line_reading_order).
+
+    Columns read right to left in an rtl book (left to right otherwise), each top to bottom;
+    horizontal lines read top to bottom, each left to right, whatever the binding direction.
+    """
+    vertical = resolve_vertical([regions[index] for index in comp], grouping)
+    across, across_size, along = ("x", "width", "y") if vertical else ("y", "height", "x")
+    lines = []  # [start, end, members] across the line
+    for index in sorted(comp, key=lambda i: regions[i][across]):
+        start = regions[index][across]
+        end = start + regions[index][across_size]
+        for line in lines:
+            narrower = max(1, min(end - start, line[1] - line[0]))
+            shared = min(end, line[1]) - max(start, line[0])
+            centre_offset = abs((start + end) - (line[0] + line[1])) / 2
+            if shared >= _SAME_LINE_SHARE * narrower and centre_offset <= _SAME_LINE_MAX_CENTRE_OFFSET * narrower:
+                line[0], line[1] = min(start, line[0]), max(end, line[1])
+                line[2].append(index)
+                break
+        else:
+            lines.append([start, end, [index]])
+    if vertical:
+        lines.sort(key=lambda line: -(line[0] + line[1]) if grouping.reading_direction == "rtl" else line[0] + line[1])
+    else:
+        lines.sort(key=lambda line: line[0] + line[1])
+    return [index for line in lines for index in sorted(line[2], key=lambda i: regions[i][along])]
 
 
 def merge_ocr_regions(
@@ -124,7 +162,9 @@ def merge_ocr_regions(
             continue
 
         # Sort indices in reading order inside the component
-        if reading_direction == "rtl":
+        if grouping.line_reading_order:
+            comp[:] = _line_reading_order(comp, regions, grouping)
+        elif reading_direction == "rtl":
             # Right-to-left: larger X first, then top-to-bottom (smaller Y)
             comp.sort(key=lambda idx: (-regions[idx]["x"], regions[idx]["y"]))
         else:

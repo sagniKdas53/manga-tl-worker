@@ -1,5 +1,6 @@
 import json
 
+from worker.services.fragment_grouping import GroupingConfig
 from worker.services.merge_regions import merge_ocr_regions
 
 
@@ -84,6 +85,72 @@ def test_merge_rtl_regions():
     assert result[0]["y"] == 10
     assert result[0]["width"] == 50
     assert result[0]["height"] == 50
+
+
+def _piece(text, x, y, width, height):
+    return {"text": text, "detectedLanguage": "ja", "confidence": 0.9, "x": x, "y": y, "width": width, "height": height}
+
+
+# Tests ch. 4 p. 63: a three-line horizontal caption whose lines all start at about the same x.
+_CAPTION = [
+    _piece("ここまで追跡してくるのは骨が", 552, 564, 455, 39),
+    _piece("折れたけど，大魔族討伐の手柄", 546, 605, 440, 41),
+    _piece("はアタシがもらうよ,ゼンゼ.", 550, 652, 410, 33),
+]
+# Tests ch. 4 p. 54: four columns, the last broken by OCR into 手ブラ above a narrower での.
+_BROKEN_COLUMNS = [
+    _piece("手ブラ", 111, 548, 39, 97),
+    _piece("長富蓮実ち", 137, 547, 47, 157),
+    _piece("での", 112, 628, 37, 73),
+    _piece("本日の挑戦者は", 169, 548, 45, 208),
+]
+
+
+def _one_group(regions, **config):
+    grouping = GroupingConfig(threshold_ratio=1e9, reading_direction="rtl", orientation="vote", **config)
+    (merged,) = merge_ocr_regions([dict(region) for region in regions], grouping=grouping)
+    return merged["text"]
+
+
+def test_legacy_order_reads_a_horizontal_caption_by_x():
+    """The shipped order sorts by -x first, so left-aligned lines come out by their start offset."""
+    assert _one_group(_CAPTION) == "ここまで追跡してくるのは骨がはアタシがもらうよ,ゼンゼ.折れたけど，大魔族討伐の手柄"
+
+
+def test_line_order_reads_horizontal_lines_top_to_bottom():
+    assert _one_group(_CAPTION, line_reading_order=True) == (
+        "ここまで追跡してくるのは骨が折れたけど，大魔族討伐の手柄はアタシがもらうよ,ゼンゼ."
+    )
+
+
+def test_line_order_reads_a_broken_column_top_to_bottom():
+    """での is narrower than 手ブラ above it, so sorting by -x put it first."""
+    assert _one_group(_BROKEN_COLUMNS) == "本日の挑戦者は長富蓮実ちでの手ブラ"
+    assert _one_group(_BROKEN_COLUMNS, line_reading_order=True) == "本日の挑戦者は長富蓮実ち手ブラでの"
+
+
+def test_line_order_keeps_overlapping_wide_columns_apart():
+    """Tests ch. 4 p. 64: OCR boxes wider than the column pitch overlap their neighbours by half.
+
+    Overlap alone put ボクの言う and 通りにすれば on one line; their centres are 90 px apart.
+    """
+    columns = [
+        _piece("大丈夫だよん", 1209, 1398, 155, 456),
+        _piece("通りにすれば", 1288, 1405, 159, 456),
+        _piece("ボクの言う", 1367, 1409, 181, 403),
+    ]
+    assert _one_group(columns, line_reading_order=True) == "ボクの言う通りにすれば大丈夫だよん"
+
+
+def test_line_order_reads_a_tilted_sign_line_by_line():
+    """Tests ch. 5 p. 19 (AUDIT-R23's sign, tilted 25°): two lines overlap in y but sit apart."""
+    sign = [_piece("キュアット", 487, 106, 250, 173), _piece("探偵事所", 446, 153, 296, 223)]
+    assert _one_group(sign, line_reading_order=True) == "キュアット探偵事所"
+
+
+def test_line_order_keeps_plain_columns_right_to_left():
+    regions = [_piece("一", 200, 10, 30, 120), _piece("二", 160, 14, 30, 110), _piece("三", 120, 12, 30, 90)]
+    assert _one_group(regions, line_reading_order=True) == _one_group(regions) == "一二三"
 
 
 def test_merge_preserves_shared_mask_polygon_and_safe_area():

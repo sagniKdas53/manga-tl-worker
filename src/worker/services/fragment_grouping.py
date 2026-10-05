@@ -46,6 +46,11 @@ class GroupingConfig:
             ``BLOCK_OVERLAP_SHARE`` of the shorter one's length) with less than this many
             characters of white space between them: too little room for two balloon outlines.
             ``None`` (the shipped behaviour) applies the veto to them. AUDIT-R21, 4Oct p. 17.
+        line_reading_order: How ``merge_ocr_regions`` orders a group's text. ``False`` (shipped)
+            sorts pieces by -x then y (rtl), which scrambles horizontal lines and a column OCR
+            broke into a wider and a narrower piece. ``True`` groups pieces into lines first:
+            columns right to left (left to right for ltr), horizontal lines top to bottom, and
+            pieces along each line in order.
         component_max_members: Maximum members allowed in one connected component. ``None`` keeps
             frozen legacy behaviour; a bounded component is deliberately split to unresolved
             singleton candidates rather than silently retaining a bridge merge.
@@ -63,6 +68,7 @@ class GroupingConfig:
     waist_gate: float | None = None
     waist_max_solidity: float = DEFAULT_WAIST_MAX_SOLIDITY
     waist_adjacent_line_gap: float | None = None
+    line_reading_order: bool = False
     component_max_members: int | None = None
     component_max_area_fraction: float | None = None
 

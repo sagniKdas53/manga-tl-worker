@@ -30,6 +30,7 @@ from worker.config import (
     OCR_COMPONENT_MAX_AREA_FRACTION,
     OCR_CONFIG,
     OCR_JOIN_SPLIT_LINES,
+    OCR_LINE_READING_ORDER,
     OCR_MERGE_THRESHOLD,
     OCR_ORIENTATION,
     OCR_SPLIT_VETOED_AT_BREAKS,
@@ -105,6 +106,7 @@ def grouping_config(reading_direction, threshold_ratio=None):
         waist_gate=OCR_WAIST_GATE if OCR_WAIST_GATE > 0 else None,
         waist_max_solidity=OCR_WAIST_MAX_SOLIDITY,
         waist_adjacent_line_gap=OCR_WAIST_ADJACENT_LINE_GAP if OCR_WAIST_ADJACENT_LINE_GAP > 0 else None,
+        line_reading_order=OCR_LINE_READING_ORDER,
         component_max_area_fraction=(OCR_COMPONENT_MAX_AREA_FRACTION if OCR_COMPONENT_MAX_AREA_FRACTION > 0 else None),
     )
 

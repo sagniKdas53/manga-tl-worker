@@ -525,6 +525,12 @@ OCR_SPLIT_VETOED_AT_BREAKS = os.environ.get("OCR_SPLIT_VETOED_AT_BREAKS", "true"
     "yes",
 )
 
+# Order a joined region's text line by line instead of by -x then y: columns right to left,
+# horizontal lines top to bottom. The old sort scrambled horizontal groups (Tests ch. 4 p. 63's
+# three-line caption read 1, 3, 2; 4Oct p. 3's watermark) and a broken column whose lower piece is
+# narrower (手ブラ | での read "での手ブラ"). "false" restores the old order.
+OCR_LINE_READING_ORDER = os.environ.get("OCR_LINE_READING_ORDER", "true").strip().lower() in ("1", "true", "yes")
+
 # AUDIT-R21: two lines side by side (sharing half their length) closer than this many characters
 # are exempt from the clearance veto -- there is no room for two balloon outlines between them.
 # A narrow balloon (4Oct p. 17, 254 px wide) is under one character deep everywhere, so the veto
