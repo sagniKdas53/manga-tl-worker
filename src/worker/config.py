@@ -390,6 +390,11 @@ BUBBLE_CONTOUR_MAX_PAGE_FRACTION = float(os.environ.get("BUBBLE_CONTOUR_MAX_PAGE
 # guess, not yet measured against an annotated set the way WAIST_MAX_SOLIDITY was.
 BACKGROUND_FILL_MAX_SPREAD = float(os.environ.get("BACKGROUND_FILL_MAX_SPREAD", "20.0"))
 
+# Cleanup's halo growth (`CleanupConfig.halo_grow`): when on, the outline or glow left round
+# lettering on artwork joins the erase mask. "false" turns it off for every page, which gives
+# exactly the masks and patches cleanup made before it existed.
+CLEANUP_HALO_GROW = os.environ.get("CLEANUP_HALO_GROW", "true").lower() in ("1", "true", "yes", "on")
+
 # R1 (docs/issues.md): a balloon has to contain the text it is the balloon for.
 #
 # Fragments are assigned to whichever YOLO mask they overlap most, and "most" was the only test --
