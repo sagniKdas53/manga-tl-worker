@@ -14,8 +14,10 @@ from tenacity.wait import wait_exponential
 from worker.config import (
     CALLBACK_URL,
     backend_headers,
+    reset_llm_session,
     reset_stage,
     reset_trace_id,
+    set_llm_session,
     set_stage,
     set_trace_id,
 )
@@ -207,6 +209,12 @@ def process_job_rq(queue_name, job_data):
     # trace id because this is the one place every job passes through, and chunk workers inherit it
     # through the copy_context().run submissions already in place for the cost list.
     stage_token = set_stage(queue_name.removeprefix("queue:"))
+    # One OpenRouter session per chapter and stage, so a chapter's calls stay on the host that holds
+    # their prompt cache (config._llm_session). A page with no chapter gets its own image's.
+    session_scope = job_data.get("chapterId") or job_data.get("imageId") or ""
+    session_token = set_llm_session(
+        f"tlhub:{session_scope}:{queue_name.removeprefix('queue:')}" if session_scope else ""
+    )
     # Same argument as the trace id, and the same one place to do it: cost records accumulate per
     # job, so the list is bound here rather than reset inside each handler. Handler-level resets
     # against a shared global meant a job starting mid-flight discarded another job's costs.
@@ -329,3 +337,4 @@ def process_job_rq(queue_name, job_data):
         # job's output with this one's pipeline.
         reset_trace_id(trace_token)
         reset_stage(stage_token)
+        reset_llm_session(session_token)

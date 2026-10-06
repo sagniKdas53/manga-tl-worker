@@ -65,6 +65,30 @@ def get_trace_id() -> str:
 # derives it with a removeprefix and there is no mapping table to keep in step.
 _stage: contextvars.ContextVar[str] = contextvars.ContextVar("stage", default="")
 
+# OpenRouter's sticky-routing key for the current job: one per chapter and stage. Price routing
+# moves each call to whichever host is cheapest, and every host keeps its own prompt cache, so
+# repeat prompts missed the cache: GLM 5.3 Flash alternated Novita / StreamLake with no cache hit,
+# and with one session_id stayed on StreamLake and cached 2,752 of 2,779 tokens, 78% cheaper per
+# call (measured 2026-10-06). Bound in process_job_rq beside the trace id and stage.
+_llm_session: contextvars.ContextVar[str] = contextvars.ContextVar("llm_session", default="")
+
+
+def set_llm_session(session):
+    """Bind the OpenRouter session_id for the current job. Returns the reset token."""
+    return _llm_session.set(str(session)[:256] if session else "")
+
+
+def reset_llm_session(token):
+    """Unbind; pair with the token from set_llm_session."""
+    try:
+        _llm_session.reset(token)
+    except ValueError:
+        _llm_session.set("")
+
+
+def get_llm_session() -> str:
+    return _llm_session.get()
+
 
 def set_stage(stage):
     """Bind the pipeline stage for the current job. Returns the reset token."""

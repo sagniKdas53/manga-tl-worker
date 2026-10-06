@@ -84,7 +84,9 @@ def test_llm_client_openrouter_caching_and_session(mock_post):
     client.complete(messages=[{"role": "user", "content": "Hi"}], system_prompt="System instructions")
 
     posted_json = mock_post.call_args.kwargs["json"]
-    assert posted_json.get("extra_body", {}).get("session_id") == "chapter-10"
+    # Top level, where OpenRouter reads it; "extra_body" is an OpenAI-SDK idiom raw JSON does not unwrap.
+    assert posted_json["session_id"] == "chapter-10"
+    assert "extra_body" not in posted_json
     # System message content should be cache annotated array
     assert posted_json["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 

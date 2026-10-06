@@ -639,12 +639,12 @@ For each region in the provided metadata, evaluate and check if:
 4. The reading order/bubble sequence is incorrect (flag with orderBad=true and provide suggestedReadingOrderIndex).
 
 Status categories:
-- "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed.
+- "passed": No correction needed. Leave "qaFeedback" empty, or a few words at most.
 - "direct_fix": If you have a better translation, output it directly. You must supply "directFix" object with correctedText. You MUST also provide detailed reasoning in "qaFeedback".
 {REJECT_SFX_RULE}
 - "failed": Translation error requiring a translation re-run. Specify "qaFeedback" with detailed correction notes/feedback to guide the re-translation. Your output must be strictly better. Do not send back the exact same text if flagging an error.
 
-IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
+IMPORTANT: "qaFeedback" is only read for "failed" and "direct_fix" regions: there it must explain the problem in detail. For "passed" regions keep it empty or a few words.
 
 IMPORTANT: Every result MUST include both a "directFix" object and an "escalation" object. They are
 never omitted. When a field does not apply, send its empty value rather than leaving it out —
@@ -1061,12 +1061,12 @@ For each region in the provided metadata, evaluate and check if:
 4. The reading order/bubble sequence is incorrect (flag with orderBad=true and provide suggestedReadingOrderIndex).
 
 Status categories:
-- "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed.
+- "passed": No correction needed. Leave "qaFeedback" empty, or a few words at most.
 - "direct_fix": If you have a better translation, output it directly. You must supply "directFix" object with correctedText. You MUST also provide detailed reasoning in "qaFeedback".
 {REJECT_SFX_RULE}
 - "failed": Translation error requiring a translation re-run. Specify "qaFeedback" with detailed correction notes/feedback to guide the re-translation. Your output must be strictly better. Do not send back the exact same text if flagging an error.
 
-IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
+IMPORTANT: "qaFeedback" is only read for "failed" and "direct_fix" regions: there it must explain the problem in detail. For "passed" regions keep it empty or a few words.
 
 IMPORTANT: Every result MUST include both a "directFix" object and an "escalation" object. They are
 never omitted. When a field does not apply, send its empty value rather than leaving it out —
@@ -1248,12 +1248,12 @@ For each region in the provided metadata, evaluate and check if:
 5. The reading order/bubble sequence is incorrect (flag with orderBad=true and provide suggestedReadingOrderIndex).
 
 Status categories ("qaStatus"):
-- "passed": No correction needed. You MUST still provide a detailed explanation/reasoning in "qaFeedback" explaining why the region passed.
+- "passed": No correction needed. Leave "qaFeedback" empty, or a few words at most.
 - "direct_fix": If you have a better translation, output it directly. You must supply "directFix" object with correctedText or suggestedFontSize. You MUST also provide detailed reasoning in "qaFeedback".
 {REJECT_SFX_RULE}
 - "failed": Major translation error or layout issue requiring a translation/typesetting re-run. Specify "qaFeedback" with detailed correction notes. Your output must be strictly better. Do not send back the exact same text if flagging an error.
 
-IMPORTANT: For EVERY region (including "passed" regions), you MUST provide a detailed explanation/reasoning in "qaFeedback" explaining your evaluation.
+IMPORTANT: "qaFeedback" is only read for "failed" and "direct_fix" regions: there it must explain the problem in detail. For "passed" regions keep it empty or a few words.
 
 IMPORTANT: Every result MUST include both a "directFix" object and an "escalation" object. They are
 never omitted. When a field does not apply, send its empty value rather than leaving it out —

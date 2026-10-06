@@ -19,6 +19,7 @@ from worker.config import (
     OPENROUTER_IGNORE_PROVIDERS,
     OPENROUTER_QUANTIZATIONS,
     OPENROUTER_REQUIRE_PARAMETERS,
+    get_llm_session,
     logger,
 )
 from worker.provider_config import get_config_loader, get_provider_registry
@@ -384,8 +385,12 @@ class LLMClient:
                         ]
                     break
 
-        if self.session_id:
-            payload.setdefault("extra_body", {})["session_id"] = self.session_id
+        # Sticky routing: OpenRouter keeps a session's calls on one host, the one holding their
+        # prompt cache. It reads session_id at the top level of the body; this used to go under
+        # "extra_body", an OpenAI-SDK idiom that raw JSON sends as a key OpenRouter ignores.
+        session_id = self.session_id or get_llm_session()
+        if session_id:
+            payload["session_id"] = session_id
 
     @retry(
         stop=stop_after_attempt(3),
