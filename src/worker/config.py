@@ -547,6 +547,26 @@ OCR_WAIST_ADJACENT_LINE_GAP = float(os.environ.get("OCR_WAIST_ADJACENT_LINE_GAP"
 # pairs, 0 false merges) do not. "false" restores the neighbour-by-neighbour check.
 OCR_STAGGERED_LINES = os.environ.get("OCR_STAGGERED_LINES", "true").strip().lower() in ("1", "true", "yes")
 
+# B3b: inside one balloon, two groups are joined when their pieces, regrouped on their own with this
+# bigger budget (in characters), make one group. The 0.35 budget leaves real gaps of 0.8-2
+# characters between a balloon's columns (ja/sample27, 25, 258) and the hole a column the OCR
+# missed leaves (sample153, 136). The owner veto, the waist veto and the orientation vote still
+# apply to the pair, and the budget never reaches pieces outside it. 0 turns the pass off.
+OCR_BALLOON_JOIN_BUDGET = float(os.environ.get("OCR_BALLOON_JOIN_BUDGET", "1.5"))
+
+# ...unless an ink stroke at least this many characters long runs along the gap between the two
+# groups: a balloon outline drawn between two speakers. On the 2026-10-06 chrome-box captures the
+# fused bracket balloons of ja/sample24 have a 4.3-character stroke between them; every gap B3b
+# joins has at most 1.1, a missed column's glyphs at most 0.7.
+OCR_BALLOON_WALL_STROKE = float(os.environ.get("OCR_BALLOON_WALL_STROKE", "2.5"))
+
+# ...and never into a group of more than this many lines. One speaker's balloons drawn as one
+# connected shape look like one balloon by geometry and by pixels: ja/sample9's three overlapping
+# balloons (7, 6 and 3 columns of separate paragraphs) would become one 16-column region set across
+# all three. Every join the 2026-10-06 test pages want holds at most 8 (sample258's 4 + 4). Fitted to
+# that one counterexample; raise it if a real balloon of more lines stays split.
+OCR_BALLOON_JOIN_MAX_LINES = int(os.environ.get("OCR_BALLOON_JOIN_MAX_LINES", "8"))
+
 # Never group text that no balloon holds across the gutter of a two-page spread. ja/sample93's
 # shout on the left page and speech on the right came back as one region. A page counts as a
 # spread when it is at least OCR_SPREAD_MIN_ASPECT times as wide as it is tall and a vertical edge

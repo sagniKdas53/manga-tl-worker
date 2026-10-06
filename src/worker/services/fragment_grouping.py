@@ -93,6 +93,8 @@ class GroupingContext:
             instead of single pieces (index lists partitioning the component), or ``None``. Each
             part goes through the veto again, so this can only propose cuts, never prove a merge.
             Off by default: a vetoed component then splits into singletons, as before.
+        group_join: Called last with the final groups. Returns them, possibly with some joined
+            (B3b, `balloon_join.join_balloon_groups`). Off by default.
     """
 
     clearance: Callable[[tuple[float, float], tuple[float, float]], float] | None = None
@@ -100,6 +102,7 @@ class GroupingContext:
     owner_veto: Callable[[list[int], list], str | None] | None = None
     page_area: float | None = None
     owner_split: Callable[[list[int], list], list[list[int]] | None] | None = None
+    group_join: Callable[[list[list[int]], list], list[list[int]]] | None = None
 
 
 # Floor for the halving in `_split_oversized`. Below a twentieth of a character the budget joins
@@ -148,7 +151,10 @@ def group_fragments(
             adj[i].append(j)
             adj[j].append(i)
 
-    return _bound_components(_connected_components(adj, n), regions, config, context)
+    groups = _bound_components(_connected_components(adj, n), regions, config, context)
+    if context is not None and context.group_join is not None:
+        groups = context.group_join(groups, regions)
+    return groups
 
 
 def _bound_components(
@@ -228,7 +234,8 @@ def _split_oversized(
     members = [regions[index] for index in component]
     # Owner vetoes were already applied to the whole component; recursing with them could only
     # veto again, and the clearance field indexes page coordinates so it stays valid on a subset.
-    sub_context = replace(context, owner_veto=None) if context is not None else None
+    # The balloon join runs once, on the caller's final groups, never on an oversized split's pieces.
+    sub_context = replace(context, owner_veto=None, group_join=None) if context is not None else None
     # `group_fragments` re-enters `_bound_components`, so a piece that is still oversized is
     # halved again in there; the recursion bottoms out at the floor above.
     pieces = group_fragments(members, tighter, sub_context)

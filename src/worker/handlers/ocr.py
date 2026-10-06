@@ -27,6 +27,9 @@ from worker.config import (
     COVER_FILL_PAD_FRACTION,
     COVER_FILL_QUANT,
     COVER_FILL_RING_FRACTION,
+    OCR_BALLOON_JOIN_BUDGET,
+    OCR_BALLOON_JOIN_MAX_LINES,
+    OCR_BALLOON_WALL_STROKE,
     OCR_COMPONENT_MAX_AREA_FRACTION,
     OCR_CONFIG,
     OCR_JOIN_SPLIT_LINES,
@@ -43,8 +46,9 @@ from worker.config import (
     redis_client,
 )
 from worker.model_manager import get_local_ocr_backend, model_manager, resolve_local_ocr_model
+from worker.services.balloon_join import balloon_join
 from worker.services.bubble_detector import detect_bubbles_yolo
-from worker.services.bubble_geometry import bubble_grouping_context, simplify_mask_polygon
+from worker.services.bubble_geometry import bubble_grouping_context, gap_wall, simplify_mask_polygon
 from worker.services.fragment_grouping import (
     MIN_THRESHOLD_RATIO,
     GroupingConfig,
@@ -1065,6 +1069,7 @@ def process_ocr(job_data):
             # 4. Group fragments for each bubble and merge them (or create default crop if empty and we are using Cloud VLM)
             candidate_regions = []  # regions we need to OCR/transcribe
 
+            page_gray = None  # for B3b's wall test, made on the first balloon that needs it
             for b_idx, bubble in enumerate(detected_bubbles):
                 bx, by, bw, bh = bubble["bbox"]
                 bubble_mask = bubble_masks[b_idx]
@@ -1100,6 +1105,20 @@ def process_ocr(job_data):
                     bubble_context,
                     [{"format": "polygon", "id": f"bubble-{b_idx}", "points": bubble["mask_polygon"]}],
                 )
+                if OCR_BALLOON_JOIN_BUDGET > 0 and len(assigned_frags) > 1:
+                    # B3b: join the groups the tight budget leaves apart inside this balloon,
+                    # unless a balloon outline runs between them.
+                    wall = None
+                    if img is not None and bubble_mask is not None:
+                        if page_gray is None:
+                            page_gray = img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                        wall = gap_wall(page_gray, bubble_mask, OCR_BALLOON_WALL_STROKE)
+                    context = replace(
+                        context,
+                        group_join=balloon_join(
+                            grouping, context, OCR_BALLOON_JOIN_BUDGET, wall, OCR_BALLOON_JOIN_MAX_LINES
+                        ),
+                    )
                 merged_bubble_regions = merge_ocr_regions(
                     assigned_frags,
                     grouping=grouping,

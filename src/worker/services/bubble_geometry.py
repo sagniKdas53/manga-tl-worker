@@ -77,6 +77,77 @@ MASK_POLYGON_TOLERANCE_PX = float(os.environ.get("MASK_POLYGON_TOLERANCE_PX", "2
 MIN_MASK_POLYGON_POINTS = 4
 
 
+# A pixel is ink when it is this many grey levels darker than the gap's paper (its median).
+WALL_INK_CONTRAST = 60
+
+
+def _longest_runs(ink):
+    """Longest run of True down each column of a 2-D boolean array."""
+    best = np.zeros(ink.shape[1], dtype=np.int64)
+    run = np.zeros(ink.shape[1], dtype=np.int64)
+    for row in ink:
+        run = np.where(row, run + 1, 0)
+        best = np.maximum(best, run)
+    return best
+
+
+def gap_wall(gray, mask, min_stroke):
+    """B3b's wall test for one balloon: ``(group a, group b, regions) -> bool``.
+
+    True when an ink stroke at least ``min_stroke`` characters long runs along the gap between the
+    two groups. The gap is the space between the groups across the reading direction, over the
+    stretch of the line both groups cover, inside the balloon mask. A balloon outline drawn between
+    two speakers runs that whole stretch (ja/sample24's fused bracket balloons: 4.3 characters); the
+    glyphs of a column the OCR missed break at every character (at most 0.7 on the 2026-10-06
+    captures). ``gray`` and ``mask`` are page-sized; ``mask`` is non-zero inside the balloon.
+    """
+    height, width = gray.shape[:2]
+
+    def wall(group_a, group_b, regions):
+        members = [regions[index] for index in (*group_a, *group_b)]
+        vertical = sum(r["height"] > r["width"] for r in members) >= sum(r["width"] > r["height"] for r in members)
+        char = float(np.median([r["width"] if vertical else r["height"] for r in members]))
+        if char <= 0:
+            return False
+
+        def box(group):
+            rs = [regions[index] for index in group]
+            return (
+                min(r["x"] for r in rs),
+                min(r["y"] for r in rs),
+                max(r["x"] + r["width"] for r in rs),
+                max(r["y"] + r["height"] for r in rs),
+            )
+
+        a, b = box(group_a), box(group_b)
+        across = 0 if vertical else 1  # columns stack along x, lines along y
+        low, high = sorted((a, b), key=lambda r: r[across])
+        gap_start, gap_end = int(low[across + 2]), int(high[across])
+        along_start = int(max(a[1 - across], b[1 - across]))
+        along_end = int(min(a[3 - across], b[3 - across]))
+        if gap_end - gap_start < 2 or along_end - along_start < char:
+            return False
+        if vertical:
+            rows, cols = (
+                slice(max(0, along_start), min(height, along_end)),
+                slice(max(0, gap_start), min(width, gap_end)),
+            )
+            strip, inside = gray[rows, cols], mask[rows, cols] > 0
+        else:
+            rows, cols = (
+                slice(max(0, gap_start), min(height, gap_end)),
+                slice(max(0, along_start), min(width, along_end)),
+            )
+            strip, inside = gray[rows, cols].T, mask[rows, cols].T > 0
+        if strip.size == 0 or not inside.any():
+            return False
+        paper = float(np.median(strip[inside]))
+        ink = (strip.astype(np.int16) < paper - WALL_INK_CONTRAST) & inside
+        return float(_longest_runs(ink).max()) >= min_stroke * char
+
+    return wall
+
+
 @overload
 def simplify_mask_polygon(points: None, tolerance_px: float | None = ...) -> None: ...
 
