@@ -554,11 +554,12 @@ OCR_STAGGERED_LINES = os.environ.get("OCR_STAGGERED_LINES", "true").strip().lowe
 # apply to the pair, and the budget never reaches pieces outside it. 0 turns the pass off.
 OCR_BALLOON_JOIN_BUDGET = float(os.environ.get("OCR_BALLOON_JOIN_BUDGET", "1.5"))
 
-# ...unless an ink stroke at least this many characters long runs along the gap between the two
-# groups: a balloon outline drawn between two speakers. On the 2026-10-06 chrome-box captures the
-# fused bracket balloons of ja/sample24 have a 4.3-character stroke between them; every gap B3b
-# joins has at most 1.1, a missed column's glyphs at most 0.7.
-OCR_BALLOON_WALL_STROKE = float(os.environ.get("OCR_BALLOON_WALL_STROKE", "2.5"))
+# ...unless one connected ink stroke in the gap between the two groups reaches this many characters
+# along the line: a balloon outline drawn between two speakers, straight or sloped. Measured
+# 2026-10-06 (chrome-box captures and the 40 cached corpus pages): the fused bracket balloons of
+# ja/sample24 have a 5.2-6.4 character stroke between them; every gap B3b joins has at most 2.1
+# (sample218's two jagged balloons, the owner's call: join), the rest at most 1.0.
+OCR_BALLOON_WALL_STROKE = float(os.environ.get("OCR_BALLOON_WALL_STROKE", "3.0"))
 
 # ...and never into a group of more than this many lines. One speaker's balloons drawn as one
 # connected shape look like one balloon by geometry and by pixels: ja/sample9's three overlapping

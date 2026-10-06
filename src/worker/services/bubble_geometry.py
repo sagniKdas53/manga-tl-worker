@@ -77,31 +77,25 @@ MASK_POLYGON_TOLERANCE_PX = float(os.environ.get("MASK_POLYGON_TOLERANCE_PX", "2
 MIN_MASK_POLYGON_POINTS = 4
 
 
-# A pixel is ink when it is this many grey levels darker than the gap's paper (its median).
+# A pixel is ink when it is this many grey levels darker than the balloon's paper (its median).
 WALL_INK_CONTRAST = 60
-
-
-def _longest_runs(ink):
-    """Longest run of True down each column of a 2-D boolean array."""
-    best = np.zeros(ink.shape[1], dtype=np.int64)
-    run = np.zeros(ink.shape[1], dtype=np.int64)
-    for row in ink:
-        run = np.where(row, run + 1, 0)
-        best = np.maximum(best, run)
-    return best
 
 
 def gap_wall(gray, mask, min_stroke):
     """B3b's wall test for one balloon: ``(group a, group b, regions) -> bool``.
 
-    True when an ink stroke at least ``min_stroke`` characters long runs along the gap between the
-    two groups. The gap is the space between the groups across the reading direction, over the
-    stretch of the line both groups cover, inside the balloon mask. A balloon outline drawn between
-    two speakers runs that whole stretch (ja/sample24's fused bracket balloons: 4.3 characters); the
-    glyphs of a column the OCR missed break at every character (at most 0.7 on the 2026-10-06
-    captures). ``gray`` and ``mask`` are page-sized; ``mask`` is non-zero inside the balloon.
+    True when one connected ink stroke inside the gap between the two groups reaches ``min_stroke``
+    characters along the line. The gap is the space between the groups across the reading
+    direction, over the stretch of the line both groups cover, inside the balloon mask. A balloon
+    outline drawn between two speakers runs that whole stretch, straight or sloped (ja/sample24's
+    fused bracket balloons: 5.2 characters); the glyphs of a column the OCR missed are separate
+    strokes, one per character. The paper is measured over the whole balloon, so an outline that
+    fills a narrow gap is still darker than it. ``gray`` and ``mask`` are page-sized; ``mask`` is
+    non-zero inside the balloon.
     """
     height, width = gray.shape[:2]
+    inside_balloon = mask > 0
+    paper = float(np.median(gray[inside_balloon])) if inside_balloon.any() else 255.0
 
     def wall(group_a, group_b, regions):
         members = [regions[index] for index in (*group_a, *group_b)]
@@ -132,18 +126,21 @@ def gap_wall(gray, mask, min_stroke):
                 slice(max(0, along_start), min(height, along_end)),
                 slice(max(0, gap_start), min(width, gap_end)),
             )
-            strip, inside = gray[rows, cols], mask[rows, cols] > 0
+            strip, inside = gray[rows, cols], inside_balloon[rows, cols]
         else:
             rows, cols = (
                 slice(max(0, gap_start), min(height, gap_end)),
                 slice(max(0, along_start), min(width, along_end)),
             )
-            strip, inside = gray[rows, cols].T, mask[rows, cols].T > 0
+            strip, inside = gray[rows, cols].T, inside_balloon[rows, cols].T
         if strip.size == 0 or not inside.any():
             return False
-        paper = float(np.median(strip[inside]))
-        ink = (strip.astype(np.int16) < paper - WALL_INK_CONTRAST) & inside
-        return float(_longest_runs(ink).max()) >= min_stroke * char
+        ink = ((strip.astype(np.int16) < paper - WALL_INK_CONTRAST) & inside).astype(np.uint8)
+        count, _, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
+        if count < 2:
+            return False
+        # Rows of the strip run along the line, so a stroke's height is its length along the line.
+        return float(stats[1:, cv2.CC_STAT_HEIGHT].max()) >= min_stroke * char
 
     return wall
 

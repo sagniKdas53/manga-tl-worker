@@ -86,7 +86,7 @@ def _groups(case, *, budget=1.5, stroke=None, wall=True, max_lines=8, regions=No
     base = replace(base, page_area=float(width * height))
     context = owner_aware_grouping_context(base, [{"format": "polygon", "id": "balloon", "points": case["outline"]}])
     if budget > 0:
-        test = gap_wall(gray, mask, 2.5) if wall else None
+        test = gap_wall(gray, mask, 3.0) if wall else None
         context = replace(context, group_join=balloon_join(grouping, context, budget, test, max_lines))
     regions = _regions(case) if regions is None else regions
     return sorted(sorted(group) for group in group_fragments(regions, grouping, context))
@@ -116,9 +116,21 @@ def test_a_missed_columns_glyphs_are_no_wall():
     for top in range(140, 500, 75):  # one glyph-sized mark per character down the gap
         cv2.rectangle(gray, (262, top), (282, top + 40), 30, -1)
     regions = _regions(SAMPLE25)
-    assert gap_wall(gray, mask, 2.5)([0, 1], [2, 3], regions) is False
+    assert gap_wall(gray, mask, 3.0)([0, 1], [2, 3], regions) is False
     cv2.line(gray, (272, 140), (272, 520), 30, 3)
-    assert gap_wall(gray, mask, 2.5)([0, 1], [2, 3], regions) is True
+    assert gap_wall(gray, mask, 3.0)([0, 1], [2, 3], regions) is True
+
+
+def test_a_sloped_outline_between_the_groups_is_a_wall():
+    """CodeRabbit on #59: an outline crossing the gap at a slant has no long run in any one column."""
+    assert _groups(SAMPLE24_B4, stroke=((2322, 370), (2372, 760))) == [[0, 1], [2, 3]]
+
+
+def test_an_outline_that_fills_a_narrow_gap_is_still_a_wall():
+    """CodeRabbit on #59: measured over the gap alone, a thick outline was its own "paper"."""
+    gray, mask = _page(SAMPLE24_B4)
+    cv2.rectangle(gray, (2319, 370), (2375, 760), 120, -1)
+    assert gap_wall(gray, mask, 3.0)([0, 1], [2, 3], _regions(SAMPLE24_B4)) is True
 
 
 def test_no_joined_group_holds_more_than_max_lines():
@@ -142,7 +154,7 @@ def test_trial_regroupings_do_not_write_decisions_for_pairs_that_stay_apart():
     assert len(owners) != 1  # never the joined pair's single owner
 
 
-@pytest.mark.parametrize(("env", "expected"), [(None, "1.5 2.5 8"), ("0", "0.0 2.5 8")])
+@pytest.mark.parametrize(("env", "expected"), [(None, "1.5 3.0 8"), ("0", "0.0 3.0 8")])
 def test_the_settings_default_on_and_can_be_switched_off(env, expected):
     import os
     import subprocess
