@@ -68,7 +68,11 @@ def test_swaps_model_within_the_pinned_provider_when_it_is_the_global_one(global
     assert target == ("openrouter", "pinned-key", "openai/gpt-5.6-luna")
 
 
-def test_no_fallback_when_the_pinned_model_is_already_the_global_default(global_openrouter):
+def test_no_fallback_when_the_pinned_model_is_already_the_global_default(global_openrouter, monkeypatch):
+    import worker.config
+
+    # Without TL_FALLBACK_MODEL, whatever the environment running the tests sets (CodeRabbit on #57).
+    monkeypatch.setattr(worker.config, "TL_FALLBACK_MODEL", "")
     assert resolve_fallback_target("openrouter", "openai/gpt-5.6-luna", "k", True) is None
 
 

@@ -4,6 +4,7 @@ try_cloud_ai, try_cloud_ai_vision, and try_cloud_ai_vision_batch.
 Includes native prompt caching support for OpenRouter and Anthropic.
 """
 
+import json
 import threading
 import time
 from dataclasses import dataclass
@@ -225,7 +226,9 @@ class LLMClient:
             self.headers.update(extra)
 
         self._degraded_format = False
-        self._unfiltered_routing = False
+        # What a 404 from OpenRouter's routing has turned off for this client's calls: "hosts" (the
+        # quantization and ignore filters), "reasoning", "require_parameters". See _relax_routing.
+        self._relaxed_routing: set[str] = set()
 
     def complete(
         self,
@@ -347,18 +350,24 @@ class LLMClient:
         elif self.routing_strategy == "highest-throughput":
             payload["provider"] = {"allow_fallbacks": True, "sort": "throughput"}
 
-        # Skip the hosts measured to ignore the request (config.OPENROUTER_QUANTIZATIONS). Dropped
-        # for the rest of this client's calls if no host of the model is left (_execute_with_retry).
-        if not self._unfiltered_routing:
-            provider = payload.setdefault("provider", {})
+        # Skip the hosts measured to ignore the request (config.OPENROUTER_QUANTIZATIONS). Relaxed
+        # for the rest of this client's calls if no host of the model is left (_relax_routing).
+        provider = payload.setdefault("provider", {})
+        if "hosts" not in self._relaxed_routing:
             if OPENROUTER_QUANTIZATIONS:
                 provider["quantizations"] = list(OPENROUTER_QUANTIZATIONS)
             if OPENROUTER_IGNORE_PROVIDERS:
                 provider["ignore"] = list(OPENROUTER_IGNORE_PROVIDERS)
-            if OPENROUTER_REQUIRE_PARAMETERS and "response_format" in payload:
-                provider["require_parameters"] = True
-            if not provider:
-                payload.pop("provider")
+        if (
+            OPENROUTER_REQUIRE_PARAMETERS
+            and "response_format" in payload
+            and "require_parameters" not in self._relaxed_routing
+        ):
+            provider["require_parameters"] = True
+            if "reasoning" in self._relaxed_routing:
+                payload.pop("reasoning", None)
+        if not provider:
+            payload.pop("provider")
 
         # Inject OpenRouter cache_control on system prompt if present
         if "messages" in payload:
@@ -421,18 +430,8 @@ class LLMClient:
         if response.status_code >= 500:
             raise TransientAPIError(f"Server error: {response.status_code}", status_code=response.status_code)
 
-        if response.status_code == 404 and "No endpoints found" in response.text and not self._unfiltered_routing:
-            routing = payload.get("provider") or {}
-            if {"quantizations", "ignore", "require_parameters"} & set(routing):
-                # The host filters left this model no host. Calling anyway beats failing the job.
-                logger.warning(
-                    f"{self.req_prefix}No OpenRouter host of {self.model} passes the host filters; "
-                    f"retrying without them: {response.text[:200]}"
-                )
-                for key in ("quantizations", "ignore", "require_parameters"):
-                    routing.pop(key, None)
-                self._unfiltered_routing = True
-                raise TransientAPIError("Retrying without OpenRouter host filters", status_code=404)
+        if response.status_code == 404:
+            self._relax_routing(payload, response.text)
 
         if response.status_code in (401, 403):
             # A bad credential does not heal inside a job, but every layer above this one retries:
@@ -451,6 +450,53 @@ class LLMClient:
             raise PermanentAPIError(f"Client error: {response.status_code} — {response.text}")
 
         return self._parse_response(response.json(), time.perf_counter() - start)
+
+    def _relax_routing(self, payload: dict, detail: str) -> None:
+        """Answer an OpenRouter routing 404 by turning off the filter that left no host, then retrying.
+
+        Calling a host outside the filters beats failing the job. OpenRouter names the routing step
+        that emptied the list (measured 2026-10-06): "Filter by Quantization" or "Filter by Ignored
+        Providers" turn off the host filters. "Filter by Parameters" means no host supports every
+        parameter, which require_parameters demands of a schema call: a model that cannot reason
+        has no host for ``reasoning`` (Mistral Small 3.2: 404 with it, 200 without), so
+        ``reasoning`` goes first and require_parameters stays, so no host can ignore the schema
+        (CodeRabbit on #57). require_parameters goes only if the model still has no host, as the
+        400 path drops a schema it cannot send. A 404 naming no step relaxes in that same order.
+        Does nothing when the payload carries nothing left to relax: the caller's 404 handling runs.
+        """
+        try:
+            error = json.loads(detail).get("error") or {}
+        except (ValueError, AttributeError):
+            error = {}
+        step = str((error.get("metadata") or {}).get("failed_routing_step") or "")
+        if not step and "No endpoints found" not in detail and "providers have been ignored" not in detail:
+            return
+        routing = payload.get("provider") or {}
+        has_hosts = bool({"quantizations", "ignore"} & set(routing))
+        has_reasoning = "require_parameters" in routing and "reasoning" in payload
+        if step in ("Filter by Quantization", "Filter by Ignored Providers") or (not step and has_hosts):
+            if not has_hosts:
+                return
+            relax, change = "hosts", "the host filters"
+            routing.pop("quantizations", None)
+            routing.pop("ignore", None)
+        elif step in ("Filter by Parameters", "") and has_reasoning:
+            relax, change = "reasoning", "the reasoning budget (no host takes it with require_parameters)"
+            payload.pop("reasoning")
+        elif step in ("Filter by Parameters", "") and "require_parameters" in routing:
+            relax, change = "require_parameters", "require_parameters, so a host may ignore the schema"
+            routing.pop("require_parameters")
+            # Without require_parameters a host may take reasoning or not, so the cap goes back on.
+            if "reasoning" in self._relaxed_routing:
+                payload["reasoning"] = {"max_tokens": REASONING_MAX_TOKENS}
+        else:
+            return
+        self._relaxed_routing.add(relax)
+        logger.warning(
+            f"{self.req_prefix}No OpenRouter host of {self.model} passes {step or 'the routing filters'}; "
+            f"retrying without {change}: {detail[:200]}"
+        )
+        raise TransientAPIError(f"Retrying without OpenRouter {relax}", status_code=404)
 
     def _register_rate_limit(self, retry_after: str | None) -> float:
         """Record a 429 and return the cooldown it installs.

@@ -75,28 +75,113 @@ def test_other_providers_get_no_openrouter_routing(mock_post):
     assert "provider" not in _sent(mock_post, client)[0]
 
 
-@pytest.mark.usefixtures("no_retry_sleep")
-@patch("worker.services.llm_client.requests.post")
-def test_no_matching_host_retries_once_without_the_filters(mock_post):
+# OpenRouter's 404 bodies, as returned 2026-10-06 (Mistral Small 3.2, messages trimmed).
+BY_PARAMETERS = (
+    '{"error":{"message":"No endpoints found that can handle the requested parameters.","code":404,'
+    '"metadata":{"failed_routing_step":"Filter by Parameters"}}}'
+)
+BY_QUANTIZATION = (
+    '{"error":{"message":"No endpoints found for the request with quantization: fp32.","code":404,'
+    '"metadata":{"failed_routing_step":"Filter by Quantization"}}}'
+)
+BY_IGNORE = (
+    '{"error":{"message":"All providers have been ignored.","code":404,'
+    '"metadata":{"failed_routing_step":"Filter by Ignored Providers"}}}'
+)
+NO_STEP = '{"error":{"message":"No endpoints found that can handle the requested parameters.","code":404}}'
+FILTERS = {"quantizations", "ignore"}
+
+
+def _answers(mock_post, *not_found):
+    """Answer with each 404 body in turn, then succeed; record every payload sent."""
     sent = []
-    no_endpoints = MagicMock(
-        status_code=404,
-        text='{"error":{"message":"No endpoints found that can handle the requested parameters.","code":404}}',
-    )
 
     def record(*_args, **kw):
         sent.append(copy.deepcopy(kw["json"]))
-        return no_endpoints if len(sent) == 1 else _ok()
+        if len(sent) <= len(not_found):
+            return MagicMock(status_code=404, text=not_found[len(sent) - 1])
+        return _ok()
 
     mock_post.side_effect = record
-    client = LLMClient(provider="openrouter", api_key="k", model="m", routing_strategy="lowest-cost")
-    res = client.complete(messages=[{"role": "user", "content": "Hi"}], response_schema=SCHEMA)
+    return sent
 
+
+def _client():
+    return LLMClient(provider="openrouter", api_key="k", model="m", routing_strategy="lowest-cost")
+
+
+def _complete(client, **kwargs):
+    res = client.complete(messages=[{"role": "user", "content": "Hi"}], **kwargs)
     assert res is not None and res.content == "ok"
+
+
+@pytest.mark.usefixtures("no_retry_sleep")
+@patch("worker.services.llm_client.requests.post")
+def test_a_model_that_cannot_reason_drops_reasoning_but_keeps_the_schema_guard(mock_post):
+    """CodeRabbit on #57: the retry used to drop require_parameters, so a host could ignore the
+    schema. Mistral Small 3.2 has hosts for the schema but none for ``reasoning`` (404 with it,
+    200 without, measured 2026-10-06), so only reasoning goes."""
+    sent = _answers(mock_post, BY_PARAMETERS)
+    client = _client()
+    _complete(client, response_schema=SCHEMA)
+
     assert len(sent) == 2
-    assert {"quantizations", "ignore", "require_parameters"} <= set(sent[0]["provider"])
-    assert not {"quantizations", "ignore", "require_parameters"} & set(sent[1]["provider"])
-    assert sent[1]["provider"]["sort"] == "price"
+    assert "reasoning" in sent[0] and "reasoning" not in sent[1]
+    assert sent[1]["provider"]["require_parameters"] is True
+    assert sent[1]["response_format"]["type"] == "json_schema"
+    assert set(sent[1]["provider"]) >= FILTERS and sent[1]["provider"]["sort"] == "price"
+
+    # The client's later calls start where the retry left off.
+    later = _sent(mock_post, client, response_schema=SCHEMA)[0]
+    assert "reasoning" not in later and later["provider"]["require_parameters"] is True
+
+
+@pytest.mark.usefixtures("no_retry_sleep")
+@pytest.mark.parametrize("body", [BY_QUANTIZATION, BY_IGNORE])
+@patch("worker.services.llm_client.requests.post")
+def test_no_host_past_the_host_filters_drops_only_those(mock_post, body):
+    sent = _answers(mock_post, body)
+    _complete(_client(), response_schema=SCHEMA)
+
+    assert len(sent) == 2
+    assert not FILTERS & set(sent[1]["provider"])
+    assert sent[1]["provider"]["require_parameters"] is True
+    assert sent[1]["reasoning"] == sent[0]["reasoning"]
+
+
+@pytest.mark.usefixtures("no_retry_sleep")
+@patch("worker.services.llm_client.requests.post")
+def test_require_parameters_goes_only_when_the_model_still_has_no_host(mock_post):
+    sent = _answers(mock_post, BY_PARAMETERS, BY_PARAMETERS)
+    _complete(_client(), response_schema=SCHEMA)
+
+    assert len(sent) == 3
+    assert sent[1]["provider"]["require_parameters"] is True and "reasoning" not in sent[1]
+    assert "require_parameters" not in sent[2]["provider"]
+    # The reasoning cap is back once nothing forces a host to support it.
+    assert sent[2]["reasoning"] == sent[0]["reasoning"]
+
+
+@pytest.mark.usefixtures("no_retry_sleep")
+@patch("worker.services.llm_client.requests.post")
+def test_a_404_naming_no_step_relaxes_the_host_filters_first(mock_post):
+    sent = _answers(mock_post, NO_STEP)
+    _complete(_client(), response_schema=SCHEMA)
+
+    assert len(sent) == 2
+    assert not FILTERS & set(sent[1]["provider"])
+    assert sent[1]["provider"]["require_parameters"] is True and "reasoning" in sent[1]
+
+
+@pytest.mark.usefixtures("no_retry_sleep")
+@patch("worker.services.llm_client.requests.post")
+def test_a_call_without_a_schema_keeps_its_reasoning_budget(mock_post):
+    sent = _answers(mock_post, BY_QUANTIZATION)
+    _complete(_client())
+
+    assert len(sent) == 2
+    assert not FILTERS & set(sent[1]["provider"])
+    assert sent[1]["reasoning"] == sent[0]["reasoning"]
 
 
 @patch("worker.services.llm_client.requests.post")
