@@ -108,3 +108,24 @@ def test_the_handler_passes_the_setting_to_the_owner_veto():
 
     assert OCR_STAGGERED_LINES is True
     assert "staggered_lines=OCR_STAGGERED_LINES" in inspect.getsource(ocr_handler)
+
+
+# 4Oct ch. 1 p. 3, the owner's hand merge (worker #53): 仕事とはいえ, high in the same balloon, stays
+# apart from the seven-piece sentence ブライダルなんて…でしょう. Its overlap along the line with the
+# top of the sentence's first columns is under a fifth, so the chain does not link it.
+FOURTH_OCT_P3_SENTENCE = [
+    (1628, 501, 118, 498),  # でしょう：
+    (1708, 487, 152, 633),  # 縁が無かった
+    (1811, 491, 142, 726),  # していなければ
+    (1936, 508, 104, 207),  # アイ
+    (2026, 501, 114, 235),  # ブラ
+    (1919, 677, 135, 332),  # ドルを
+    (2002, 670, 162, 626),  # イダルなんて
+]
+FOURTH_OCT_P3_ASIDE = (2161, 110, 231, 436)  # 仕事とはいえ (its region box on the dev stack)
+
+
+def test_the_owners_hand_merge_on_4oct_p3_still_holds():
+    assert _decide(FOURTH_OCT_P3_SENTENCE, staggered_lines=True).state == "assigned"
+    decision = _decide([*FOURTH_OCT_P3_SENTENCE, FOURTH_OCT_P3_ASIDE], staggered_lines=True)
+    assert decision.state == "unknown"
