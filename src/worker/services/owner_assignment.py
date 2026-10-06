@@ -425,7 +425,9 @@ def _line_orientation(boxes: Sequence[tuple[float, float, float, float]]) -> boo
     return horizontal_votes > 0
 
 
-def split_at_line_breaks(raw_quads: Sequence[Any], *, join_split_lines: bool) -> list[list[int]] | None:
+def split_at_line_breaks(
+    raw_quads: Sequence[Any], *, join_split_lines: bool, staggered_lines: bool = False
+) -> list[list[int]] | None:
     """Cut a candidate group where its line continuity breaks, keeping the runs on either side.
 
     The owner veto used to answer any break by splitting the whole group into single pieces: on
@@ -433,6 +435,10 @@ def split_at_line_breaks(raw_quads: Sequence[Any], *, join_split_lines: bool) ->
     cost the sentence its own grouping. Lines are ordered and compared exactly as
     `_line_continuity` does, and a cut goes where it would reject: lateral overlap under
     `_MIN_LATERAL_OVERLAP`, or a gap over `_MAX_LINE_GAP_MULTIPLIER` mean line widths.
+
+    With ``staggered_lines`` (B3), cut runs that `_staggered_chain` links are joined again, so a
+    balloon set as two offset paragraphs is not cut apart because an unrelated line joined its
+    component (CodeRabbit on #56). When that leaves one part, the plain cuts are kept.
 
     Returns the parts as lists of indices into ``raw_quads``, or ``None`` when there is no break
     to cut at, or no line geometry to order (invalid quads, square or mixed orientation). Each
@@ -453,18 +459,49 @@ def split_at_line_breaks(raw_quads: Sequence[Any], *, join_split_lines: bool) ->
     ordered = sorted(lines, key=lambda line: _center(line[0])[1 if horizontal else 0])
     cross_lengths = [(box[3] - box[1]) if horizontal else (box[2] - box[0]) for box, _ in ordered]
     threshold = (sum(cross_lengths) / len(cross_lengths)) * _MAX_LINE_GAP_MULTIPLIER
-    parts: list[list[int]] = [list(ordered[0][1])]
-    for (previous, _), (current, members) in pairwise(ordered):
+    # Each part is a list of positions in `ordered`; the indices are read out at the end.
+    parts: list[list[int]] = [[0]]
+    for position, ((previous, _), (current, _)) in enumerate(pairwise(ordered), start=1):
         previous_start, previous_end = _cross_interval(previous, horizontal)
         current_start, current_end = _cross_interval(current, horizontal)
         overlap = max(0.0, min(previous_end, current_end) - max(previous_start, current_start))
         share = overlap / max(1e-9, min(previous_end - previous_start, current_end - current_start))
         gap = max(0.0, _along_interval(current, horizontal)[0] - _along_interval(previous, horizontal)[1])
         if share < _MIN_LATERAL_OVERLAP or gap > threshold:
-            parts.append(list(members))
+            parts.append([position])
         else:
-            parts[-1].extend(members)
-    return parts if len(parts) > 1 else None
+            parts[-1].append(position)
+    if staggered_lines and len(parts) > 1:
+        max_gap = _STAGGERED_MAX_GAP * sum(cross_lengths) / len(cross_lengths)
+        joined = _join_staggered_parts(parts, [box for box, _ in ordered], horizontal, max_gap)
+        if len(joined) > 1:
+            parts = joined
+    if len(parts) == 1:
+        return None
+    return [[index for position in part for index in ordered[position][1]] for part in parts]
+
+
+def _join_staggered_parts(
+    parts: list[list[int]], boxes: Sequence[tuple[float, float, float, float]], horizontal: bool, max_gap: float
+) -> list[list[int]]:
+    """Join the parts holding any two lines `_staggered_link` connects; order by first line."""
+    part_of = {position: number for number, part in enumerate(parts) for position in part}
+    root = list(range(len(parts)))
+
+    def find(number: int) -> int:
+        while root[number] != number:
+            root[number] = root[root[number]]
+            number = root[number]
+        return number
+
+    for left in range(len(boxes)):
+        for right in range(left + 1, len(boxes)):
+            if _staggered_link(boxes[left], boxes[right], horizontal, max_gap):
+                root[find(part_of[left])] = find(part_of[right])
+    joined: dict[int, list[int]] = {}
+    for number, part in enumerate(parts):
+        joined.setdefault(find(number), []).extend(part)
+    return sorted((sorted(part) for part in joined.values()), key=lambda part: part[0])
 
 
 def _same_line(a: tuple[float, float, float, float], b: tuple[float, float, float, float], horizontal: bool) -> bool:
@@ -589,18 +626,26 @@ def _staggered_chain(boxes: Sequence[tuple[float, float, float, float]], horizon
         for other in range(count):
             if other in linked:
                 continue
-            a_start, a_end = _cross_interval(boxes[current], horizontal)
-            b_start, b_end = _cross_interval(boxes[other], horizontal)
-            shared = min(a_end, b_end) - max(a_start, b_start)
-            if shared < _MIN_LATERAL_OVERLAP * min(a_end - a_start, b_end - b_start):
-                continue
-            a_along_start, a_along_end = _along_interval(boxes[current], horizontal)
-            b_along_start, b_along_end = _along_interval(boxes[other], horizontal)
-            if max(a_along_start, b_along_start) - min(a_along_end, b_along_end) > max_gap:
+            if not _staggered_link(boxes[current], boxes[other], horizontal, max_gap):
                 continue
             linked.add(other)
             frontier.append(other)
     return len(linked) == count
+
+
+def _staggered_link(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float], horizontal: bool, max_gap: float
+) -> bool:
+    """Two lines overlap along the line by `_MIN_LATERAL_OVERLAP` of the shorter and sit at most
+    ``max_gap`` apart across it."""
+    a_start, a_end = _cross_interval(a, horizontal)
+    b_start, b_end = _cross_interval(b, horizontal)
+    shared = min(a_end, b_end) - max(a_start, b_start)
+    if shared < _MIN_LATERAL_OVERLAP * min(a_end - a_start, b_end - b_start):
+        return False
+    a_along_start, a_along_end = _along_interval(a, horizontal)
+    b_along_start, b_along_end = _along_interval(b, horizontal)
+    return max(a_along_start, b_along_start) - min(a_along_end, b_along_end) <= max_gap
 
 
 def _major_axis_angle(quad: Sequence[tuple[float, float]]) -> float | None:

@@ -251,7 +251,7 @@ def owner_aware_grouping_context(
             regions[index].get("sourceQuad") or (regions[index].get("ownershipProvenance") or {}).get("sourceQuad")
             for index in component
         ]
-        parts = split_at_line_breaks(quads, join_split_lines=join_split_lines)
+        parts = split_at_line_breaks(quads, join_split_lines=join_split_lines, staggered_lines=staggered_lines)
         return None if parts is None else [[component[local] for local in part] for part in parts]
 
     return GroupingContext(

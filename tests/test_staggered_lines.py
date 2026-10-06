@@ -100,14 +100,54 @@ def test_ordinary_columns_are_continuous_either_way(staggered_lines):
     assert "staggered" not in decision.diagnostics["line_continuity"]
 
 
-def test_the_handler_passes_the_setting_to_the_owner_veto():
-    import inspect
+@pytest.mark.parametrize(("env", "expected"), [(None, "True"), ("false", "False")])
+def test_the_setting_defaults_on_and_can_be_switched_off(env, expected):
+    import os
+    import subprocess
+    import sys
 
+    import worker
+
+    environment = {key: value for key, value in os.environ.items() if key != "OCR_STAGGERED_LINES"}
+    environment["PYTHONPATH"] = os.path.dirname(os.path.dirname(worker.__file__))
+    if env is not None:
+        environment["OCR_STAGGERED_LINES"] = env
+    result = subprocess.run(
+        [sys.executable, "-c", "from worker.config import OCR_STAGGERED_LINES; print(OCR_STAGGERED_LINES)"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip().splitlines()[-1] == expected
+
+
+@pytest.mark.parametrize("staggered_lines", [False, True])
+def test_the_owner_veto_and_split_receive_the_setting(monkeypatch, staggered_lines):
     import worker.handlers.ocr as ocr_handler
-    from worker.config import OCR_STAGGERED_LINES
 
-    assert OCR_STAGGERED_LINES is True
-    assert "staggered_lines=OCR_STAGGERED_LINES" in inspect.getsource(ocr_handler)
+    received = {}
+
+    class Decision:
+        def to_dict(self):
+            return {"state": "unknown", "reason": "test"}
+
+    def fake_attach(*args, **kwargs):
+        received["veto"] = kwargs.get("staggered_lines")
+        return [Decision()]
+
+    def fake_split(quads, **kwargs):
+        received["split"] = kwargs.get("staggered_lines")
+        return None
+
+    monkeypatch.setattr(ocr_handler, "attach_live_owner_decisions", fake_attach)
+    monkeypatch.setattr(ocr_handler, "split_at_line_breaks", fake_split)
+    context = ocr_handler.owner_aware_grouping_context(None, [], staggered_lines=staggered_lines)
+    assert context.owner_veto is not None and context.owner_split is not None
+    regions = [{"sourceQuad": _quad(*box)} for box in SAMPLE78]
+    context.owner_veto([0, 1, 2, 3], regions)
+    context.owner_split([0, 1, 2, 3], regions)
+    assert received == {"veto": staggered_lines, "split": staggered_lines}
 
 
 # 4Oct ch. 1 p. 3, the owner's hand merge (worker #53): 仕事とはいえ, high in the same balloon, stays
@@ -129,3 +169,82 @@ def test_the_owners_hand_merge_on_4oct_p3_still_holds():
     assert _decide(FOURTH_OCT_P3_SENTENCE, staggered_lines=True).state == "assigned"
     decision = _decide([*FOURTH_OCT_P3_SENTENCE, FOURTH_OCT_P3_ASIDE], staggered_lines=True)
     assert decision.state == "unknown"
+
+
+def _region(index, box):
+    quad = _quad(*box)
+    x, y, w, h = box
+    return {
+        "text": f"line-{index}",
+        "detectedLanguage": "ja",
+        "confidence": 0.9,
+        "x": x,
+        "y": y,
+        "width": w,
+        "height": h,
+        "fragmentId": f"fragment-{index}",
+        "sourceQuad": quad,
+        "ownershipProvenance": {"id": f"fragment-{index}", "sourceQuad": quad},
+    }
+
+
+def _grouped(boxes, *, staggered_lines):
+    """Group ``boxes`` as the handler does inside one balloon: owner veto, then the split at breaks."""
+    from worker.handlers.ocr import grouping_config, owner_aware_grouping_context
+    from worker.services.fragment_grouping import group_fragments
+
+    regions = [_region(index, box) for index, box in enumerate(boxes)]
+    xs = [b[0] for b in boxes] + [b[0] + b[2] for b in boxes]
+    ys = [b[1] for b in boxes] + [b[1] + b[3] for b in boxes]
+    left, top, right, bottom = min(xs) - 20, min(ys) - 20, max(xs) + 20, max(ys) + 20
+    balloon = {
+        "format": "polygon",
+        "id": "balloon",
+        "points": [[left, top], [right, top], [right, bottom], [left, bottom]],
+    }
+    context = owner_aware_grouping_context(
+        None, [balloon], join_split_lines=True, split_at_breaks=True, staggered_lines=staggered_lines
+    )
+    return sorted(sorted(group) for group in group_fragments(regions, grouping_config("rtl", 0.35), context))
+
+
+@pytest.mark.parametrize(
+    "stray",
+    [
+        (1055, 370, 38, 120),  # below and left of the lower paragraph
+        (1205, 380, 40, 120),  # below and right of the upper paragraph
+    ],
+)
+def test_a_stray_line_in_the_component_does_not_cut_the_staggered_balloon(stray):
+    """CodeRabbit on #56: a line that proximity joins to sample78's balloon gets the whole component
+    vetoed, and the split that follows cut only between neighbours, so the balloon came back as three
+    pieces. The split now keeps lines the staggered chain links together."""
+    boxes = [*SAMPLE78, stray]
+    assert _grouped(boxes, staggered_lines=True) == [[0, 1, 2, 3], [4]]
+    # Without B3 the balloon is pieces either way: the split only changes when the setting is on.
+    assert _grouped(boxes, staggered_lines=False) == [[0], [1, 3], [2], [4]]
+
+
+@pytest.mark.parametrize(
+    ("boxes", "expected"),
+    [
+        (TELEA_ASIDE, [[0, 1], [2]]),
+        ([*FOURTH_OCT_P3_SENTENCE, FOURTH_OCT_P3_ASIDE], [[0, 1, 2, 3, 4, 5, 6], [7]]),
+        ([*SAMPLE24_UPPER, *SAMPLE24_REPLY], [[0, 1, 2], [3, 4]]),
+    ],
+    ids=["telea-aside", "4oct-p3-hand-merge", "sample24-reply"],
+)
+def test_the_guard_pages_hold_through_grouping_and_the_split(boxes, expected):
+    """CodeRabbit on #56: the guards above call the owner decision directly. Through group_fragments
+    and the split at breaks, the aside and the reply must still come out as texts of their own."""
+    assert _grouped(boxes, staggered_lines=True) == expected
+
+
+def test_the_split_without_staggered_lines_is_unchanged():
+    from worker.services.owner_assignment import split_at_line_breaks
+
+    quads = [_quad(*box) for box in [*SAMPLE78, (1055, 370, 38, 120)]]
+    plain = split_at_line_breaks(quads, join_split_lines=True)
+    assert plain is not None and sorted(sorted(part) for part in plain) == [[0], [1, 3], [2], [4]]
+    staggered = split_at_line_breaks(quads, join_split_lines=True, staggered_lines=True)
+    assert staggered is not None and sorted(sorted(part) for part in staggered) == [[0, 1, 2, 3], [4]]
