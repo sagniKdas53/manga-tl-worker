@@ -35,6 +35,8 @@ from worker.config import (
     OCR_JOIN_SPLIT_LINES,
     OCR_LINE_READING_ORDER,
     OCR_MERGE_THRESHOLD,
+    OCR_NO_BALLOON_SIZE_RATIO,
+    OCR_NO_BALLOON_VETO,
     OCR_ORIENTATION,
     OCR_SPLIT_VETOED_AT_BREAKS,
     OCR_STAGGERED_LINES,
@@ -59,7 +61,14 @@ from worker.services.layout import bubble_compare
 from worker.services.merge_regions import merge_ocr_regions
 from worker.services.ocr import parse_paddle_ocr_results, parse_rapid_ocr_results
 from worker.services.ocr_capture import capture_observed_ocr_grouping
-from worker.services.owner_assignment import assign_captured_owners, split_at_line_breaks
+from worker.services.owner_assignment import (
+    assign_captured_owners,
+    has_rotated_lines,
+    split_at_line_breaks,
+    split_by_character_size,
+    split_by_orientation,
+    split_off_squares,
+)
 from worker.services.ownership_features import capture_fragment_features
 from worker.services.panel_detection import detect_text_containers
 from worker.services.pixel_stats import pixel_spread as _pixel_spread
@@ -264,6 +273,69 @@ def owner_aware_grouping_context(
         owner_veto=owner_veto,
         page_area=base_context.page_area if base_context is not None else None,
         owner_split=owner_split if split_at_breaks else None,
+    )
+
+
+def no_balloon_grouping_context(
+    base_context,
+    join_split_lines=OCR_JOIN_SPLIT_LINES,
+    staggered_lines=OCR_STAGGERED_LINES,
+    size_ratio=OCR_NO_BALLOON_SIZE_RATIO,
+):
+    """B5: the owner veto for text no balloon holds.
+
+    The balloon path vetoes a group the owner decision cannot prove. Outside balloons there is no
+    container to prove, so every multi-piece decision is ``missing-validated-container`` and the
+    decision was only recorded. Here it is applied without the container: a group is kept when its
+    only fault is the missing balloon, and cut when its lines break, mix directions or change
+    character size. Text set at an angle (a title's tilted tiles) only gets the size check: the
+    line checks assume straight lines. A cut goes by size first (misreads of the art beside
+    speech), then by direction (a stat table beside a paragraph), then square pieces off (B4: a
+    glyph's angle is not a line's), then at the line breaks; each part is decided again.
+    """
+
+    def quads(component, regions):
+        return [
+            regions[index].get("sourceQuad") or (regions[index].get("ownershipProvenance") or {}).get("sourceQuad")
+            for index in component
+        ]
+
+    def owner_veto(component, regions):
+        candidate_groups = [component] + [[index] for index in range(len(regions)) if index not in component]
+        decision = attach_live_owner_decisions(
+            regions,
+            candidate_groups,
+            [],
+            persist_groups=1,
+            join_split_lines=join_split_lines,
+            staggered_lines=staggered_lines,
+        )[0].to_dict()
+        if size_ratio > 0 and split_by_character_size(quads(component, regions), size_ratio) is not None:
+            return "different-character-sizes"
+        if has_rotated_lines(quads(component, regions)):
+            return None
+        if decision["state"] != "assigned" and decision["reason"] != "missing-validated-container":
+            return decision["reason"]
+        return None
+
+    def owner_split(component, regions):
+        component_quads = quads(component, regions)
+        for parts in (
+            split_by_character_size(component_quads, size_ratio) if size_ratio > 0 else None,
+            split_by_orientation(component_quads),
+            split_off_squares(component_quads),
+            split_at_line_breaks(component_quads, join_split_lines=join_split_lines, staggered_lines=staggered_lines),
+        ):
+            if parts is not None:
+                return [[component[local] for local in part] for part in parts]
+        return None
+
+    return GroupingContext(
+        clearance=base_context.clearance if base_context is not None else None,
+        solidity=base_context.solidity if base_context is not None else 1.0,
+        owner_veto=owner_veto,
+        page_area=base_context.page_area if base_context is not None else None,
+        owner_split=owner_split,
     )
 
 
@@ -1205,6 +1277,8 @@ def process_ocr(job_data):
             grouping = grouping_config(reading_direction, merge_threshold)
             # No balloon bounds these, so the page does: the area gate needs to know how big it is.
             page_context = GroupingContext(page_area=page_area)
+            if OCR_NO_BALLOON_VETO:
+                page_context = no_balloon_grouping_context(page_context)
             unmatched_groups = []
             merged_unmatched = []
             # On a two-page spread, each page's text is grouped on its own (ja/sample93).

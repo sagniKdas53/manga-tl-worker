@@ -481,6 +481,118 @@ def split_at_line_breaks(
     return [[index for position in part for index in ordered[position][1]] for part in parts]
 
 
+def _boxes(raw_quads: Sequence[Any]) -> list[tuple[float, float, float, float]] | None:
+    quads = [_normalise_quad(raw) for raw in raw_quads]
+    if any(quad is None for quad in quads):
+        return None
+    boxes = []
+    for quad in quads:
+        assert quad is not None
+        xs, ys = [point[0] for point in quad], [point[1] for point in quad]
+        boxes.append((min(xs), min(ys), max(xs), max(ys)))
+    return boxes
+
+
+def character_size(box: tuple[float, float, float, float]) -> float:
+    """A line's character size: a column's width, a horizontal line's height, else the short side."""
+    width, height = box[2] - box[0], box[3] - box[1]
+    if height >= width * _MIN_ORIENTATION_ASPECT:
+        return width
+    if width >= height * _MIN_ORIENTATION_ASPECT:
+        return height
+    return min(width, height)
+
+
+def split_by_character_size(raw_quads: Sequence[Any], max_ratio: float) -> list[list[int]] | None:
+    """Cut a group where its sorted character sizes jump by more than ``max_ratio`` (B5).
+
+    One text keeps one character size: over the 61 multi-piece texts of the 2026-08-09 hand labels
+    the widest spread inside one is 1.8x (95th percentile 1.48x). Text outside balloons chains
+    with misreads of the art, which come out far bigger: on chrome-box's sample218 p. 9 three
+    94-102 px columns of speech chained with お, 谷, ``(gftgs grgitgt`` and BOFE at 262-407 px.
+    Returns the size bands, smallest first, or ``None`` when there is no jump.
+    """
+    boxes = _boxes(raw_quads)
+    if boxes is None or len(boxes) < 2:
+        return None
+    order = sorted(range(len(boxes)), key=lambda index: character_size(boxes[index]))
+    parts: list[list[int]] = [[order[0]]]
+    for previous, current in pairwise(order):
+        small, large = character_size(boxes[previous]), character_size(boxes[current])
+        if small > 0 and large / small > max_ratio:
+            parts.append([current])
+        else:
+            parts[-1].append(current)
+    return parts if len(parts) > 1 else None
+
+
+def split_by_orientation(raw_quads: Sequence[Any]) -> list[list[int]] | None:
+    """Split a group that mixes columns and horizontal lines into its columns and its lines (B4).
+
+    A square piece (a single glyph, a mark) is its own part: on the 2026-10-06 test pages those are
+    misreads, SFX or bracket glyphs (お, M, 秘, 靠), and attaching one to either side would carry
+    its direction into a text it does not belong to. Returns ``None`` unless both directions occur.
+    """
+    boxes = _boxes(raw_quads)
+    if boxes is None:
+        return None
+    vertical, horizontal, square = [], [], []
+    for index, box in enumerate(boxes):
+        width, height = box[2] - box[0], box[3] - box[1]
+        if _is_square(box):
+            square.append(index)
+        elif height >= width * _MIN_ORIENTATION_ASPECT:
+            vertical.append(index)
+        else:
+            horizontal.append(index)
+    if not vertical or not horizontal:
+        return None
+    return [vertical, horizontal, *[[index] for index in square]]
+
+
+# A line whose major axis is more than this far off horizontal or vertical is set at an angle: the
+# tilted tiles of a title (ja/sample104: 62-77 degrees), not a straight column or row.
+_ROTATED_LINE_DEGREES = 10.0
+
+
+def _is_square(box: tuple[float, float, float, float]) -> bool:
+    width, height = box[2] - box[0], box[3] - box[1]
+    return height < width * _MIN_ORIENTATION_ASPECT and width < height * _MIN_ORIENTATION_ASPECT
+
+
+def has_rotated_lines(raw_quads: Sequence[Any]) -> bool:
+    """True when a non-square piece is set at an angle (B4). Line checks assume straight lines."""
+    for raw in raw_quads:
+        quad = _normalise_quad(raw)
+        if quad is None:
+            continue
+        xs, ys = [point[0] for point in quad], [point[1] for point in quad]
+        if _is_square((min(xs), min(ys), max(xs), max(ys))):
+            continue
+        angle = _major_axis_angle(quad)
+        if angle is not None and min(angle % 90, 90 - angle % 90) > _ROTATED_LINE_DEGREES:
+            return True
+    return False
+
+
+def split_off_squares(raw_quads: Sequence[Any]) -> list[list[int]] | None:
+    """Peel the square pieces (a single glyph, a mark, a misread) off a group of lines (B4).
+
+    A square piece has no direction, and its quad's angle reads 0 against a column's 90: on
+    ja/sample83 a square "M" made two upright columns 「くそ…むっちゃ痛いけど」 「我慢しなきゃ…」
+    look incoherent, and the group fell apart into single pieces. Returns the lines, then each
+    square on its own, or ``None`` when there is nothing to peel or nothing would be left.
+    """
+    boxes = _boxes(raw_quads)
+    if boxes is None:
+        return None
+    squares = [index for index, box in enumerate(boxes) if _is_square(box)]
+    lines = [index for index, box in enumerate(boxes) if not _is_square(box)]
+    if not squares or not lines:
+        return None
+    return [lines, *[[index] for index in squares]]
+
+
 def _join_staggered_parts(
     parts: list[list[int]], boxes: Sequence[tuple[float, float, float, float]], horizontal: bool, max_gap: float
 ) -> list[list[int]]:

@@ -568,6 +568,21 @@ OCR_BALLOON_WALL_STROKE = float(os.environ.get("OCR_BALLOON_WALL_STROKE", "3.0")
 # that one counterexample; raise it if a real balloon of more lines stays split.
 OCR_BALLOON_JOIN_MAX_LINES = int(os.environ.get("OCR_BALLOON_JOIN_MAX_LINES", "8"))
 
+# B5: text no balloon holds is grouped by distance alone, and the "is this one text" decision was
+# recorded but never applied, so a speech column chained with misreads of the art (chrome-box
+# sample218 p. 9: one 1140 x 1995 region typeset under its balloon), and a stat table chained
+# with the paragraph beside it (sample4, "grouped too much"). With this on, the no-balloon path
+# applies the decision's line checks (the missing balloon itself is not held against it): a group
+# whose lines break, mix directions or change character size is cut, by size first, then by
+# direction, then at its line breaks. "false" restores distance alone.
+OCR_NO_BALLOON_VETO = os.environ.get("OCR_NO_BALLOON_VETO", "true").strip().lower() in ("1", "true", "yes")
+
+# ...where "changes character size" means the sorted sizes jump by more than this factor. The widest
+# spread inside one text over the 61 hand-labelled multi-piece texts is 1.8x; sample218's speech to
+# its misreads is 2.57x. Ruby (furigana, about half its base text) was not in the labels: if ruby
+# comes apart from its text on the no-balloon path, this is the setting. 0 turns the size cut off.
+OCR_NO_BALLOON_SIZE_RATIO = float(os.environ.get("OCR_NO_BALLOON_SIZE_RATIO", "2.2"))
+
 # Never group text that no balloon holds across the gutter of a two-page spread. ja/sample93's
 # shout on the left page and speech on the right came back as one region. A page counts as a
 # spread when it is at least OCR_SPREAD_MIN_ASPECT times as wide as it is tall and a vertical edge
