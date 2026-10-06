@@ -14,7 +14,12 @@ from tenacity.retry import retry_if_exception_type
 from tenacity.stop import stop_after_attempt
 from tenacity.wait import wait_exponential
 
-from worker.config import logger
+from worker.config import (
+    OPENROUTER_IGNORE_PROVIDERS,
+    OPENROUTER_QUANTIZATIONS,
+    OPENROUTER_REQUIRE_PARAMETERS,
+    logger,
+)
 from worker.provider_config import get_config_loader, get_provider_registry
 from worker.utils.rate_limit import enforce_rate_limit, record_llm_call
 
@@ -220,6 +225,7 @@ class LLMClient:
             self.headers.update(extra)
 
         self._degraded_format = False
+        self._unfiltered_routing = False
 
     def complete(
         self,
@@ -341,6 +347,19 @@ class LLMClient:
         elif self.routing_strategy == "highest-throughput":
             payload["provider"] = {"allow_fallbacks": True, "sort": "throughput"}
 
+        # Skip the hosts measured to ignore the request (config.OPENROUTER_QUANTIZATIONS). Dropped
+        # for the rest of this client's calls if no host of the model is left (_execute_with_retry).
+        if not self._unfiltered_routing:
+            provider = payload.setdefault("provider", {})
+            if OPENROUTER_QUANTIZATIONS:
+                provider["quantizations"] = list(OPENROUTER_QUANTIZATIONS)
+            if OPENROUTER_IGNORE_PROVIDERS:
+                provider["ignore"] = list(OPENROUTER_IGNORE_PROVIDERS)
+            if OPENROUTER_REQUIRE_PARAMETERS and "response_format" in payload:
+                provider["require_parameters"] = True
+            if not provider:
+                payload.pop("provider")
+
         # Inject OpenRouter cache_control on system prompt if present
         if "messages" in payload:
             for msg in payload["messages"]:
@@ -401,6 +420,19 @@ class LLMClient:
 
         if response.status_code >= 500:
             raise TransientAPIError(f"Server error: {response.status_code}", status_code=response.status_code)
+
+        if response.status_code == 404 and "No endpoints found" in response.text and not self._unfiltered_routing:
+            routing = payload.get("provider") or {}
+            if {"quantizations", "ignore", "require_parameters"} & set(routing):
+                # The host filters left this model no host. Calling anyway beats failing the job.
+                logger.warning(
+                    f"{self.req_prefix}No OpenRouter host of {self.model} passes the host filters; "
+                    f"retrying without them: {response.text[:200]}"
+                )
+                for key in ("quantizations", "ignore", "require_parameters"):
+                    routing.pop(key, None)
+                self._unfiltered_routing = True
+                raise TransientAPIError("Retrying without OpenRouter host filters", status_code=404)
 
         if response.status_code in (401, 403):
             # A bad credential does not heal inside a job, but every layer above this one retries:

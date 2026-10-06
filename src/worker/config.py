@@ -638,6 +638,30 @@ QA_CONFIG = ModelConfig(
 # single fallback to QA_VLM_MODEL.
 QA_VLM_FALLBACK_MODELS = [m.strip() for m in os.environ.get("QA_VLM_FALLBACK_MODELS", "").split(",") if m.strip()]
 
+# OpenRouter hosts to route to. Cheapest-first routing ranks hosts by prompt price, and on
+# 2026-10-06 the cheapest were fp4 builds that ignored the reasoning budget or crawled: DeepSeek V4
+# Flash on OpenInference spent all 8,192 output tokens on reasoning (no translation, 216 s a call),
+# Relace and OpenInference reasoned 2-3x past a 512-token budget on V4 and V4.1 Flash at 4-50x the
+# cost of fp8 hosts, Wafer spent 6,600-8,192 tokens reasoning on GLM 5.3 Flash and V4.1 Flash
+# (153-277 s, two truncated), and MiMo V2.6 Flash on Darkbloom ran at 15-28 tokens/s. Comma-separated;
+# empty sends no filter. OPENROUTER_QUANTIZATIONS keeps "unknown" because Google and others
+# publish no precision.
+OPENROUTER_QUANTIZATIONS = [
+    q.strip()
+    for q in os.environ.get("OPENROUTER_QUANTIZATIONS", "fp8,mxfp8,fp16,bf16,fp32,unknown").split(",")
+    if q.strip()
+]
+OPENROUTER_IGNORE_PROVIDERS = [
+    p.strip() for p in os.environ.get("OPENROUTER_IGNORE_PROVIDERS", "relace,open-inference,wafer").split(",") if p.strip()
+]
+# A call that sends a schema goes only to hosts that support every parameter it sends, so a host
+# without structured outputs cannot quietly drop the schema.
+OPENROUTER_REQUIRE_PARAMETERS = os.environ.get("OPENROUTER_REQUIRE_PARAMETERS", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 LOCAL_LLM_PROVIDER = os.environ.get("LOCAL_LLM_PROVIDER", "").strip()
 LOCAL_LLM_ENDPOINT = os.environ.get("LOCAL_LLM_ENDPOINT", "").strip()
 LOCAL_LLM_MODEL = os.environ.get("LOCAL_LLM_MODEL", "").strip()
