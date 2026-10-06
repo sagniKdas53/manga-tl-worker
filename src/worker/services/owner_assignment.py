@@ -21,6 +21,11 @@ _MIN_ORIENTATION_ASPECT = 1.2
 _MAX_ANGLE_DELTA_DEGREES = 15.0
 _MIN_LATERAL_OVERLAP = 0.25
 _MAX_LINE_GAP_MULTIPLIER = 2.0
+# B3: with staggered_lines, two lines are linked when they overlap along the line by
+# _MIN_LATERAL_OVERLAP and sit at most this many mean line thicknesses apart across it. Half a line
+# keeps TELEA p. 2's aside apart: it overlaps the first column's length but sits 80 px (0.64 lines)
+# beside it.
+_STAGGERED_MAX_GAP = 0.5
 # AUDIT-R20: a balloon is an ellipse and a text column is a rectangle, so the outermost column
 # (ja/zh) or the top and bottom line (ko) of any multi-line balloon has corners past the curve.
 # Requiring all four corners inside split every such balloon into one region per column on the
@@ -64,6 +69,7 @@ def assign_captured_owners(
     detector_masks: Sequence[Any],
     scale_transform: Mapping[str, Any],
     join_split_lines: bool = False,
+    staggered_lines: bool = False,
 ) -> list[OwnerDecision]:
     """Assign only evidence-backed text owners for captured OCR grouping candidates.
 
@@ -75,6 +81,10 @@ def assign_captured_owners(
     `join_split_lines` (AUDIT-R21, off by default) joins the pieces OCR broke one line into
     before the line-continuity checks, so a column read as ブラ | イダルなんて is one line rather
     than two that each fail to overlap their neighbour.
+
+    `staggered_lines` (B3, off by default) accepts lines that fail the neighbour-by-neighbour check
+    when they still form one connected chain (see `_staggered_chain`): a balloon set as two
+    paragraphs, one higher than the other.
     """
     count = len(fragment_ids)
     if len(raw_quads) != count or len(recognition) != count or len(regions) != count:
@@ -141,7 +151,9 @@ def assign_captured_owners(
             decisions.append(_unknown(fragment_group_ids, "different-source-styles", diagnostics))
             continue
 
-        continuity = _line_continuity(evidence, source_scale, join_split_lines=join_split_lines)
+        continuity = _line_continuity(
+            evidence, source_scale, join_split_lines=join_split_lines, staggered_lines=staggered_lines
+        )
         diagnostics["line_continuity"] = continuity
         if not continuity["continuous"]:
             decisions.append(_unknown(fragment_group_ids, str(continuity["reason"]), diagnostics))
@@ -474,7 +486,11 @@ def _same_line(a: tuple[float, float, float, float], b: tuple[float, float, floa
 
 
 def _line_continuity(
-    members: Sequence[_FragmentEvidence], source_scale: float, *, join_split_lines: bool = False
+    members: Sequence[_FragmentEvidence],
+    source_scale: float,
+    *,
+    join_split_lines: bool = False,
+    staggered_lines: bool = False,
 ) -> dict[str, Any]:
     widths = [member.bbox[2] - member.bbox[0] for member in members]
     heights = [member.bbox[3] - member.bbox[1] for member in members]
@@ -511,6 +527,7 @@ def _line_continuity(
     threshold = (sum(cross_lengths) / len(cross_lengths)) * _MAX_LINE_GAP_MULTIPLIER * source_scale
     gaps: list[float] = []
     overlaps: list[float] = []
+    staggered = False
     for previous, current in pairwise(ordered):
         previous_cross_start, previous_cross_end = _cross_interval(previous, horizontal)
         current_cross_start, current_cross_end = _cross_interval(current, horizontal)
@@ -523,14 +540,22 @@ def _line_continuity(
         gap = max(0.0, current_along_start - previous_along_end)
         gaps.append(gap)
         overlaps.append(overlap_share)
+        broken = None
         if overlap_share < _MIN_LATERAL_OVERLAP:
-            return {
+            broken = {
                 "continuous": False,
                 "reason": "insufficient-lateral-line-overlap",
                 "lateral_overlap": overlap_share,
             }
-        if gap > threshold:
-            return {"continuous": False, "reason": "line-gap-too-large", "gap": gap, "max_gap": threshold}
+        elif gap > threshold:
+            broken = {"continuous": False, "reason": "line-gap-too-large", "gap": gap, "max_gap": threshold}
+        if broken is not None:
+            mean_thickness = sum(cross_lengths) / len(cross_lengths) * source_scale
+            if staggered_lines and _staggered_chain(ordered, horizontal, _STAGGERED_MAX_GAP * mean_thickness):
+                gaps, overlaps = [], []
+                staggered = True
+                break
+            return broken
     result: dict[str, Any] = {
         "continuous": True,
         "orientation": "horizontal" if horizontal else "vertical",
@@ -542,7 +567,40 @@ def _line_continuity(
     }
     if join_split_lines:
         result["line_count"] = len(boxes)
+    if staggered:
+        result["staggered"] = True
     return result
+
+
+def _staggered_chain(boxes: Sequence[tuple[float, float, float, float]], horizontal: bool, max_gap: float) -> bool:
+    """True when the lines form one connected chain, linking any two that overlap along the line
+    (by `_MIN_LATERAL_OVERLAP` of the shorter) and sit at most `max_gap` apart across it.
+
+    The neighbour-by-neighbour check pairs lines by position across the reading direction, so in a
+    balloon set as two paragraphs, one higher than the other, a short line of the upper paragraph
+    is paired with a line of the lower one and the balloon is vetoed (ja/sample78). Two balloons
+    stacked in one detector blob stay apart: none of their lines overlap along the line.
+    """
+    count = len(boxes)
+    linked = {0}
+    frontier = [0]
+    while frontier:
+        current = frontier.pop()
+        for other in range(count):
+            if other in linked:
+                continue
+            a_start, a_end = _cross_interval(boxes[current], horizontal)
+            b_start, b_end = _cross_interval(boxes[other], horizontal)
+            shared = min(a_end, b_end) - max(a_start, b_start)
+            if shared < _MIN_LATERAL_OVERLAP * min(a_end - a_start, b_end - b_start):
+                continue
+            a_along_start, a_along_end = _along_interval(boxes[current], horizontal)
+            b_along_start, b_along_end = _along_interval(boxes[other], horizontal)
+            if max(a_along_start, b_along_start) - min(a_along_end, b_along_end) > max_gap:
+                continue
+            linked.add(other)
+            frontier.append(other)
+    return len(linked) == count
 
 
 def _major_axis_angle(quad: Sequence[tuple[float, float]]) -> float | None:

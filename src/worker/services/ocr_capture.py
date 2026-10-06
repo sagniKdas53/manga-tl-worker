@@ -176,10 +176,11 @@ def capture_observed_ocr_grouping(
     observed_groups: list[list[int]],
     paths: dict[str, str] | None = None,
     join_split_lines: bool = False,
+    staggered_lines: bool = False,
 ) -> OcrCapture:
     """Record groups observed at runtime without rerunning or changing the grouping decision.
 
-    ``join_split_lines`` must match the live owner veto, so the recorded decisions are the ones
+    ``join_split_lines`` and ``staggered_lines`` must match the live owner veto, so the recorded decisions are the ones
     the run actually made.
     """
     if len(raw_quads) != len(regions) or len(recognition) != len(regions):
@@ -218,6 +219,7 @@ def capture_observed_ocr_grouping(
         detector_masks=detector_masks,
         scale_transform=scale_transform,
         join_split_lines=join_split_lines,
+        staggered_lines=staggered_lines,
     )
     return OcrCapture(
         format="ocr-grouping-capture-v2",

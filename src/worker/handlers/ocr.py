@@ -34,6 +34,7 @@ from worker.config import (
     OCR_MERGE_THRESHOLD,
     OCR_ORIENTATION,
     OCR_SPLIT_VETOED_AT_BREAKS,
+    OCR_STAGGERED_LINES,
     OCR_WAIST_ADJACENT_LINE_GAP,
     OCR_WAIST_GATE,
     OCR_WAIST_MAX_SOLIDITY,
@@ -178,14 +179,20 @@ def group_fallback_regions(img, regions, grouping, page_context):
 
 
 def attach_live_owner_decisions(
-    regions, candidate_groups, detector_masks, persist_groups=None, join_split_lines=OCR_JOIN_SPLIT_LINES
+    regions,
+    candidate_groups,
+    detector_masks,
+    persist_groups=None,
+    join_split_lines=OCR_JOIN_SPLIT_LINES,
+    staggered_lines=OCR_STAGGERED_LINES,
 ):
     """Persist F01's decision with every member of each normal-runtime component.
 
     Every group is evaluated, but only the first ``persist_groups`` (all, by default) write their
     decision into the members' provenance. The owner veto evaluates one component against the
     rest as singletons; writing those singletons' decisions would overwrite what earlier
-    components recorded. ``join_split_lines`` is passed to the owner decision (AUDIT-R21).
+    components recorded. ``join_split_lines`` (AUDIT-R21) and ``staggered_lines`` (B3) are passed to
+    the owner decision.
     """
 
     raw_quads = [
@@ -200,6 +207,7 @@ def attach_live_owner_decisions(
         detector_masks=detector_masks,
         scale_transform={"ocr_to_source": {"scale_x": 1.0, "scale_y": 1.0}},
         join_split_lines=join_split_lines,
+        staggered_lines=staggered_lines,
     )
     persisted = candidate_groups if persist_groups is None else candidate_groups[:persist_groups]
     for decision, component in zip(decisions[: len(persisted)], persisted, strict=True):
@@ -216,6 +224,7 @@ def owner_aware_grouping_context(
     detector_masks,
     join_split_lines=OCR_JOIN_SPLIT_LINES,
     split_at_breaks=OCR_SPLIT_VETOED_AT_BREAKS,
+    staggered_lines=OCR_STAGGERED_LINES,
 ):
     """Attach one F01 decision to each live component and veto unproven joins.
 
@@ -228,7 +237,12 @@ def owner_aware_grouping_context(
     def owner_veto(component, regions):
         candidate_groups = [component] + [[index] for index in range(len(regions)) if index not in component]
         decision = attach_live_owner_decisions(
-            regions, candidate_groups, detector_masks, persist_groups=1, join_split_lines=join_split_lines
+            regions,
+            candidate_groups,
+            detector_masks,
+            persist_groups=1,
+            join_split_lines=join_split_lines,
+            staggered_lines=staggered_lines,
         )[0].to_dict()
         return None if decision["state"] == "assigned" else decision["reason"]
 
@@ -1831,6 +1845,7 @@ def process_ocr(job_data):
                     grouping=grouping_config(reading_direction, merge_threshold),
                     observed_groups=capture_groups,
                     join_split_lines=OCR_JOIN_SPLIT_LINES,
+                    staggered_lines=OCR_STAGGERED_LINES,
                 )
                 capture.write(Path(capture_dir) / f"{page_id or image_id}.json")
             except Exception:

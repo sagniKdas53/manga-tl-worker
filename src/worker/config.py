@@ -539,6 +539,14 @@ OCR_LINE_READING_ORDER = os.environ.get("OCR_LINE_READING_ORDER", "true").strip(
 # quarter-character gap its own tests treat as room for a wall.
 OCR_WAIST_ADJACENT_LINE_GAP = float(os.environ.get("OCR_WAIST_ADJACENT_LINE_GAP", "0.2"))
 
+# B3: the owner veto accepts a balloon's lines when they form one connected chain, even if a pair of
+# neighbours across the reading direction does not overlap. A balloon set as two paragraphs, one
+# higher than the other (ja/sample78 「ちょっと男子ぃ」 over 「いま峯森さん撮ったでしょ？」), was vetoed
+# into three regions. Measured 2026-10-06: of the 22 corpus test pages only that balloon changes;
+# the guard pages (fused balloons 174, 218, 3, 30, 24) and the 2026-08-09 hand labels (4,097
+# pairs, 0 false merges) do not. "false" restores the neighbour-by-neighbour check.
+OCR_STAGGERED_LINES = os.environ.get("OCR_STAGGERED_LINES", "true").strip().lower() in ("1", "true", "yes")
+
 # Never group text that no balloon holds across the gutter of a two-page spread. ja/sample93's
 # shout on the left page and speech on the right came back as one region. A page counts as a
 # spread when it is at least OCR_SPREAD_MIN_ASPECT times as wide as it is tall and a vertical edge
