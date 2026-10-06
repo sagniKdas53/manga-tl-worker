@@ -572,9 +572,10 @@ OCR_BALLOON_JOIN_MAX_LINES = int(os.environ.get("OCR_BALLOON_JOIN_MAX_LINES", "8
 # recorded but never applied, so a speech column chained with misreads of the art (chrome-box
 # sample218 p. 9: one 1140 x 1995 region typeset under its balloon), and a stat table chained
 # with the paragraph beside it (sample4, "grouped too much"). With this on, the no-balloon path
-# applies the decision's line checks (the missing balloon itself is not held against it): a group
-# whose lines break, mix directions or change character size is cut, by size first, then by
-# direction, then at its line breaks. "false" restores distance alone.
+# applies the decision's direction and angle checks plus a character-size check (the missing
+# balloon and a free layout are not held against it): a group whose lines mix directions, disagree
+# in angle or change character size is cut, by size first, then by direction, then square pieces
+# off, then at its line breaks. "false" restores distance alone.
 OCR_NO_BALLOON_VETO = os.environ.get("OCR_NO_BALLOON_VETO", "true").strip().lower() in ("1", "true", "yes")
 
 # ...where "changes character size" means the sorted sizes jump by more than this factor. The widest

@@ -182,3 +182,25 @@ def test_the_handler_gives_the_no_balloon_path_the_veto():
 
     source = inspect.getsource(ocr_handler.process_ocr)
     assert "page_context = no_balloon_grouping_context(page_context)" in source
+
+
+# Fixture sample61 (a game UI page): eight lines of skill text in two blocks side by side, with two
+# font sizes. Lines that do not stack neatly are a free layout, not two texts: the first B5 cut
+# this page's paragraphs into chunks, which the fixture gate forbids.
+SAMPLE61_SKILL_TEXT = {
+    "page": (2000, 2000),
+    "pieces": [
+        ("重擎·蒼刻の型を発動時、", [[984, 471], [1408, 471], [1408, 484], [984, 484]]),
+        ("場キャラの場合、今国の重", [[982, 486], [1408, 486], [1408, 506], [982, 506]]),
+        ("重撃・蒼剣の型終了時に【", [[986, 508], [1406, 508], [1406, 521], [986, 521]]),
+        ("強力な重掣ダメージを与え", [[1449, 500], [1617, 500], [1617, 514], [1449, 514]]),
+        ("【虚减効果】を自身の有利", [[1455, 516], [1713, 516], [1713, 535], [1455, 535]]),
+        ("【蒼铜】を2Pt所持時、", [[1457, 537], [1920, 537], [1920, 551], [1457, 551]]),
+        ("重撃・置刻の型は、命中し", [[984, 541], [1400, 543], [1400, 562], [984, 561]]),
+        ("秒ごとに1回のみ握得可能", [[986, 527], [1137, 527], [1137, 541], [986, 541]]),
+    ],
+}
+
+
+def test_free_layout_text_keeps_its_distance_grouping():
+    assert _groups(SAMPLE61_SKILL_TEXT) == _groups(SAMPLE61_SKILL_TEXT, veto=False) == [[0, 1, 2, 3, 4, 5, 6, 7]]

@@ -276,6 +276,13 @@ def owner_aware_grouping_context(
     )
 
 
+# Owner-decision reasons that only say a no-balloon group is laid out freely, not that it is two
+# texts: no balloon, and lines that do not stack neatly (see no_balloon_grouping_context).
+_NO_BALLOON_LAYOUT_REASONS = frozenset(
+    {"missing-validated-container", "insufficient-lateral-line-overlap", "line-gap-too-large"}
+)
+
+
 def no_balloon_grouping_context(
     base_context,
     join_split_lines=OCR_JOIN_SPLIT_LINES,
@@ -287,9 +294,12 @@ def no_balloon_grouping_context(
     The balloon path vetoes a group the owner decision cannot prove. Outside balloons there is no
     container to prove, so every multi-piece decision is ``missing-validated-container`` and the
     decision was only recorded. Here it is applied without the container: a group is kept when its
-    only fault is the missing balloon, and cut when its lines break, mix directions or change
-    character size. Text set at an angle (a title's tilted tiles) only gets the size check: the
-    line checks assume straight lines. A cut goes by size first (misreads of the art beside
+    only fault is the missing balloon or a free layout, and cut when its lines mix directions,
+    disagree in angle or change character size. Free layout: outside a balloon a line need not
+    overlap the next one or sit close to it (a UI page's label and value side by side on one row,
+    indents, two font sizes: fixture sample61's skill text was cut into chunks by those two checks),
+    so `_NO_BALLOON_LAYOUT_REASONS` do not cut. Text set at an angle (a title's tilted tiles) only
+    gets the size check: the angle check assumes straight lines. A cut goes by size first (misreads of the art beside
     speech), then by direction (a stat table beside a paragraph), then square pieces off (B4: a
     glyph's angle is not a line's), then at the line breaks; each part is decided again.
     """
@@ -314,7 +324,7 @@ def no_balloon_grouping_context(
             return "different-character-sizes"
         if has_rotated_lines(quads(component, regions)):
             return None
-        if decision["state"] != "assigned" and decision["reason"] != "missing-validated-container":
+        if decision["state"] != "assigned" and decision["reason"] not in _NO_BALLOON_LAYOUT_REASONS:
             return decision["reason"]
         return None
 
