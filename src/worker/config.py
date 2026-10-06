@@ -539,6 +539,15 @@ OCR_LINE_READING_ORDER = os.environ.get("OCR_LINE_READING_ORDER", "true").strip(
 # quarter-character gap its own tests treat as room for a wall.
 OCR_WAIST_ADJACENT_LINE_GAP = float(os.environ.get("OCR_WAIST_ADJACENT_LINE_GAP", "0.2"))
 
+# Never group text that no balloon holds across the gutter of a two-page spread. ja/sample93's
+# shout on the left page and speech on the right came back as one region. A page counts as a
+# spread when it is at least OCR_SPREAD_MIN_ASPECT times as wide as it is tall and a vertical edge
+# near the centre covers OCR_SPREAD_SEAM_COVERAGE of its height (sample93 0.96; the highest wide
+# single illustration in the corpus, sample92's checked wall, 0.81). "false" turns it off.
+OCR_SPREAD_GUTTER = os.environ.get("OCR_SPREAD_GUTTER", "true").strip().lower() in ("1", "true", "yes")
+OCR_SPREAD_MIN_ASPECT = float(os.environ.get("OCR_SPREAD_MIN_ASPECT", "1.2"))
+OCR_SPREAD_SEAM_COVERAGE = float(os.environ.get("OCR_SPREAD_SEAM_COVERAGE", "0.85"))
+
 
 def is_usable_model(model):
     """A model id counts as usable only if it is a real, non-sentinel value."""

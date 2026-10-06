@@ -58,6 +58,7 @@ from worker.services.owner_assignment import assign_captured_owners, split_at_li
 from worker.services.ownership_features import capture_fragment_features
 from worker.services.panel_detection import detect_text_containers
 from worker.services.pixel_stats import pixel_spread as _pixel_spread
+from worker.services.spread_gutter import find_spread_gutter, split_fragments_at_gutter
 from worker.services.stage_timer import StageTimer
 from worker.services.translation import (
     LANG_MAP,
@@ -1150,9 +1151,17 @@ def process_ocr(job_data):
             page_context = GroupingContext(page_area=page_area)
             unmatched_groups = []
             merged_unmatched = []
-            for panel_fragments in partition_unmatched_fragments_by_panel(
-                unmatched_frags, direct_text_containers
-            ).values():
+            # On a two-page spread, each page's text is grouped on its own (ja/sample93).
+            gutter_x = find_spread_gutter(img, unmatched_frags)
+            if gutter_x is not None:
+                logger.info(f"[OCR] Two-page spread: no grouping across the gutter at x={gutter_x:.0f}")
+            for panel_fragments in (
+                page_fragments
+                for partition in partition_unmatched_fragments_by_panel(
+                    unmatched_frags, direct_text_containers
+                ).values()
+                for page_fragments in split_fragments_at_gutter(partition, gutter_x)
+            ):
                 local_groups = group_fragments(panel_fragments, grouping, page_context)
                 attach_live_owner_decisions(panel_fragments, local_groups, [])
                 unmatched_groups.extend(local_groups)
