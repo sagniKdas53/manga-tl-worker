@@ -66,6 +66,7 @@ from worker.services.translation import (
 )
 from worker.utils.image import calculate_overlap_area, download_image, downscale_for_ocr
 from worker.utils.lock import acquire_lock
+from worker.utils.reading_direction import normalize_reading_direction
 from worker.utils.text import detect_language
 
 logger = logging.getLogger(__name__)
@@ -712,7 +713,7 @@ def process_ocr(job_data):
     # The backend sets these from the series context when it enqueues the job.
     # Defaults preserve the original behaviour (Japanese RTL) when not supplied.
     source_language = (job_data.get("sourceLanguage") or "ja").strip().lower()
-    reading_direction = (job_data.get("readingDirection") or "rtl").strip().lower()
+    reading_direction = normalize_reading_direction(job_data.get("readingDirection"))
     merge_threshold = merge_threshold_for(job_data)
     logger.info(f"[OCR] Grouping threshold {merge_threshold:g} characters")
 

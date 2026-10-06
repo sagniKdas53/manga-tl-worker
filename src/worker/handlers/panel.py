@@ -5,13 +5,14 @@ import requests
 from worker.config import CALLBACK_URL, backend_headers, redis_client
 from worker.services.panel_detection import detect_panels
 from worker.utils.image import download_image
+from worker.utils.reading_direction import normalize_reading_direction
 
 logger = logging.getLogger(__name__)
 
 
 def process_panel_detection(job_data):
     image_id = job_data["imageId"]
-    reading_direction = (job_data.get("readingDirection") or "rtl").strip().lower()
+    reading_direction = normalize_reading_direction(job_data.get("readingDirection"))
 
     page_num = job_data.get("pageNumber")
     chapter_num = job_data.get("chapterNumber")
