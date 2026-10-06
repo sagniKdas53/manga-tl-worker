@@ -154,6 +154,29 @@ def partition_unmatched_fragments_by_panel(fragments, panels):
     return partitions
 
 
+def group_fallback_regions(img, regions, grouping, page_context):
+    """Group and merge the regions found when YOLO is unavailable, one spread page at a time.
+
+    The fallback path has no balloon owners, so a spread's two pages would otherwise chain into
+    one region across the gutter, as ja/sample93 did on the YOLO path. Returns the groups (as
+    indices into ``regions``, for the capture) and the merged regions.
+    """
+    gutter_x = find_spread_gutter(img, regions)
+    if gutter_x is not None:
+        logger.info(f"[OCR] Two-page spread: no grouping across the gutter at x={gutter_x:.0f}")
+    page_index = {id(region): index for index, region in enumerate(regions)}
+    groups = []
+    merged = []
+    for page_regions in split_fragments_at_gutter(regions, gutter_x):
+        local_groups = group_fragments(page_regions, grouping, page_context)
+        # The fallback contour is not a detector-validated owner container. Keep any
+        # multi-fragment decision explicit and unresolved while preserving its current group.
+        attach_live_owner_decisions(page_regions, local_groups, [])
+        groups.extend([[page_index[id(page_regions[index])] for index in group] for group in local_groups])
+        merged.extend(merge_ocr_regions(page_regions, grouping=grouping, context=page_context))
+    return groups, merged
+
+
 def attach_live_owner_decisions(
     regions, candidate_groups, detector_masks, persist_groups=None, join_split_lines=OCR_JOIN_SPLIT_LINES
 ):
@@ -1706,13 +1729,9 @@ def process_ocr(job_data):
 
             grouping = grouping_config(reading_direction, merge_threshold)
             page_context = GroupingContext(page_area=page_area)
-            fallback_groups = group_fragments(regions, grouping, page_context)
-            # The fallback contour is not a detector-validated owner container. Keep any
-            # multi-fragment decision explicit and unresolved while preserving its current group.
-            attach_live_owner_decisions(regions, fallback_groups, [])
+            fallback_groups, regions = group_fallback_regions(img, regions, grouping, page_context)
             if capture_dir:
                 capture_groups = fallback_groups
-            regions = merge_ocr_regions(regions, grouping=grouping, context=page_context)
 
         # Everything between the detector marks and here is OCR-only per-region work. Cleanup is
         # deliberately a later heavy job, so OCR cannot hide CTD time or cleanup failures.

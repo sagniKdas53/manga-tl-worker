@@ -100,3 +100,38 @@ def test_the_handler_splits_no_balloon_text_at_the_gutter():
     source = inspect.getsource(ocr_handler.process_ocr)
     assert "find_spread_gutter(" in source
     assert "split_fragments_at_gutter(" in source
+
+
+def _fallback_region(index, x):
+    region = _frag(x, w=50, text="あ")
+    quad = [[x, 100], [x + 50, 100], [x + 50, 500], [x, 500]]
+    region.update(
+        {
+            "detectedLanguage": "ja",
+            "confidence": 0.9,
+            "fragmentId": f"fragment-{index}",
+            "sourceQuad": quad,
+            "ownershipProvenance": {"id": f"fragment-{index}", "sourceQuad": quad},
+        }
+    )
+    return region
+
+
+def test_the_fallback_path_groups_each_page_of_a_spread_apart():
+    """CodeRabbit on #55: without YOLO, process_ocr groups in its fallback branch, which had no gutter."""
+    from worker.handlers.ocr import group_fallback_regions, grouping_config
+    from worker.services.fragment_grouping import GroupingContext
+
+    # Two columns 10px apart, one on each side of the seam, and a third on the left page.
+    regions = [_fallback_region(0, 640), _fallback_region(1, 700), _fallback_region(2, 580)]
+    grouping = grouping_config("rtl", 0.35)
+    context = GroupingContext(page_area=1400 * 1000)
+
+    groups, merged = group_fallback_regions(_spread(), regions, grouping, context)
+    assert sorted(sorted(group) for group in groups) == [[0, 2], [1]]
+    assert len(merged) == 2
+
+    # On a single page the same three columns are one group, as before.
+    groups, merged = group_fallback_regions(None, regions, grouping, context)
+    assert sorted(sorted(group) for group in groups) == [[0, 1, 2]]
+    assert len(merged) == 1
