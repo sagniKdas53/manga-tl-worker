@@ -97,3 +97,21 @@ def test_no_fallback_without_a_configured_global_default(monkeypatch):
     park("neurometric")
 
     assert resolve_fallback_target("neurometric", "some-model", "pinned-key", True) is None
+
+
+def test_the_global_default_falls_back_to_tl_fallback_model(global_openrouter, monkeypatch):
+    # With GLM 5.3 Flash as the default (2026-10-06), a job on the default model had no second
+    # model at all; TL_FALLBACK_MODEL gives it one, on the same provider.
+    import worker.config
+
+    monkeypatch.setattr(worker.config, "TL_FALLBACK_MODEL", "xiaomi/mimo-v2.6-flash")
+    target = resolve_fallback_target("openrouter", "openai/gpt-5.6-luna", "k", True)
+
+    assert target == ("openrouter", "k", "xiaomi/mimo-v2.6-flash")
+
+
+def test_tl_fallback_model_equal_to_the_failed_model_gives_no_fallback(global_openrouter, monkeypatch):
+    import worker.config
+
+    monkeypatch.setattr(worker.config, "TL_FALLBACK_MODEL", "openai/gpt-5.6-luna")
+    assert resolve_fallback_target("openrouter", "openai/gpt-5.6-luna", "k", True) is None

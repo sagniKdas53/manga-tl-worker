@@ -638,6 +638,11 @@ QA_CONFIG = ModelConfig(
 # single fallback to QA_VLM_MODEL.
 QA_VLM_FALLBACK_MODELS = [m.strip() for m in os.environ.get("QA_VLM_FALLBACK_MODELS", "").split(",") if m.strip()]
 
+# The translation model a job on the global default (TL_LLM_MODEL) falls back to, on the same
+# provider. A pinned model falls back to TL_LLM_MODEL; one already on it had no fallback at all.
+# Empty keeps that.
+TL_FALLBACK_MODEL = os.environ.get("TL_FALLBACK_MODEL", "").strip()
+
 # OpenRouter hosts to route to. Cheapest-first routing ranks hosts by prompt price, and on
 # 2026-10-06 the cheapest were fp4 builds that ignored the reasoning budget or crawled: DeepSeek V4
 # Flash on OpenInference spent all 8,192 output tokens on reasoning (no translation, 216 s a call),
@@ -652,7 +657,9 @@ OPENROUTER_QUANTIZATIONS = [
     if q.strip()
 ]
 OPENROUTER_IGNORE_PROVIDERS = [
-    p.strip() for p in os.environ.get("OPENROUTER_IGNORE_PROVIDERS", "relace,open-inference,wafer").split(",") if p.strip()
+    p.strip()
+    for p in os.environ.get("OPENROUTER_IGNORE_PROVIDERS", "relace,open-inference,wafer").split(",")
+    if p.strip()
 ]
 # A call that sends a schema goes only to hosts that support every parameter it sends, so a host
 # without structured outputs cannot quietly drop the schema.

@@ -416,6 +416,7 @@ def resolve_fallback_target(provider, user_model, api_key, use_fallback_models, 
     every traceback carried "No fallback applied (global provider different or model identical)".
     A parked provider is not a preference worth honouring, so crossing is allowed then.
     """
+    from worker import config
     from worker.config import TL_CONFIG
 
     if not use_fallback_models:
@@ -427,9 +428,11 @@ def resolve_fallback_target(provider, user_model, api_key, use_fallback_models, 
         return None
 
     if global_provider == provider:
-        # Same provider: only a different model is worth retrying.
+        # Same provider: only a different model is worth retrying. A job already on the global
+        # model falls back to TL_FALLBACK_MODEL, if one is set.
         if global_model == user_model:
-            return None
+            second = config.TL_FALLBACK_MODEL
+            return (provider, api_key, second) if second and second != user_model else None
         return provider, api_key, global_model
 
     if not is_provider_auth_parked(provider):
