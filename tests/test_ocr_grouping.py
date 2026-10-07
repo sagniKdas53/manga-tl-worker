@@ -90,6 +90,8 @@ def test_process_ocr_yolo_preserves_grouping(
     # YOLO should have kept them as 2 separate regions because they are in different bubbles
     # If the bug was present, they would have been merged into 1 giant region.
     assert len(regions) == 2, "Expected 2 separate regions, but they were merged!"
+    # #243: each piece's provenance carries what OCR read in it, for the editor's overlay.
+    assert sorted(region["ownershipProvenance"]["text"] for region in regions) == ["Text A", "Text B"]
 
     # Verify that the maskPolygon is preserved and isolated per bubble
     mask_a = json.loads(regions[0]["maskPolygon"])

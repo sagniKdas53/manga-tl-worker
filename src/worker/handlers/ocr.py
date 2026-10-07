@@ -1103,7 +1103,9 @@ def process_ocr(job_data):
             )
             for fragment, feature in zip(raw_fragments, raw_features, strict=True):
                 fragment["fragmentId"] = feature["id"]
-                fragment["ownershipProvenance"] = feature
+                # #243: what OCR read in this piece, for the editor's OCR fragments overlay. Added
+                # here, not to the feature, so OCR_CAPTURE_DIR captures stay as they were.
+                fragment["ownershipProvenance"] = feature | {"text": fragment["text"]}
             # 2. Pre-generate binary masks for bubbles to compute exact pixel overlap
             bubble_masks = []
             for bubble in detected_bubbles:
@@ -1842,7 +1844,7 @@ def process_ocr(job_data):
             )
             for region, feature in zip(regions, fallback_features, strict=True):
                 region["fragmentId"] = feature["id"]
-                region["ownershipProvenance"] = feature
+                region["ownershipProvenance"] = feature | {"text": region["text"]}
 
             grouping = grouping_config(reading_direction, merge_threshold)
             page_context = GroupingContext(page_area=page_area)
