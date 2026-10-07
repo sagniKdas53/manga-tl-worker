@@ -49,9 +49,9 @@ def _page(case, stroke=None):
     width, height = case["page"]
     gray = np.full((height, width), 250, dtype=np.uint8)
     mask = np.zeros((height, width), dtype=np.uint8)
-    cv2.fillPoly(mask, [np.array(case["outline"], dtype=np.int32)], 255)
+    cv2.fillPoly(mask, [np.array(case["outline"], dtype=np.int32)], (255,))
     if stroke is not None:
-        cv2.line(gray, stroke[0], stroke[1], 120, 5)
+        cv2.line(gray, stroke[0], stroke[1], (120,), 5)
     return gray, mask
 
 
@@ -114,10 +114,10 @@ def test_a_missed_columns_glyphs_are_no_wall():
     """The hole a missed column leaves still holds its glyphs: short marks, broken every character."""
     gray, mask = _page(SAMPLE25)
     for top in range(140, 500, 75):  # one glyph-sized mark per character down the gap
-        cv2.rectangle(gray, (262, top), (282, top + 40), 30, -1)
+        cv2.rectangle(gray, (262, top), (282, top + 40), (30,), -1)
     regions = _regions(SAMPLE25)
     assert gap_wall(gray, mask, 3.0)([0, 1], [2, 3], regions) is False
-    cv2.line(gray, (272, 140), (272, 520), 30, 3)
+    cv2.line(gray, (272, 140), (272, 520), (30,), 3)
     assert gap_wall(gray, mask, 3.0)([0, 1], [2, 3], regions) is True
 
 
@@ -129,7 +129,7 @@ def test_a_sloped_outline_between_the_groups_is_a_wall():
 def test_an_outline_that_fills_a_narrow_gap_is_still_a_wall():
     """CodeRabbit on #59: measured over the gap alone, a thick outline was its own "paper"."""
     gray, mask = _page(SAMPLE24_B4)
-    cv2.rectangle(gray, (2319, 370), (2375, 760), 120, -1)
+    cv2.rectangle(gray, (2319, 370), (2375, 760), (120,), -1)
     assert gap_wall(gray, mask, 3.0)([0, 1], [2, 3], _regions(SAMPLE24_B4)) is True
 
 
