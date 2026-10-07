@@ -42,6 +42,15 @@ class GroupingConfig:
             outline. `None` disables it, which is the shipped behaviour.
         waist_max_solidity: Only apply the veto to masks below this solidity. A convex mask has no
             waist, and forcing the measurement on one produces noise, not signal.
+        waist_adjacent_line_gap: Exempt from the veto two lines that run side by side (sharing
+            ``BLOCK_OVERLAP_SHARE`` of the shorter one's length) with less than this many
+            characters of white space between them: too little room for two balloon outlines.
+            ``None`` (the shipped behaviour) applies the veto to them. AUDIT-R21, 4Oct p. 17.
+        line_reading_order: How ``merge_ocr_regions`` orders a group's text. ``False`` (shipped)
+            sorts pieces by -x then y (rtl), which scrambles horizontal lines and a column OCR
+            broke into a wider and a narrower piece. ``True`` groups pieces into lines first:
+            columns right to left (left to right for ltr), horizontal lines top to bottom, and
+            pieces along each line in order.
         component_max_members: Maximum members allowed in one connected component. ``None`` keeps
             frozen legacy behaviour; a bounded component is deliberately split to unresolved
             singleton candidates rather than silently retaining a bridge merge.
@@ -58,6 +67,8 @@ class GroupingConfig:
     orientation: str = "reading_direction"
     waist_gate: float | None = None
     waist_max_solidity: float = DEFAULT_WAIST_MAX_SOLIDITY
+    waist_adjacent_line_gap: float | None = None
+    line_reading_order: bool = False
     component_max_members: int | None = None
     component_max_area_fraction: float | None = None
 
@@ -78,12 +89,20 @@ class GroupingContext:
             split it into unresolved singleton candidates, or ``None`` to keep it. It cannot
             create a merge and is off by default.
         page_area: Source page area in pixels², for ``component_max_area_fraction``.
+        owner_split: Called on a component ``owner_veto`` rejected. Return the parts to try
+            instead of single pieces (index lists partitioning the component), or ``None``. Each
+            part goes through the veto again, so this can only propose cuts, never prove a merge.
+            Off by default: a vetoed component then splits into singletons, as before.
+        group_join: Called last with the final groups. Returns them, possibly with some joined
+            (B3b, `balloon_join.join_balloon_groups`). Off by default.
     """
 
     clearance: Callable[[tuple[float, float], tuple[float, float]], float] | None = None
     solidity: float = 1.0
     owner_veto: Callable[[list[int], list], str | None] | None = None
     page_area: float | None = None
+    owner_split: Callable[[list[int], list], list[list[int]] | None] | None = None
+    group_join: Callable[[list[list[int]], list], list[list[int]]] | None = None
 
 
 # Floor for the halving in `_split_oversized`. Below a twentieth of a character the budget joins
@@ -132,7 +151,10 @@ def group_fragments(
             adj[i].append(j)
             adj[j].append(i)
 
-    return _bound_components(_connected_components(adj, n), regions, config, context)
+    groups = _bound_components(_connected_components(adj, n), regions, config, context)
+    if context is not None and context.group_join is not None:
+        groups = context.group_join(groups, regions)
+    return groups
 
 
 def _bound_components(
@@ -155,6 +177,13 @@ def _bound_components(
             reason = "component-max-members"
         elif context is not None and context.owner_veto is not None:
             reason = context.owner_veto(component, regions)
+            if reason is not None and context.owner_split is not None and len(component) > 2:
+                parts = context.owner_split(component, regions)
+                if parts is not None and 1 < len(parts) < len(component):
+                    # Each part is smaller than the component, so the recursion ends; a part the
+                    # veto still rejects is split again, down to singletons at worst.
+                    bounded.extend(_bound_components(parts, regions, config, context))
+                    continue
         if reason is not None:
             bounded.extend([[index] for index in component])
         elif _oversized(component, regions, config, context):
@@ -205,7 +234,8 @@ def _split_oversized(
     members = [regions[index] for index in component]
     # Owner vetoes were already applied to the whole component; recursing with them could only
     # veto again, and the clearance field indexes page coordinates so it stays valid on a subset.
-    sub_context = replace(context, owner_veto=None) if context is not None else None
+    # The balloon join runs once, on the caller's final groups, never on an oversized split's pieces.
+    sub_context = replace(context, owner_veto=None, group_join=None) if context is not None else None
     # `group_fragments` re-enters `_bound_components`, so a piece that is still oversized is
     # halved again in there; the recursion bottoms out at the floor above.
     pieces = group_fragments(members, tighter, sub_context)
@@ -283,6 +313,13 @@ def _waist_veto(config: GroupingConfig, context: GroupingContext | None):
         char_size = max(r1["width"], r2["width"]) if vertical else max(r1["height"], r2["height"])
         if char_size <= 0:
             return False
+        # The same argument for lines that do not quite touch. On 4Oct p. 17 a narrow shout
+        # balloon holds two columns 9 px apart; the deepest point in the whole balloon is about
+        # one character from its outline, so the gate could never pass any pair inside it.
+        if config.waist_adjacent_line_gap is not None and _adjacent_lines(
+            r1, r2, vertical, config.waist_adjacent_line_gap * char_size
+        ):
+            return False
         p, q = _nearest_points(r1, r2)
         assert context.clearance is not None
         return context.clearance(p, q) < config.waist_gate * char_size
@@ -313,6 +350,24 @@ def _boxes_overlap(r1: dict, r2: dict) -> bool:
     x_share = x_overlap / max(1, min(r1["width"], r2["width"]))
     y_share = y_overlap / max(1, min(r1["height"], r2["height"]))
     return max(x_share, y_share) >= BLOCK_OVERLAP_SHARE
+
+
+def _adjacent_lines(r1: dict, r2: dict, vertical: bool, max_gap: float) -> bool:
+    """Two lines side by side, sharing most of their length, closer than ``max_gap`` pixels.
+
+    For columns the length runs along y and the gap is measured across x; for horizontal lines
+    the other way round. A pair that only clips corners (sample9's って against 何ニヤニヤ, a
+    tenth of their length shared) is not adjacent lines, so the gate still decides it.
+    """
+    if vertical:
+        start, extent, across, breadth = "y", "height", "x", "width"
+    else:
+        start, extent, across, breadth = "x", "width", "y", "height"
+    shared = min(r1[start] + r1[extent], r2[start] + r2[extent]) - max(r1[start], r2[start])
+    if shared / max(1, min(r1[extent], r2[extent])) < BLOCK_OVERLAP_SHARE:
+        return False
+    gap = max(r1[across], r2[across]) - min(r1[across] + r1[breadth], r2[across] + r2[breadth])
+    return gap < max_gap
 
 
 def _nearest_points(r1: dict, r2: dict) -> tuple[tuple[float, float], tuple[float, float]]:

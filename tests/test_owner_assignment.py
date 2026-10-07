@@ -2,8 +2,8 @@ import math
 
 import pytest
 
+from worker.services.owner_assignment import _join_line_pieces, assign_captured_owners, split_at_line_breaks
 from worker.services.owner_assignment import _point_in_polygon as _inside
-from worker.services.owner_assignment import assign_captured_owners
 
 _CONTAINER = {"id": "bubble-a", "format": "polygon", "points": [[0, 0], [300, 0], [300, 300], [0, 300]]}
 
@@ -160,3 +160,155 @@ def test_single_fragment_owner_does_not_require_container_or_style():
 def test_rejects_a_candidate_group_that_loses_or_duplicates_a_fragment():
     with pytest.raises(ValueError, match="partition every fragment exactly once"):
         _decision(groups=[[0, 0]])
+
+
+# AUDIT-R21, 4Oct ch. 1 p. 3 (the user's screenshot): seven OCR pieces of one balloon, as detected.
+# OCR broke two columns in two -- ブラ | イダルなんて and アイ | ドルを -- so sorted by x, each top
+# piece's neighbour is the *next* column and the lateral-overlap check vetoes the whole balloon.
+_SPLIT_COLUMNS = [
+    ("でしょう：", 1628, 501, 118, 498),
+    ("縁が無かった", 1708, 487, 152, 633),
+    ("していなければ", 1811, 491, 142, 726),
+    ("アイ", 1936, 508, 104, 207),
+    ("ブラ", 2026, 501, 114, 235),
+    ("ドルを", 1919, 677, 135, 332),
+    ("イダルなんて", 2002, 670, 162, 626),
+]
+_SPLIT_COLUMNS_BALLOON = {
+    "id": "bubble-2",
+    "format": "polygon",
+    "points": [[1593, 60], [2435, 60], [2435, 1357], [1593, 1357]],
+}
+
+
+def _joined_decision(quads, *, join_split_lines, masks=None):
+    return assign_captured_owners(
+        fragment_ids=[f"fragment-{index}" for index in range(len(quads))],
+        raw_quads=quads,
+        recognition=[{} for _ in quads],
+        regions=[{} for _ in quads],
+        candidate_groups=[list(range(len(quads)))],
+        detector_masks=masks if masks is not None else [_CONTAINER],
+        scale_transform={"ocr_to_source": {"scale_x": 1.0, "scale_y": 1.0}},
+        join_split_lines=join_split_lines,
+    )[0]
+
+
+def _split_columns():
+    return [_quad(x, y, width=w, height=h) for _, x, y, w, h in _SPLIT_COLUMNS]
+
+
+def test_a_column_broken_in_two_vetoes_its_balloon_by_default():
+    decision = _joined_decision(_split_columns(), join_split_lines=False, masks=[_SPLIT_COLUMNS_BALLOON])
+
+    assert decision.state == "unknown"
+    assert decision.reason == "insufficient-lateral-line-overlap"
+
+
+def test_joining_a_columns_pieces_first_keeps_the_balloon_one_owner():
+    decision = _joined_decision(_split_columns(), join_split_lines=True, masks=[_SPLIT_COLUMNS_BALLOON])
+
+    assert decision.state == "assigned"
+    assert decision.reason == "validated-container-continuous-lines"
+    continuity = decision.diagnostics["line_continuity"]
+    assert continuity["orientation"] == "vertical"
+    # Seven pieces, five columns: each broken column became one line.
+    assert continuity["line_count"] == 5
+
+
+def test_side_by_side_columns_are_not_joined_into_one_line():
+    """Neighbouring columns share their height, not their width; joining runs along the line only."""
+    columns = [_quad(60 + 30 * index, 60, width=26, height=180) for index in range(3)]
+    decision = _joined_decision(columns, join_split_lines=True)
+
+    assert decision.state == "assigned"
+    assert decision.diagnostics["line_continuity"]["line_count"] == 3
+
+
+# chrome-box TELEA chapter, p. 2 (the 良くないけど gate), as the live worker read it 2026-10-05.
+# Balloon 1: two columns of one sentence, and a handwritten aside set lower beside them.
+_ASIDE_BALLOON = [
+    (2562, 1347, 124, 1183),  # クソ兄貴のお手製フリップは
+    (2454, 1347, 104, 767),  # まだいいとして：
+    (2334, 1986, 148, 576),  # 良くないけど
+]
+# Balloon 4: two two-column blocks, the second set lower and to the left of the first.
+_STEPPED_BALLOON = [
+    (763, 1826, 104, 812),  # ジッパー式のバニーが
+    (659, 1830, 96, 700),  # 好きなんだけどさ
+    (523, 2386, 104, 1311),  # あれ引っかかったら痛そうだから
+    (415, 2382, 96, 1183),  # ボタンで手作りしてみたぞノ
+]
+
+
+def _as_sets(parts):
+    return sorted(sorted(part) for part in parts)
+
+
+def test_a_vetoed_balloon_splits_where_its_lines_break_not_into_single_pieces():
+    quads = [_quad(x, y, width=w, height=h) for x, y, w, h in _ASIDE_BALLOON]
+
+    assert _as_sets(split_at_line_breaks(quads, join_split_lines=True)) == [[0, 1], [2]]
+
+
+def test_two_stepped_blocks_in_one_balloon_split_into_the_two_blocks():
+    quads = [_quad(x, y, width=w, height=h) for x, y, w, h in _STEPPED_BALLOON]
+
+    assert _as_sets(split_at_line_breaks(quads, join_split_lines=True)) == [[0, 1], [2, 3]]
+
+
+def test_continuous_lines_have_no_break_to_split_at():
+    columns = [_quad(60 + 30 * index, 60, width=26, height=180) for index in range(3)]
+
+    assert split_at_line_breaks(columns, join_split_lines=True) is None
+
+
+def test_split_points_keep_a_broken_columns_pieces_together():
+    """The p. 3 balloon is continuous once its pieces are joined, so there is nothing to cut."""
+    assert split_at_line_breaks(_split_columns(), join_split_lines=True) is None
+
+
+def test_mixed_orientation_gives_no_split_points():
+    quads = [_quad(100, 20, width=26, height=180), _quad(140, 20, width=180, height=26)]
+
+    assert split_at_line_breaks(quads, join_split_lines=True) is None
+
+
+def test_columns_of_two_stacked_balloons_are_not_joined_as_one_broken_column():
+    """Tests ch. 6 p. 5: three echo balloons fused by YOLO, stacked top to bottom.
+
+    The middle balloon's 終わらせる ends 2 px into the bottom balloon's 速攻で and they share most
+    of their width, but a broken column's pieces sit on one centre line (4Oct p. 3: 0 and 1.5 px
+    apart); these are 14 px apart, a fifth of the column.
+    """
+    stacked = [
+        _quad(92, 172, width=68, height=274),  # 終わらせる (middle balloon)
+        _quad(96, 444, width=88, height=214),  # 速攻で (bottom balloon)
+    ]
+
+    assert _join_line_pieces([_box(quad) for quad in stacked], horizontal=False) == [
+        (_box(stacked[0]), [0]),
+        (_box(stacked[1]), [1]),
+    ]
+
+
+def test_a_column_broken_in_three_with_a_slight_drift_joins_as_one_line():
+    """The same drift on the owner side: the third piece must match a member, not the union."""
+    pieces = [(0.0, 0.0, 40.0, 60.0), (5.0, 60.0, 45.0, 120.0), (10.0, 120.0, 50.0, 180.0)]
+
+    (line,) = _join_line_pieces(pieces, horizontal=False)
+    assert sorted(line[1]) == [0, 1, 2]
+
+
+def _box(quad):
+    return (quad[0][0], quad[0][1], quad[2][0], quad[2][1])
+
+
+def test_pieces_of_one_column_far_apart_are_not_joined_over_the_gap():
+    """Joining must not hide a gap: two pieces of one column far apart along it stay two lines."""
+    quads = [_quad(100, 20, width=26, height=60), _quad(100, 200, width=26, height=60)]
+    decision = _joined_decision(quads, join_split_lines=True)
+
+    # Not joined, so still two lines in one column, which share no length: vetoed as before.
+    assert decision.state == "unknown"
+    assert decision.reason == "insufficient-lateral-line-overlap"

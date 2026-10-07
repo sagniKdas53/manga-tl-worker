@@ -27,10 +27,20 @@ from worker.config import (
     COVER_FILL_PAD_FRACTION,
     COVER_FILL_QUANT,
     COVER_FILL_RING_FRACTION,
+    OCR_BALLOON_JOIN_BUDGET,
+    OCR_BALLOON_JOIN_MAX_LINES,
+    OCR_BALLOON_WALL_STROKE,
     OCR_COMPONENT_MAX_AREA_FRACTION,
     OCR_CONFIG,
+    OCR_JOIN_SPLIT_LINES,
+    OCR_LINE_READING_ORDER,
     OCR_MERGE_THRESHOLD,
+    OCR_NO_BALLOON_SIZE_RATIO,
+    OCR_NO_BALLOON_VETO,
     OCR_ORIENTATION,
+    OCR_SPLIT_VETOED_AT_BREAKS,
+    OCR_STAGGERED_LINES,
+    OCR_WAIST_ADJACENT_LINE_GAP,
     OCR_WAIST_GATE,
     OCR_WAIST_MAX_SOLIDITY,
     YOLO_MASK_EROSION,
@@ -38,8 +48,9 @@ from worker.config import (
     redis_client,
 )
 from worker.model_manager import get_local_ocr_backend, model_manager, resolve_local_ocr_model
+from worker.services.balloon_join import balloon_join
 from worker.services.bubble_detector import detect_bubbles_yolo
-from worker.services.bubble_geometry import bubble_grouping_context, simplify_mask_polygon
+from worker.services.bubble_geometry import bubble_grouping_context, gap_wall, simplify_mask_polygon
 from worker.services.fragment_grouping import (
     MIN_THRESHOLD_RATIO,
     GroupingConfig,
@@ -50,10 +61,18 @@ from worker.services.layout import bubble_compare
 from worker.services.merge_regions import merge_ocr_regions
 from worker.services.ocr import parse_paddle_ocr_results, parse_rapid_ocr_results
 from worker.services.ocr_capture import capture_observed_ocr_grouping
-from worker.services.owner_assignment import assign_captured_owners
+from worker.services.owner_assignment import (
+    assign_captured_owners,
+    has_rotated_lines,
+    split_at_line_breaks,
+    split_by_character_size,
+    split_by_orientation,
+    split_off_squares,
+)
 from worker.services.ownership_features import capture_fragment_features
 from worker.services.panel_detection import detect_text_containers
 from worker.services.pixel_stats import pixel_spread as _pixel_spread
+from worker.services.spread_gutter import find_spread_gutter, split_fragments_at_gutter
 from worker.services.stage_timer import StageTimer
 from worker.services.translation import (
     LANG_MAP,
@@ -62,6 +81,7 @@ from worker.services.translation import (
 )
 from worker.utils.image import calculate_overlap_area, download_image, downscale_for_ocr
 from worker.utils.lock import acquire_lock
+from worker.utils.reading_direction import normalize_reading_direction
 from worker.utils.text import detect_language
 
 logger = logging.getLogger(__name__)
@@ -101,6 +121,8 @@ def grouping_config(reading_direction, threshold_ratio=None):
         orientation=OCR_ORIENTATION,
         waist_gate=OCR_WAIST_GATE if OCR_WAIST_GATE > 0 else None,
         waist_max_solidity=OCR_WAIST_MAX_SOLIDITY,
+        waist_adjacent_line_gap=OCR_WAIST_ADJACENT_LINE_GAP if OCR_WAIST_ADJACENT_LINE_GAP > 0 else None,
+        line_reading_order=OCR_LINE_READING_ORDER,
         component_max_area_fraction=(OCR_COMPONENT_MAX_AREA_FRACTION if OCR_COMPONENT_MAX_AREA_FRACTION > 0 else None),
     )
 
@@ -146,13 +168,44 @@ def partition_unmatched_fragments_by_panel(fragments, panels):
     return partitions
 
 
-def attach_live_owner_decisions(regions, candidate_groups, detector_masks, persist_groups=None):
+def group_fallback_regions(img, regions, grouping, page_context):
+    """Group and merge the regions found when YOLO is unavailable, one spread page at a time.
+
+    The fallback path has no balloon owners, so a spread's two pages would otherwise chain into
+    one region across the gutter, as ja/sample93 did on the YOLO path. Returns the groups (as
+    indices into ``regions``, for the capture) and the merged regions.
+    """
+    gutter_x = find_spread_gutter(img, regions)
+    if gutter_x is not None:
+        logger.info(f"[OCR] Two-page spread: no grouping across the gutter at x={gutter_x:.0f}")
+    page_index = {id(region): index for index, region in enumerate(regions)}
+    groups = []
+    merged = []
+    for page_regions in split_fragments_at_gutter(regions, gutter_x):
+        local_groups = group_fragments(page_regions, grouping, page_context)
+        # The fallback contour is not a detector-validated owner container. Keep any
+        # multi-fragment decision explicit and unresolved while preserving its current group.
+        attach_live_owner_decisions(page_regions, local_groups, [])
+        groups.extend([[page_index[id(page_regions[index])] for index in group] for group in local_groups])
+        merged.extend(merge_ocr_regions(page_regions, grouping=grouping, context=page_context))
+    return groups, merged
+
+
+def attach_live_owner_decisions(
+    regions,
+    candidate_groups,
+    detector_masks,
+    persist_groups=None,
+    join_split_lines=OCR_JOIN_SPLIT_LINES,
+    staggered_lines=OCR_STAGGERED_LINES,
+):
     """Persist F01's decision with every member of each normal-runtime component.
 
     Every group is evaluated, but only the first ``persist_groups`` (all, by default) write their
     decision into the members' provenance. The owner veto evaluates one component against the
     rest as singletons; writing those singletons' decisions would overwrite what earlier
-    components recorded.
+    components recorded. ``join_split_lines`` (AUDIT-R21) and ``staggered_lines`` (B3) are passed to
+    the owner decision.
     """
 
     raw_quads = [
@@ -166,6 +219,8 @@ def attach_live_owner_decisions(regions, candidate_groups, detector_masks, persi
         candidate_groups=candidate_groups,
         detector_masks=detector_masks,
         scale_transform={"ocr_to_source": {"scale_x": 1.0, "scale_y": 1.0}},
+        join_split_lines=join_split_lines,
+        staggered_lines=staggered_lines,
     )
     persisted = candidate_groups if persist_groups is None else candidate_groups[:persist_groups]
     for decision, component in zip(decisions[: len(persisted)], persisted, strict=True):
@@ -177,24 +232,120 @@ def attach_live_owner_decisions(regions, candidate_groups, detector_masks, persi
     return decisions
 
 
-def owner_aware_grouping_context(base_context, detector_masks):
+def owner_aware_grouping_context(
+    base_context,
+    detector_masks,
+    join_split_lines=OCR_JOIN_SPLIT_LINES,
+    split_at_breaks=OCR_SPLIT_VETOED_AT_BREAKS,
+    staggered_lines=OCR_STAGGERED_LINES,
+):
     """Attach one F01 decision to each live component and veto unproven joins.
 
     The runtime fragments already carry stable source-space quads and IDs. The bubble detector
     supplies the only candidate container for this grouping call. A rejected decision can only
-    split a component; it never promotes a merge or cleanup authority.
+    split a component; it never promotes a merge or cleanup authority. With ``split_at_breaks``
+    a rejected component is first cut where its lines break, and each run is decided again.
     """
 
     def owner_veto(component, regions):
         candidate_groups = [component] + [[index] for index in range(len(regions)) if index not in component]
-        decision = attach_live_owner_decisions(regions, candidate_groups, detector_masks, persist_groups=1)[0].to_dict()
+        decision = attach_live_owner_decisions(
+            regions,
+            candidate_groups,
+            detector_masks,
+            persist_groups=1,
+            join_split_lines=join_split_lines,
+            staggered_lines=staggered_lines,
+        )[0].to_dict()
         return None if decision["state"] == "assigned" else decision["reason"]
+
+    def owner_split(component, regions):
+        quads = [
+            regions[index].get("sourceQuad") or (regions[index].get("ownershipProvenance") or {}).get("sourceQuad")
+            for index in component
+        ]
+        parts = split_at_line_breaks(quads, join_split_lines=join_split_lines, staggered_lines=staggered_lines)
+        return None if parts is None else [[component[local] for local in part] for part in parts]
 
     return GroupingContext(
         clearance=base_context.clearance if base_context is not None else None,
         solidity=base_context.solidity if base_context is not None else 1.0,
         owner_veto=owner_veto,
         page_area=base_context.page_area if base_context is not None else None,
+        owner_split=owner_split if split_at_breaks else None,
+    )
+
+
+# Owner-decision reasons that only say a no-balloon group is laid out freely, not that it is two
+# texts: no balloon, and lines that do not stack neatly (see no_balloon_grouping_context).
+_NO_BALLOON_LAYOUT_REASONS = frozenset(
+    {"missing-validated-container", "insufficient-lateral-line-overlap", "line-gap-too-large"}
+)
+
+
+def no_balloon_grouping_context(
+    base_context,
+    join_split_lines=OCR_JOIN_SPLIT_LINES,
+    staggered_lines=OCR_STAGGERED_LINES,
+    size_ratio=OCR_NO_BALLOON_SIZE_RATIO,
+):
+    """B5: the owner veto for text no balloon holds.
+
+    The balloon path vetoes a group the owner decision cannot prove. Outside balloons there is no
+    container to prove, so every multi-piece decision is ``missing-validated-container`` and the
+    decision was only recorded. Here it is applied without the container: a group is kept when its
+    only fault is the missing balloon or a free layout, and cut when its lines mix directions,
+    disagree in angle or change character size. Free layout: outside a balloon a line need not
+    overlap the next one or sit close to it (a UI page's label and value side by side on one row,
+    indents, two font sizes: fixture sample61's skill text was cut into chunks by those two checks),
+    so `_NO_BALLOON_LAYOUT_REASONS` do not cut. Text set at an angle (a title's tilted tiles) only
+    gets the size check: the angle check assumes straight lines. A cut goes by size first (misreads of the art beside
+    speech), then by direction (a stat table beside a paragraph), then square pieces off (B4: a
+    glyph's angle is not a line's), then at the line breaks; each part is decided again.
+    """
+
+    def quads(component, regions):
+        return [
+            regions[index].get("sourceQuad") or (regions[index].get("ownershipProvenance") or {}).get("sourceQuad")
+            for index in component
+        ]
+
+    def owner_veto(component, regions):
+        candidate_groups = [component] + [[index] for index in range(len(regions)) if index not in component]
+        decision = attach_live_owner_decisions(
+            regions,
+            candidate_groups,
+            [],
+            persist_groups=1,
+            join_split_lines=join_split_lines,
+            staggered_lines=staggered_lines,
+        )[0].to_dict()
+        if size_ratio > 0 and split_by_character_size(quads(component, regions), size_ratio) is not None:
+            return "different-character-sizes"
+        if has_rotated_lines(quads(component, regions)):
+            return None
+        if decision["state"] != "assigned" and decision["reason"] not in _NO_BALLOON_LAYOUT_REASONS:
+            return decision["reason"]
+        return None
+
+    def owner_split(component, regions):
+        component_quads = quads(component, regions)
+        for parts in (
+            split_by_character_size(component_quads, size_ratio) if size_ratio > 0 else None,
+            split_by_orientation(component_quads),
+            split_off_squares(component_quads),
+            split_at_line_breaks(component_quads, join_split_lines=join_split_lines, staggered_lines=staggered_lines),
+        ):
+            if parts is not None:
+                return [[component[local] for local in part] for part in parts]
+        return None
+
+    return GroupingContext(
+        clearance=base_context.clearance if base_context is not None else None,
+        solidity=base_context.solidity if base_context is not None else 1.0,
+        owner_veto=owner_veto,
+        page_area=base_context.page_area if base_context is not None else None,
+        owner_split=owner_split,
     )
 
 
@@ -686,7 +837,7 @@ def process_ocr(job_data):
     # The backend sets these from the series context when it enqueues the job.
     # Defaults preserve the original behaviour (Japanese RTL) when not supplied.
     source_language = (job_data.get("sourceLanguage") or "ja").strip().lower()
-    reading_direction = (job_data.get("readingDirection") or "rtl").strip().lower()
+    reading_direction = normalize_reading_direction(job_data.get("readingDirection"))
     merge_threshold = merge_threshold_for(job_data)
     logger.info(f"[OCR] Grouping threshold {merge_threshold:g} characters")
 
@@ -1000,6 +1151,7 @@ def process_ocr(job_data):
             # 4. Group fragments for each bubble and merge them (or create default crop if empty and we are using Cloud VLM)
             candidate_regions = []  # regions we need to OCR/transcribe
 
+            page_gray = None  # for B3b's wall test, made on the first balloon that needs it
             for b_idx, bubble in enumerate(detected_bubbles):
                 bx, by, bw, bh = bubble["bbox"]
                 bubble_mask = bubble_masks[b_idx]
@@ -1035,6 +1187,20 @@ def process_ocr(job_data):
                     bubble_context,
                     [{"format": "polygon", "id": f"bubble-{b_idx}", "points": bubble["mask_polygon"]}],
                 )
+                if OCR_BALLOON_JOIN_BUDGET > 0 and len(assigned_frags) > 1:
+                    # B3b: join the groups the tight budget leaves apart inside this balloon,
+                    # unless a balloon outline runs between them.
+                    wall = None
+                    if img is not None and bubble_mask is not None:
+                        if page_gray is None:
+                            page_gray = img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                        wall = gap_wall(page_gray, bubble_mask, OCR_BALLOON_WALL_STROKE)
+                    context = replace(
+                        context,
+                        group_join=balloon_join(
+                            grouping, context, OCR_BALLOON_JOIN_BUDGET, wall, OCR_BALLOON_JOIN_MAX_LINES
+                        ),
+                    )
                 merged_bubble_regions = merge_ocr_regions(
                     assigned_frags,
                     grouping=grouping,
@@ -1121,11 +1287,21 @@ def process_ocr(job_data):
             grouping = grouping_config(reading_direction, merge_threshold)
             # No balloon bounds these, so the page does: the area gate needs to know how big it is.
             page_context = GroupingContext(page_area=page_area)
+            if OCR_NO_BALLOON_VETO:
+                page_context = no_balloon_grouping_context(page_context)
             unmatched_groups = []
             merged_unmatched = []
-            for panel_fragments in partition_unmatched_fragments_by_panel(
-                unmatched_frags, direct_text_containers
-            ).values():
+            # On a two-page spread, each page's text is grouped on its own (ja/sample93).
+            gutter_x = find_spread_gutter(img, unmatched_frags)
+            if gutter_x is not None:
+                logger.info(f"[OCR] Two-page spread: no grouping across the gutter at x={gutter_x:.0f}")
+            for panel_fragments in (
+                page_fragments
+                for partition in partition_unmatched_fragments_by_panel(
+                    unmatched_frags, direct_text_containers
+                ).values()
+                for page_fragments in split_fragments_at_gutter(partition, gutter_x)
+            ):
                 local_groups = group_fragments(panel_fragments, grouping, page_context)
                 attach_live_owner_decisions(panel_fragments, local_groups, [])
                 unmatched_groups.extend(local_groups)
@@ -1670,13 +1846,9 @@ def process_ocr(job_data):
 
             grouping = grouping_config(reading_direction, merge_threshold)
             page_context = GroupingContext(page_area=page_area)
-            fallback_groups = group_fragments(regions, grouping, page_context)
-            # The fallback contour is not a detector-validated owner container. Keep any
-            # multi-fragment decision explicit and unresolved while preserving its current group.
-            attach_live_owner_decisions(regions, fallback_groups, [])
+            fallback_groups, regions = group_fallback_regions(img, regions, grouping, page_context)
             if capture_dir:
                 capture_groups = fallback_groups
-            regions = merge_ocr_regions(regions, grouping=grouping, context=page_context)
 
         # Everything between the detector marks and here is OCR-only per-region work. Cleanup is
         # deliberately a later heavy job, so OCR cannot hide CTD time or cleanup failures.
@@ -1775,6 +1947,8 @@ def process_ocr(job_data):
                     regions=capture_regions,
                     grouping=grouping_config(reading_direction, merge_threshold),
                     observed_groups=capture_groups,
+                    join_split_lines=OCR_JOIN_SPLIT_LINES,
+                    staggered_lines=OCR_STAGGERED_LINES,
                 )
                 capture.write(Path(capture_dir) / f"{page_id or image_id}.json")
             except Exception:

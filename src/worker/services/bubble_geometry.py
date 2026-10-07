@@ -77,6 +77,74 @@ MASK_POLYGON_TOLERANCE_PX = float(os.environ.get("MASK_POLYGON_TOLERANCE_PX", "2
 MIN_MASK_POLYGON_POINTS = 4
 
 
+# A pixel is ink when it is this many grey levels darker than the balloon's paper (its median).
+WALL_INK_CONTRAST = 60
+
+
+def gap_wall(gray, mask, min_stroke):
+    """B3b's wall test for one balloon: ``(group a, group b, regions) -> bool``.
+
+    True when one connected ink stroke inside the gap between the two groups reaches ``min_stroke``
+    characters along the line. The gap is the space between the groups across the reading
+    direction, over the stretch of the line both groups cover, inside the balloon mask. A balloon
+    outline drawn between two speakers runs that whole stretch, straight or sloped (ja/sample24's
+    fused bracket balloons: 5.2 characters); the glyphs of a column the OCR missed are separate
+    strokes, one per character. The paper is measured over the whole balloon, so an outline that
+    fills a narrow gap is still darker than it. ``gray`` and ``mask`` are page-sized; ``mask`` is
+    non-zero inside the balloon.
+    """
+    height, width = gray.shape[:2]
+    inside_balloon = mask > 0
+    paper = float(np.median(gray[inside_balloon])) if inside_balloon.any() else 255.0
+
+    def wall(group_a, group_b, regions):
+        members = [regions[index] for index in (*group_a, *group_b)]
+        vertical = sum(r["height"] > r["width"] for r in members) >= sum(r["width"] > r["height"] for r in members)
+        char = float(np.median([r["width"] if vertical else r["height"] for r in members]))
+        if char <= 0:
+            return False
+
+        def box(group):
+            rs = [regions[index] for index in group]
+            return (
+                min(r["x"] for r in rs),
+                min(r["y"] for r in rs),
+                max(r["x"] + r["width"] for r in rs),
+                max(r["y"] + r["height"] for r in rs),
+            )
+
+        a, b = box(group_a), box(group_b)
+        across = 0 if vertical else 1  # columns stack along x, lines along y
+        low, high = sorted((a, b), key=lambda r: r[across])
+        gap_start, gap_end = int(low[across + 2]), int(high[across])
+        along_start = int(max(a[1 - across], b[1 - across]))
+        along_end = int(min(a[3 - across], b[3 - across]))
+        if gap_end - gap_start < 2 or along_end - along_start < char:
+            return False
+        if vertical:
+            rows, cols = (
+                slice(max(0, along_start), min(height, along_end)),
+                slice(max(0, gap_start), min(width, gap_end)),
+            )
+            strip, inside = gray[rows, cols], inside_balloon[rows, cols]
+        else:
+            rows, cols = (
+                slice(max(0, gap_start), min(height, gap_end)),
+                slice(max(0, along_start), min(width, along_end)),
+            )
+            strip, inside = gray[rows, cols].T, inside_balloon[rows, cols].T
+        if strip.size == 0 or not inside.any():
+            return False
+        ink = ((strip.astype(np.int16) < paper - WALL_INK_CONTRAST) & inside).astype(np.uint8)
+        count, _, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
+        if count < 2:
+            return False
+        # Rows of the strip run along the line, so a stroke's height is its length along the line.
+        return float(stats[1:, cv2.CC_STAT_HEIGHT].max()) >= min_stroke * char
+
+    return wall
+
+
 @overload
 def simplify_mask_polygon(points: None, tolerance_px: float | None = ...) -> None: ...
 

@@ -65,6 +65,30 @@ def get_trace_id() -> str:
 # derives it with a removeprefix and there is no mapping table to keep in step.
 _stage: contextvars.ContextVar[str] = contextvars.ContextVar("stage", default="")
 
+# OpenRouter's sticky-routing key for the current job: one per chapter and stage. Price routing
+# moves each call to whichever host is cheapest, and every host keeps its own prompt cache, so
+# repeat prompts missed the cache: GLM 5.3 Flash alternated Novita / StreamLake with no cache hit,
+# and with one session_id stayed on StreamLake and cached 2,752 of 2,779 tokens, 78% cheaper per
+# call (measured 2026-10-06). Bound in process_job_rq beside the trace id and stage.
+_llm_session: contextvars.ContextVar[str] = contextvars.ContextVar("llm_session", default="")
+
+
+def set_llm_session(session):
+    """Bind the OpenRouter session_id for the current job. Returns the reset token."""
+    return _llm_session.set(str(session)[:256] if session else "")
+
+
+def reset_llm_session(token):
+    """Unbind; pair with the token from set_llm_session."""
+    try:
+        _llm_session.reset(token)
+    except ValueError:
+        _llm_session.set("")
+
+
+def get_llm_session() -> str:
+    return _llm_session.get()
+
 
 def set_stage(stage):
     """Bind the pipeline stage for the current job. Returns the reset token."""
@@ -507,6 +531,92 @@ OCR_ORIENTATION = os.environ.get("OCR_ORIENTATION", "vote").strip().lower()
 # of the art. Set to 0 to disable.
 OCR_COMPONENT_MAX_AREA_FRACTION = float(os.environ.get("OCR_COMPONENT_MAX_AREA_FRACTION", "0.25"))
 
+# AUDIT-R21: join the pieces OCR broke one line into before the owner veto's continuity test.
+# When a column is read as ブラ | イダルなんて, the top piece's neighbour is the next column, the
+# lateral-overlap check fails, and the whole balloon is split into one region per piece (4Oct
+# ch. 1 p. 3: seven regions for one sentence). On by default since 2026-10-05; "false" restores
+# the old veto. Over the 2026-08-09 hand labels it changes nothing; every balloon it changed on
+# the dev stack's 4Oct and Tests pages became the one text unit it is.
+OCR_JOIN_SPLIT_LINES = os.environ.get("OCR_JOIN_SPLIT_LINES", "true").strip().lower() in ("1", "true", "yes")
+
+# AUDIT-R21: when the owner veto rejects a balloon's group, cut it where its lines break and keep
+# the runs on either side (each must pass the veto again) instead of splitting it into single
+# pieces. chrome-box TELEA p. 2: an aside set lower beside a two-column sentence (良くないけど)
+# split the sentence too. "false" restores single pieces.
+OCR_SPLIT_VETOED_AT_BREAKS = os.environ.get("OCR_SPLIT_VETOED_AT_BREAKS", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+# Order a joined region's text line by line instead of by -x then y: columns right to left,
+# horizontal lines top to bottom. The old sort scrambled horizontal groups (Tests ch. 4 p. 63's
+# three-line caption read 1, 3, 2; 4Oct p. 3's watermark) and a broken column whose lower piece is
+# narrower (手ブラ | での read "での手ブラ"). "false" restores the old order.
+OCR_LINE_READING_ORDER = os.environ.get("OCR_LINE_READING_ORDER", "true").strip().lower() in ("1", "true", "yes")
+
+# AUDIT-R21: two lines side by side (sharing half their length) closer than this many characters
+# are exempt from the clearance veto -- there is no room for two balloon outlines between them.
+# A narrow balloon (4Oct p. 17, 254 px wide) is under one character deep everywhere, so the veto
+# split its two columns 9 px apart. 0 disables (the veto then applies to them, as before). 0.2
+# keeps the veto's one correct catch on the hand labels (sample9, corners clipping) and the
+# quarter-character gap its own tests treat as room for a wall.
+OCR_WAIST_ADJACENT_LINE_GAP = float(os.environ.get("OCR_WAIST_ADJACENT_LINE_GAP", "0.2"))
+
+# B3: the owner veto accepts a balloon's lines when they form one connected chain, even if a pair of
+# neighbours across the reading direction does not overlap. A balloon set as two paragraphs, one
+# higher than the other (ja/sample78 「ちょっと男子ぃ」 over 「いま峯森さん撮ったでしょ？」), was vetoed
+# into three regions. Measured 2026-10-06: of the 22 corpus test pages only that balloon changes;
+# the guard pages (fused balloons 174, 218, 3, 30, 24) and the 2026-08-09 hand labels (4,097
+# pairs, 0 false merges) do not. "false" restores the neighbour-by-neighbour check.
+OCR_STAGGERED_LINES = os.environ.get("OCR_STAGGERED_LINES", "true").strip().lower() in ("1", "true", "yes")
+
+# B3b: inside one balloon, two groups are joined when their pieces, regrouped on their own with this
+# bigger budget (in characters), make one group. The 0.35 budget leaves real gaps of 0.8-2
+# characters between a balloon's columns (ja/sample27, 25, 258) and the hole a column the OCR
+# missed leaves (sample153, 136). The owner veto, the waist veto and the orientation vote still
+# apply to the pair, and the budget never reaches pieces outside it. 0 turns the pass off.
+OCR_BALLOON_JOIN_BUDGET = float(os.environ.get("OCR_BALLOON_JOIN_BUDGET", "1.5"))
+
+# ...unless one connected ink stroke in the gap between the two groups reaches this many characters
+# along the line: a balloon outline drawn between two speakers, straight or sloped. Measured
+# 2026-10-06 (chrome-box captures and the 40 cached corpus pages): the fused bracket balloons of
+# ja/sample24 have a 5.2-6.4 character stroke between them; every gap B3b joins has at most 2.1
+# (sample218's two jagged balloons, the owner's call: join), the rest at most 1.0.
+OCR_BALLOON_WALL_STROKE = float(os.environ.get("OCR_BALLOON_WALL_STROKE", "3.0"))
+
+# ...and never into a group of more than this many lines. One speaker's balloons drawn as one
+# connected shape look like one balloon by geometry and by pixels: ja/sample9's three overlapping
+# balloons (7, 6 and 3 columns of separate paragraphs) would become one 16-column region set across
+# all three. Every join the 2026-10-06 test pages want holds at most 8 (sample258's 4 + 4). Fitted to
+# that one counterexample; raise it if a real balloon of more lines stays split.
+OCR_BALLOON_JOIN_MAX_LINES = int(os.environ.get("OCR_BALLOON_JOIN_MAX_LINES", "8"))
+
+# B5: text no balloon holds is grouped by distance alone, and the "is this one text" decision was
+# recorded but never applied, so a speech column chained with misreads of the art (chrome-box
+# sample218 p. 9: one 1140 x 1995 region typeset under its balloon), and a stat table chained
+# with the paragraph beside it (sample4, "grouped too much"). With this on, the no-balloon path
+# applies the decision's direction and angle checks plus a character-size check (the missing
+# balloon and a free layout are not held against it): a group whose lines mix directions, disagree
+# in angle or change character size is cut, by size first, then by direction, then square pieces
+# off, then at its line breaks. "false" restores distance alone.
+OCR_NO_BALLOON_VETO = os.environ.get("OCR_NO_BALLOON_VETO", "true").strip().lower() in ("1", "true", "yes")
+
+# ...where "changes character size" means the sorted sizes jump by more than this factor. The widest
+# spread inside one text over the 61 hand-labelled multi-piece texts is 1.8x; sample218's speech to
+# its misreads is 2.57x. Ruby (furigana, about half its base text) was not in the labels: if ruby
+# comes apart from its text on the no-balloon path, this is the setting. 0 turns the size cut off.
+OCR_NO_BALLOON_SIZE_RATIO = float(os.environ.get("OCR_NO_BALLOON_SIZE_RATIO", "2.2"))
+
+# Never group text that no balloon holds across the gutter of a two-page spread. ja/sample93's
+# shout on the left page and speech on the right came back as one region. A page counts as a
+# spread when it is at least OCR_SPREAD_MIN_ASPECT times as wide as it is tall and a vertical edge
+# near the centre covers OCR_SPREAD_SEAM_COVERAGE of its height (sample93 0.96; the highest wide
+# single illustration in the corpus, sample92's checked wall, 0.81). "false" turns it off.
+OCR_SPREAD_GUTTER = os.environ.get("OCR_SPREAD_GUTTER", "true").strip().lower() in ("1", "true", "yes")
+OCR_SPREAD_MIN_ASPECT = float(os.environ.get("OCR_SPREAD_MIN_ASPECT", "1.2"))
+OCR_SPREAD_SEAM_COVERAGE = float(os.environ.get("OCR_SPREAD_SEAM_COVERAGE", "0.85"))
+
 
 def is_usable_model(model):
     """A model id counts as usable only if it is a real, non-sentinel value."""
@@ -588,6 +698,37 @@ QA_CONFIG = ModelConfig(
 # the page, return nothing, or leave regions unjudged. Comma-separated; empty keeps the old
 # single fallback to QA_VLM_MODEL.
 QA_VLM_FALLBACK_MODELS = [m.strip() for m in os.environ.get("QA_VLM_FALLBACK_MODELS", "").split(",") if m.strip()]
+
+# The translation model a job on the global default (TL_LLM_MODEL) falls back to, on the same
+# provider. A pinned model falls back to TL_LLM_MODEL; one already on it had no fallback at all.
+# Empty keeps that.
+TL_FALLBACK_MODEL = os.environ.get("TL_FALLBACK_MODEL", "").strip()
+
+# OpenRouter hosts to route to. Cheapest-first routing ranks hosts by prompt price, and on
+# 2026-10-06 the cheapest were fp4 builds that ignored the reasoning budget or crawled: DeepSeek V4
+# Flash on OpenInference spent all 8,192 output tokens on reasoning (no translation, 216 s a call),
+# Relace and OpenInference reasoned 2-3x past a 512-token budget on V4 and V4.1 Flash at 4-50x the
+# cost of fp8 hosts, Wafer spent 6,600-8,192 tokens reasoning on GLM 5.3 Flash and V4.1 Flash
+# (153-277 s, two truncated), and MiMo V2.6 Flash on Darkbloom ran at 15-28 tokens/s. Comma-separated;
+# empty sends no filter. OPENROUTER_QUANTIZATIONS keeps "unknown" because Google and others
+# publish no precision.
+OPENROUTER_QUANTIZATIONS = [
+    q.strip()
+    for q in os.environ.get("OPENROUTER_QUANTIZATIONS", "fp8,mxfp8,fp16,bf16,fp32,unknown").split(",")
+    if q.strip()
+]
+OPENROUTER_IGNORE_PROVIDERS = [
+    p.strip()
+    for p in os.environ.get("OPENROUTER_IGNORE_PROVIDERS", "relace,open-inference,wafer").split(",")
+    if p.strip()
+]
+# A call that sends a schema goes only to hosts that support every parameter it sends, so a host
+# without structured outputs cannot quietly drop the schema.
+OPENROUTER_REQUIRE_PARAMETERS = os.environ.get("OPENROUTER_REQUIRE_PARAMETERS", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 LOCAL_LLM_PROVIDER = os.environ.get("LOCAL_LLM_PROVIDER", "").strip()
 LOCAL_LLM_ENDPOINT = os.environ.get("LOCAL_LLM_ENDPOINT", "").strip()

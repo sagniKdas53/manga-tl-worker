@@ -23,7 +23,7 @@ from worker.services.fragment_grouping import (
     resolve_vertical,
     union_area,
 )
-from worker.services.owner_assignment import assign_captured_owners
+from worker.services.owner_assignment import assign_captured_owners, split_at_line_breaks
 
 
 def _legacy_components(regions, reading_direction, threshold_ratio):
@@ -249,6 +249,49 @@ def test_gate_still_applies_to_boxes_that_only_clip_corners():
     assert group_fragments(corner, cfg, ctx) == [[0], [1]]
 
 
+# 4Oct ch. 1 p. 17 (the user's screenshot), YOLO balloon 5: a narrow spiky shout balloon holding
+# two columns of one sentence, 9 px apart. Its solidity (0.85) arms the gate, and the deepest point
+# anywhere in the balloon is 102 px from the outline -- so no pair inside it can clear one
+# character (100 px). The gap between the columns measured 74 px.
+P17_COLUMNS = [
+    {"x": 817, "y": 129, "width": 100, "height": 493},  # 私を倒しなさい
+    {"x": 926, "y": 129, "width": 89, "height": 658},  # 秧秧と付き合いたいなら
+]
+P17_CONTEXT = GroupingContext(clearance=lambda p, q: 74.5, solidity=0.855)
+
+
+def test_a_narrow_balloon_vetoes_its_own_adjacent_columns_by_default():
+    cfg = GroupingConfig(threshold_ratio=0.35, orientation="vote", waist_gate=1.0)
+    assert group_fragments(P17_COLUMNS, cfg, P17_CONTEXT) == [[0], [1]]
+
+
+def test_adjacent_lines_too_close_for_a_balloon_wall_are_exempt_from_the_gate():
+    cfg = GroupingConfig(threshold_ratio=0.35, orientation="vote", waist_gate=1.0, waist_adjacent_line_gap=0.2)
+    assert group_fragments(P17_COLUMNS, cfg, P17_CONTEXT) == [[0, 1]]
+
+
+def test_the_adjacent_line_exemption_still_vetoes_a_real_gap():
+    """TWO_COLUMNS are a quarter character apart: room for a wall, so the gate still decides."""
+    cfg = GroupingConfig(threshold_ratio=2.0, waist_gate=1.0, waist_adjacent_line_gap=0.2)
+    ctx = GroupingContext(clearance=lambda p, q: 0.0, solidity=0.5)
+    assert _grouped(cfg, ctx) == [[0], [1]]
+
+
+def test_the_adjacent_line_exemption_still_vetoes_lines_that_only_clip_corners():
+    """sample9, YOLO balloon 3: the gate's one correct veto on the hand-labelled pages.
+
+    って ends a column of the balloon above; it touches 何ニヤニヤ with no gap, but the two share
+    a tenth of their length, so they are not lines of one block.
+    """
+    clipping = [
+        {"x": 859, "y": 1167, "width": 66, "height": 100},  # って
+        {"x": 831, "y": 1257, "width": 39, "height": 157},  # 何ニヤニヤ
+    ]
+    cfg = GroupingConfig(threshold_ratio=0.35, orientation="vote", waist_gate=1.0, waist_adjacent_line_gap=0.2)
+    ctx = GroupingContext(clearance=lambda p, q: 31.0, solidity=0.805)
+    assert group_fragments(clipping, cfg, ctx) == [[0], [1]]
+
+
 def test_gate_can_only_withhold_merges_never_create_them():
     """Over the random corpus, gated grouping is always a refinement of ungated grouping."""
     rng = random.Random(7)
@@ -364,6 +407,72 @@ def _owner_decision_veto(regions, masks, recognition):
         return None if decision.state == "assigned" else decision.reason
 
     return veto
+
+
+# chrome-box TELEA p. 2, balloon 1: two columns of one sentence and the handwritten aside 良くないけど.
+TELEA_ASIDE = [
+    {"x": 2562, "y": 1347, "width": 124, "height": 1183},
+    {"x": 2454, "y": 1347, "width": 104, "height": 767},
+    {"x": 2334, "y": 1986, "width": 148, "height": 576},
+]
+TELEA_BALLOON = [
+    {"id": "bubble-1", "format": "polygon", "points": [[2300, 1300], [2720, 1300], [2720, 2600], [2300, 2600]]}
+]
+
+
+def _joined_owner_veto(regions, masks):
+    quads = [_quad(region) for region in regions]
+
+    def veto(component, _grouping_regions):
+        decision = assign_captured_owners(
+            fragment_ids=[f"fragment-{index}" for index in component],
+            raw_quads=[quads[index] for index in component],
+            recognition=[{} for _ in component],
+            regions=[regions[index] for index in component],
+            candidate_groups=[list(range(len(component)))],
+            detector_masks=masks,
+            scale_transform={"ocr_to_source": {"scale_x": 1.0, "scale_y": 1.0}},
+            join_split_lines=True,
+        )[0]
+        return None if decision.state == "assigned" else decision.reason
+
+    def split(component, _grouping_regions):
+        parts = split_at_line_breaks([quads[index] for index in component], join_split_lines=True)
+        return None if parts is None else [[component[local] for local in part] for part in parts]
+
+    return veto, split
+
+
+def test_a_vetoed_component_falls_to_singletons_without_a_split_hook():
+    veto, _ = _joined_owner_veto(TELEA_ASIDE, TELEA_BALLOON)
+    grouped = group_fragments(
+        TELEA_ASIDE, GroupingConfig(threshold_ratio=2.0, orientation="vote"), GroupingContext(owner_veto=veto)
+    )
+
+    assert sorted(grouped) == [[0], [1], [2]]
+
+
+def test_a_vetoed_component_keeps_the_runs_its_split_hook_proves():
+    veto, split = _joined_owner_veto(TELEA_ASIDE, TELEA_BALLOON)
+    grouped = group_fragments(
+        TELEA_ASIDE,
+        GroupingConfig(threshold_ratio=2.0, orientation="vote"),
+        GroupingContext(owner_veto=veto, owner_split=split),
+    )
+
+    assert sorted(sorted(group) for group in grouped) == [[0, 1], [2]]
+
+
+def test_a_run_the_owner_still_rejects_falls_to_singletons():
+    """The hook only proposes cuts; every part must pass the owner decision again."""
+    veto, split = _joined_owner_veto(TELEA_ASIDE, [])  # no container: no multi-piece owner at all
+    grouped = group_fragments(
+        TELEA_ASIDE,
+        GroupingConfig(threshold_ratio=2.0, orientation="vote"),
+        GroupingContext(owner_veto=veto, owner_split=split),
+    )
+
+    assert sorted(grouped) == [[0], [1], [2]]
 
 
 def test_actual_owner_decision_separates_an_a_b_c_bridge():

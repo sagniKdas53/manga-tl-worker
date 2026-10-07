@@ -21,6 +21,11 @@ _MIN_ORIENTATION_ASPECT = 1.2
 _MAX_ANGLE_DELTA_DEGREES = 15.0
 _MIN_LATERAL_OVERLAP = 0.25
 _MAX_LINE_GAP_MULTIPLIER = 2.0
+# B3: with staggered_lines, two lines are linked when they overlap along the line by
+# _MIN_LATERAL_OVERLAP and sit at most this many mean line thicknesses apart across it. Half a line
+# keeps TELEA p. 2's aside apart: it overlaps the first column's length but sits 80 px (0.64 lines)
+# beside it.
+_STAGGERED_MAX_GAP = 0.5
 # AUDIT-R20: a balloon is an ellipse and a text column is a rectangle, so the outermost column
 # (ja/zh) or the top and bottom line (ko) of any multi-line balloon has corners past the curve.
 # Requiring all four corners inside split every such balloon into one region per column on the
@@ -63,6 +68,8 @@ def assign_captured_owners(
     candidate_groups: Sequence[Sequence[int]],
     detector_masks: Sequence[Any],
     scale_transform: Mapping[str, Any],
+    join_split_lines: bool = False,
+    staggered_lines: bool = False,
 ) -> list[OwnerDecision]:
     """Assign only evidence-backed text owners for captured OCR grouping candidates.
 
@@ -70,6 +77,14 @@ def assign_captured_owners(
     `_MIN_QUAD_INSIDE_FRACTION` of every member's quad), coherent oriented-line geometry, and a
     finite OCR-to-source scale. Available declared source style can veto
     contradictory fragments; absent style remains an explicit unknown feature, not a split.
+
+    `join_split_lines` (AUDIT-R21, off by default) joins the pieces OCR broke one line into
+    before the line-continuity checks, so a column read as ブラ | イダルなんて is one line rather
+    than two that each fail to overlap their neighbour.
+
+    `staggered_lines` (B3, off by default) accepts lines that fail the neighbour-by-neighbour check
+    when they still form one connected chain (see `_staggered_chain`): a balloon set as two
+    paragraphs, one higher than the other.
     """
     count = len(fragment_ids)
     if len(raw_quads) != count or len(recognition) != count or len(regions) != count:
@@ -136,7 +151,9 @@ def assign_captured_owners(
             decisions.append(_unknown(fragment_group_ids, "different-source-styles", diagnostics))
             continue
 
-        continuity = _line_continuity(evidence, source_scale)
+        continuity = _line_continuity(
+            evidence, source_scale, join_split_lines=join_split_lines, staggered_lines=staggered_lines
+        )
         diagnostics["line_continuity"] = continuity
         if not continuity["continuous"]:
             decisions.append(_unknown(fragment_group_ids, str(continuity["reason"]), diagnostics))
@@ -357,7 +374,273 @@ def _signed_area(points: Sequence[tuple[float, float]]) -> float:
     )
 
 
-def _line_continuity(members: Sequence[_FragmentEvidence], source_scale: float) -> dict[str, Any]:
+# Two pieces are one line when they share at least this much of the narrower piece's line width
+# (the same share `fragment_grouping` uses for "one block") ...
+_SPLIT_LINE_CROSS_SHARE = 0.5
+# ... and the white space between them along the line is at most this many line widths. OCR breaks
+# a column where two glyphs sit close; on 4Oct p. 3 the pieces even overlap. A larger gap is a real
+# gap, and the continuity check must still see it.
+_SPLIT_LINE_MAX_GAP = 0.5
+# ... and their centre lines are at most this share of the narrower piece apart. OCR's pieces of
+# one column sit on one axis (4Oct p. 3: 0 and 1.5 px apart); the columns of two balloons stacked
+# end to end inside one YOLO blob do not (Tests ch. 6 p. 5: 14 px, a fifth of the column).
+_SPLIT_LINE_MAX_CENTRE_OFFSET = 0.15
+
+
+def _join_line_pieces(
+    boxes: Sequence[tuple[float, float, float, float]], horizontal: bool
+) -> list[tuple[tuple[float, float, float, float], list[int]]]:
+    """Union the boxes of pieces that lie on one line, until no two remaining boxes qualify.
+
+    Returns each line's box with the indices of the pieces it holds. Neighbouring columns share
+    their *height*, not their width, so this never joins two lines of one balloon; it only undoes
+    a break OCR made inside one line.
+    """
+    lines = [(box, [index]) for index, box in enumerate(boxes)]
+    joined = True
+    while joined:
+        joined = False
+        for first in range(len(lines)):
+            for second in range(first + 1, len(lines)):
+                # Compare the pieces, not the unions: a column drifting a few pixels per piece
+                # moves its union's centre off the next piece (CodeRabbit on worker #53).
+                if any(_same_line(boxes[a], boxes[b], horizontal) for a in lines[first][1] for b in lines[second][1]):
+                    (a, a_members), (b, b_members) = lines[first], lines[second]
+                    box = (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+                    lines[first] = (box, a_members + b_members)
+                    del lines[second]
+                    joined = True
+                    break
+            if joined:
+                break
+    return lines
+
+
+def _line_orientation(boxes: Sequence[tuple[float, float, float, float]]) -> bool | None:
+    """True for horizontal lines, False for columns, None when the boxes are square or mixed."""
+    horizontal_votes = sum((box[2] - box[0]) >= (box[3] - box[1]) * _MIN_ORIENTATION_ASPECT for box in boxes)
+    vertical_votes = sum((box[3] - box[1]) >= (box[2] - box[0]) * _MIN_ORIENTATION_ASPECT for box in boxes)
+    if bool(horizontal_votes) == bool(vertical_votes):
+        return None
+    return horizontal_votes > 0
+
+
+def split_at_line_breaks(
+    raw_quads: Sequence[Any], *, join_split_lines: bool, staggered_lines: bool = False
+) -> list[list[int]] | None:
+    """Cut a candidate group where its line continuity breaks, keeping the runs on either side.
+
+    The owner veto used to answer any break by splitting the whole group into single pieces: on
+    chrome-box's TELEA p. 2 one handwritten aside set beside a two-column sentence (良くないけど)
+    cost the sentence its own grouping. Lines are ordered and compared exactly as
+    `_line_continuity` does, and a cut goes where it would reject: lateral overlap under
+    `_MIN_LATERAL_OVERLAP`, or a gap over `_MAX_LINE_GAP_MULTIPLIER` mean line widths.
+
+    With ``staggered_lines`` (B3), cut runs that `_staggered_chain` links are joined again, so a
+    balloon set as two offset paragraphs is not cut apart because an unrelated line joined its
+    component (CodeRabbit on #56). When that leaves one part, the plain cuts are kept.
+
+    Returns the parts as lists of indices into ``raw_quads``, or ``None`` when there is no break
+    to cut at, or no line geometry to order (invalid quads, square or mixed orientation). Each
+    part still has to pass the owner decision on its own.
+    """
+    quads = [_normalise_quad(raw) for raw in raw_quads]
+    if len(quads) < 2 or any(quad is None for quad in quads):
+        return None
+    boxes = []
+    for quad in quads:
+        assert quad is not None
+        xs, ys = [point[0] for point in quad], [point[1] for point in quad]
+        boxes.append((min(xs), min(ys), max(xs), max(ys)))
+    horizontal = _line_orientation(boxes)
+    if horizontal is None:
+        return None
+    lines = _join_line_pieces(boxes, horizontal) if join_split_lines else [(box, [i]) for i, box in enumerate(boxes)]
+    ordered = sorted(lines, key=lambda line: _center(line[0])[1 if horizontal else 0])
+    cross_lengths = [(box[3] - box[1]) if horizontal else (box[2] - box[0]) for box, _ in ordered]
+    threshold = (sum(cross_lengths) / len(cross_lengths)) * _MAX_LINE_GAP_MULTIPLIER
+    # Each part is a list of positions in `ordered`; the indices are read out at the end.
+    parts: list[list[int]] = [[0]]
+    for position, ((previous, _), (current, _)) in enumerate(pairwise(ordered), start=1):
+        previous_start, previous_end = _cross_interval(previous, horizontal)
+        current_start, current_end = _cross_interval(current, horizontal)
+        overlap = max(0.0, min(previous_end, current_end) - max(previous_start, current_start))
+        share = overlap / max(1e-9, min(previous_end - previous_start, current_end - current_start))
+        gap = max(0.0, _along_interval(current, horizontal)[0] - _along_interval(previous, horizontal)[1])
+        if share < _MIN_LATERAL_OVERLAP or gap > threshold:
+            parts.append([position])
+        else:
+            parts[-1].append(position)
+    if staggered_lines and len(parts) > 1:
+        max_gap = _STAGGERED_MAX_GAP * sum(cross_lengths) / len(cross_lengths)
+        joined = _join_staggered_parts(parts, [box for box, _ in ordered], horizontal, max_gap)
+        if len(joined) > 1:
+            parts = joined
+    if len(parts) == 1:
+        return None
+    return [[index for position in part for index in ordered[position][1]] for part in parts]
+
+
+def _boxes(raw_quads: Sequence[Any]) -> list[tuple[float, float, float, float]] | None:
+    quads = [_normalise_quad(raw) for raw in raw_quads]
+    if any(quad is None for quad in quads):
+        return None
+    boxes = []
+    for quad in quads:
+        assert quad is not None
+        xs, ys = [point[0] for point in quad], [point[1] for point in quad]
+        boxes.append((min(xs), min(ys), max(xs), max(ys)))
+    return boxes
+
+
+def character_size(box: tuple[float, float, float, float]) -> float:
+    """A line's character size: a column's width, a horizontal line's height, else the short side."""
+    width, height = box[2] - box[0], box[3] - box[1]
+    if height >= width * _MIN_ORIENTATION_ASPECT:
+        return width
+    if width >= height * _MIN_ORIENTATION_ASPECT:
+        return height
+    return min(width, height)
+
+
+def split_by_character_size(raw_quads: Sequence[Any], max_ratio: float) -> list[list[int]] | None:
+    """Cut a group where its sorted character sizes jump by more than ``max_ratio`` (B5).
+
+    One text keeps one character size: over the 61 multi-piece texts of the 2026-08-09 hand labels
+    the widest spread inside one is 1.8x (95th percentile 1.48x). Text outside balloons chains
+    with misreads of the art, which come out far bigger: on chrome-box's sample218 p. 9 three
+    94-102 px columns of speech chained with お, 谷, ``(gftgs grgitgt`` and BOFE at 262-407 px.
+    Returns the size bands, smallest first, or ``None`` when there is no jump.
+    """
+    boxes = _boxes(raw_quads)
+    if boxes is None or len(boxes) < 2:
+        return None
+    order = sorted(range(len(boxes)), key=lambda index: character_size(boxes[index]))
+    parts: list[list[int]] = [[order[0]]]
+    for previous, current in pairwise(order):
+        small, large = character_size(boxes[previous]), character_size(boxes[current])
+        if small > 0 and large / small > max_ratio:
+            parts.append([current])
+        else:
+            parts[-1].append(current)
+    return parts if len(parts) > 1 else None
+
+
+def split_by_orientation(raw_quads: Sequence[Any]) -> list[list[int]] | None:
+    """Split a group that mixes columns and horizontal lines into its columns and its lines (B4).
+
+    A square piece (a single glyph, a mark) is its own part: on the 2026-10-06 test pages those are
+    misreads, SFX or bracket glyphs (お, M, 秘, 靠), and attaching one to either side would carry
+    its direction into a text it does not belong to. Returns ``None`` unless both directions occur.
+    """
+    boxes = _boxes(raw_quads)
+    if boxes is None:
+        return None
+    vertical, horizontal, square = [], [], []
+    for index, box in enumerate(boxes):
+        width, height = box[2] - box[0], box[3] - box[1]
+        if _is_square(box):
+            square.append(index)
+        elif height >= width * _MIN_ORIENTATION_ASPECT:
+            vertical.append(index)
+        else:
+            horizontal.append(index)
+    if not vertical or not horizontal:
+        return None
+    return [vertical, horizontal, *[[index] for index in square]]
+
+
+# A line whose major axis is more than this far off horizontal or vertical is set at an angle: the
+# tilted tiles of a title (ja/sample104: 62-77 degrees), not a straight column or row.
+_ROTATED_LINE_DEGREES = 10.0
+
+
+def _is_square(box: tuple[float, float, float, float]) -> bool:
+    width, height = box[2] - box[0], box[3] - box[1]
+    return height < width * _MIN_ORIENTATION_ASPECT and width < height * _MIN_ORIENTATION_ASPECT
+
+
+def has_rotated_lines(raw_quads: Sequence[Any]) -> bool:
+    """True when a non-square piece is set at an angle (B4). Line checks assume straight lines."""
+    for raw in raw_quads:
+        quad = _normalise_quad(raw)
+        if quad is None:
+            continue
+        xs, ys = [point[0] for point in quad], [point[1] for point in quad]
+        if _is_square((min(xs), min(ys), max(xs), max(ys))):
+            continue
+        angle = _major_axis_angle(quad)
+        if angle is not None and min(angle % 90, 90 - angle % 90) > _ROTATED_LINE_DEGREES:
+            return True
+    return False
+
+
+def split_off_squares(raw_quads: Sequence[Any]) -> list[list[int]] | None:
+    """Peel the square pieces (a single glyph, a mark, a misread) off a group of lines (B4).
+
+    A square piece has no direction, and its quad's angle reads 0 against a column's 90: on
+    ja/sample83 a square "M" made two upright columns 「くそ…むっちゃ痛いけど」 「我慢しなきゃ…」
+    look incoherent, and the group fell apart into single pieces. Returns the lines, then each
+    square on its own, or ``None`` when there is nothing to peel or nothing would be left.
+    """
+    boxes = _boxes(raw_quads)
+    if boxes is None:
+        return None
+    squares = [index for index, box in enumerate(boxes) if _is_square(box)]
+    lines = [index for index, box in enumerate(boxes) if not _is_square(box)]
+    if not squares or not lines:
+        return None
+    return [lines, *[[index] for index in squares]]
+
+
+def _join_staggered_parts(
+    parts: list[list[int]], boxes: Sequence[tuple[float, float, float, float]], horizontal: bool, max_gap: float
+) -> list[list[int]]:
+    """Join the parts holding any two lines `_staggered_link` connects; order by first line."""
+    part_of = {position: number for number, part in enumerate(parts) for position in part}
+    root = list(range(len(parts)))
+
+    def find(number: int) -> int:
+        while root[number] != number:
+            root[number] = root[root[number]]
+            number = root[number]
+        return number
+
+    for left in range(len(boxes)):
+        for right in range(left + 1, len(boxes)):
+            if _staggered_link(boxes[left], boxes[right], horizontal, max_gap):
+                root[find(part_of[left])] = find(part_of[right])
+    joined: dict[int, list[int]] = {}
+    for number, part in enumerate(parts):
+        joined.setdefault(find(number), []).extend(part)
+    return sorted((sorted(part) for part in joined.values()), key=lambda part: part[0])
+
+
+def _same_line(a: tuple[float, float, float, float], b: tuple[float, float, float, float], horizontal: bool) -> bool:
+    # Note the module's naming: `_along_interval` is the axis lines are stacked on (x for columns),
+    # so it spans a line's width; `_cross_interval` runs the length of a line.
+    a_width_span, b_width_span = _along_interval(a, horizontal), _along_interval(b, horizontal)
+    a_width, b_width = a_width_span[1] - a_width_span[0], b_width_span[1] - b_width_span[0]
+    if a_width <= 0 or b_width <= 0:
+        return False
+    shared = min(a_width_span[1], b_width_span[1]) - max(a_width_span[0], b_width_span[0])
+    if shared / min(a_width, b_width) < _SPLIT_LINE_CROSS_SHARE:
+        return False
+    centre_offset = abs((a_width_span[0] + a_width_span[1]) - (b_width_span[0] + b_width_span[1])) / 2
+    if centre_offset > _SPLIT_LINE_MAX_CENTRE_OFFSET * min(a_width, b_width):
+        return False
+    a_length_span, b_length_span = _cross_interval(a, horizontal), _cross_interval(b, horizontal)
+    gap = max(a_length_span[0], b_length_span[0]) - min(a_length_span[1], b_length_span[1])
+    return gap <= _SPLIT_LINE_MAX_GAP * (a_width + b_width) / 2
+
+
+def _line_continuity(
+    members: Sequence[_FragmentEvidence],
+    source_scale: float,
+    *,
+    join_split_lines: bool = False,
+    staggered_lines: bool = False,
+) -> dict[str, Any]:
     widths = [member.bbox[2] - member.bbox[0] for member in members]
     heights = [member.bbox[3] - member.bbox[1] for member in members]
     horizontal_votes = sum(
@@ -382,33 +665,47 @@ def _line_continuity(members: Sequence[_FragmentEvidence], source_scale: float) 
     if angle_delta > _MAX_ANGLE_DELTA_DEGREES:
         return {"continuous": False, "reason": "incoherent-oriented-lines", "max_angle_delta": angle_delta}
 
-    ordered = sorted(members, key=lambda member: _center(member.bbox)[1 if horizontal else 0])
+    boxes = [member.bbox for member in members]
+    if join_split_lines:
+        boxes = [box for box, _ in _join_line_pieces(boxes, horizontal)]
+        widths = [box[2] - box[0] for box in boxes]
+        heights = [box[3] - box[1] for box in boxes]
+    ordered = sorted(boxes, key=lambda box: _center(box)[1 if horizontal else 0])
     cross_lengths = heights if horizontal else widths
     along_lengths = widths if horizontal else heights
     threshold = (sum(cross_lengths) / len(cross_lengths)) * _MAX_LINE_GAP_MULTIPLIER * source_scale
     gaps: list[float] = []
     overlaps: list[float] = []
+    staggered = False
     for previous, current in pairwise(ordered):
-        previous_cross_start, previous_cross_end = _cross_interval(previous.bbox, horizontal)
-        current_cross_start, current_cross_end = _cross_interval(current.bbox, horizontal)
+        previous_cross_start, previous_cross_end = _cross_interval(previous, horizontal)
+        current_cross_start, current_cross_end = _cross_interval(current, horizontal)
         overlap = max(0.0, min(previous_cross_end, current_cross_end) - max(previous_cross_start, current_cross_start))
         overlap_share = overlap / min(
             previous_cross_end - previous_cross_start, current_cross_end - current_cross_start
         )
-        _, previous_along_end = _along_interval(previous.bbox, horizontal)
-        current_along_start, _ = _along_interval(current.bbox, horizontal)
+        _, previous_along_end = _along_interval(previous, horizontal)
+        current_along_start, _ = _along_interval(current, horizontal)
         gap = max(0.0, current_along_start - previous_along_end)
         gaps.append(gap)
         overlaps.append(overlap_share)
+        broken = None
         if overlap_share < _MIN_LATERAL_OVERLAP:
-            return {
+            broken = {
                 "continuous": False,
                 "reason": "insufficient-lateral-line-overlap",
                 "lateral_overlap": overlap_share,
             }
-        if gap > threshold:
-            return {"continuous": False, "reason": "line-gap-too-large", "gap": gap, "max_gap": threshold}
-    return {
+        elif gap > threshold:
+            broken = {"continuous": False, "reason": "line-gap-too-large", "gap": gap, "max_gap": threshold}
+        if broken is not None:
+            mean_thickness = sum(cross_lengths) / len(cross_lengths) * source_scale
+            if staggered_lines and _staggered_chain(ordered, horizontal, _STAGGERED_MAX_GAP * mean_thickness):
+                gaps, overlaps = [], []
+                staggered = True
+                break
+            return broken
+    result: dict[str, Any] = {
         "continuous": True,
         "orientation": "horizontal" if horizontal else "vertical",
         "max_angle_delta": angle_delta,
@@ -417,6 +714,50 @@ def _line_continuity(members: Sequence[_FragmentEvidence], source_scale: float) 
         "gap_limit": threshold,
         "mean_along_length": sum(along_lengths) / len(along_lengths),
     }
+    if join_split_lines:
+        result["line_count"] = len(boxes)
+    if staggered:
+        result["staggered"] = True
+    return result
+
+
+def _staggered_chain(boxes: Sequence[tuple[float, float, float, float]], horizontal: bool, max_gap: float) -> bool:
+    """True when the lines form one connected chain, linking any two that overlap along the line
+    (by `_MIN_LATERAL_OVERLAP` of the shorter) and sit at most `max_gap` apart across it.
+
+    The neighbour-by-neighbour check pairs lines by position across the reading direction, so in a
+    balloon set as two paragraphs, one higher than the other, a short line of the upper paragraph
+    is paired with a line of the lower one and the balloon is vetoed (ja/sample78). Two balloons
+    stacked in one detector blob stay apart: none of their lines overlap along the line.
+    """
+    count = len(boxes)
+    linked = {0}
+    frontier = [0]
+    while frontier:
+        current = frontier.pop()
+        for other in range(count):
+            if other in linked:
+                continue
+            if not _staggered_link(boxes[current], boxes[other], horizontal, max_gap):
+                continue
+            linked.add(other)
+            frontier.append(other)
+    return len(linked) == count
+
+
+def _staggered_link(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float], horizontal: bool, max_gap: float
+) -> bool:
+    """Two lines overlap along the line by `_MIN_LATERAL_OVERLAP` of the shorter and sit at most
+    ``max_gap`` apart across it."""
+    a_start, a_end = _cross_interval(a, horizontal)
+    b_start, b_end = _cross_interval(b, horizontal)
+    shared = min(a_end, b_end) - max(a_start, b_start)
+    if shared < _MIN_LATERAL_OVERLAP * min(a_end - a_start, b_end - b_start):
+        return False
+    a_along_start, a_along_end = _along_interval(a, horizontal)
+    b_along_start, b_along_end = _along_interval(b, horizontal)
+    return max(a_along_start, b_along_start) - min(a_along_end, b_along_end) <= max_gap
 
 
 def _major_axis_angle(quad: Sequence[tuple[float, float]]) -> float | None:
