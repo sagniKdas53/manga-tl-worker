@@ -40,6 +40,7 @@ from worker.config import (
     OCR_ORIENTATION,
     OCR_SPLIT_VETOED_AT_BREAKS,
     OCR_STAGGERED_LINES,
+    OCR_TEXT_ANGLE,
     OCR_WAIST_ADJACENT_LINE_GAP,
     OCR_WAIST_GATE,
     OCR_WAIST_MAX_SOLIDITY,
@@ -74,6 +75,7 @@ from worker.services.panel_detection import detect_text_containers
 from worker.services.pixel_stats import pixel_spread as _pixel_spread
 from worker.services.spread_gutter import find_spread_gutter, split_fragments_at_gutter
 from worker.services.stage_timer import StageTimer
+from worker.services.text_angle import apply_text_angles
 from worker.services.translation import (
     LANG_MAP,
     try_cloud_ai_vision_batch,
@@ -105,6 +107,18 @@ def merge_threshold_for(job_data):
         return OCR_MERGE_THRESHOLD
     low, high = MERGE_THRESHOLD_RANGE
     return min(high, max(low, value))
+
+
+def text_angle_enabled_for(job_data):
+    """Whether this job sets tilted text at its angle (E2): the job's `ocrTextAngle` (System
+    Settings, or a series/chapter override), else OCR_TEXT_ANGLE for a job queued before it existed.
+    """
+    value = job_data.get("ocrTextAngle")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+        return value.strip().lower() == "true"
+    return OCR_TEXT_ANGLE
 
 
 def grouping_config(reading_direction, threshold_ratio=None):
@@ -1898,6 +1912,10 @@ def process_ocr(job_data):
         # metadata into immutable cleanup policy; OCR never reconstructs a patch inline.
         for r in ordered_regions:
             r["cleanupEligible"] = not str(r.get("containerResolution") or "").startswith("review")
+
+        # E2 (#180): one pass over the finished regions sets each one's angle from its OCR pieces
+        # and, for a turned one, the box along its text. Every path above writes rotation 0.0.
+        apply_text_angles(ordered_regions, enabled=text_angle_enabled_for(job_data))
 
         logger.info(
             f"[OCR] Completed OCR. Found {len(ordered_regions)} text regions (lang={source_language}, direction={reading_direction})"

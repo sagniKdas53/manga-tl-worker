@@ -539,6 +539,12 @@ OCR_COMPONENT_MAX_AREA_FRACTION = float(os.environ.get("OCR_COMPONENT_MAX_AREA_F
 # the dev stack's 4Oct and Tests pages became the one text unit it is.
 OCR_JOIN_SPLIT_LINES = os.environ.get("OCR_JOIN_SPLIT_LINES", "true").strip().lower() in ("1", "true", "yes")
 
+# E2 (#180): set each region's angle from its OCR pieces (services/text_angle.py), so tilted text
+# comes out tilted. The job's `ocrTextAngle` (System Settings, or a series/chapter override) wins;
+# this is the value for a job queued before that setting existed. On by default (owner, D4,
+# 2026-10-10); "false" leaves every region level, as before.
+OCR_TEXT_ANGLE = os.environ.get("OCR_TEXT_ANGLE", "true").strip().lower() in ("1", "true", "yes")
+
 # AUDIT-R21: when the owner veto rejects a balloon's group, cut it where its lines break and keep
 # the runs on either side (each must pass the veto again) instead of splitting it into single
 # pieces. chrome-box TELEA p. 2: an aside set lower beside a two-column sentence (良くないけど)
