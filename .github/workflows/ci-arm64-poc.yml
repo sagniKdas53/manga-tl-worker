@@ -1,12 +1,9 @@
 name: CI - ARM64 RapidOCR POC
 
+# Off on pull requests (owner, 2026-10-17): no ARM64 worker has been deployed, and the QEMU build
+# is the slowest check on every worker PR. Run it by hand (Actions -> Run workflow) until ARM64
+# support is picked up again (milestone "ARM64 support (later)").
 on:
-  pull_request:
-    paths:
-      - "Dockerfile"
-      - "requirements.txt"
-      - "src/**"
-      - ".github/workflows/ci-arm64-poc.yml"
   workflow_dispatch:
 
 jobs:
