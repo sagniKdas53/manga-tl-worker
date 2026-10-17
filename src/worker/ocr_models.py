@@ -12,7 +12,16 @@ environment and apply it to every language, which is what made Korean pages unre
 replaces that with a catalog, declared in ``providers.json`` under the ``local`` provider exactly
 like every cloud provider's model list, where each entry names a detection model and a *per-language*
 recognition model. Resolution then picks a pair that can actually read the page's script, falling
-back to another catalog entry when the selected one cannot (Korean on PP-OCRv6 -> PP-OCRv5).
+back to another catalog entry when the selected one cannot.
+
+Korean pairs PP-OCRv6's *detector* with ``korean_PP-OCRv5_mobile_rec``. Detection carries no
+character set, and PP-OCRv5_mobile_det misses Korean set large and tilted: on a placard of six
+lines at +15 deg (ko/sample188) it found five scraps, while PP-OCRv6_medium_det found all six lines
+and the same Korean recognizer read them. Over the 29 Korean corpus pages, against Torii's text:
+Hangul recall 0.961 -> 0.978, precision 0.967 -> 0.968, no page worse by more than one character,
+at ~2.5x the detection time (owner, 2026-10-17). Line pieces are also what E2 needs to turn text.
+That pairing is the only one that reads Korean: the PP-OCRv5 entry no longer claims it, so a series
+set to PP-OCRv5 (until now the only Korean choice) is routed there rather than kept on v5's detector.
 
 Both halves of a pair are validated against PaddleX's on-disk model registry before an entry is
 offered as a choice, so the UI never lists a model the host cannot load.
@@ -42,6 +51,8 @@ BUILTIN_LOCAL_OCR_MODELS: list[dict] = [
             "zh-cn": "PP-OCRv6_medium_rec",
             "zh-tw": "PP-OCRv6_medium_rec",
             "en": "PP-OCRv6_medium_rec",
+            # No PP-OCRv6 Korean recognizer exists; the v6 detector with v5's Korean one does.
+            "ko": "korean_PP-OCRv5_mobile_rec",
         },
     },
     # The detector is deliberately the *mobile* one even though ja/zh recognition is server-tier:
@@ -57,7 +68,8 @@ BUILTIN_LOCAL_OCR_MODELS: list[dict] = [
             "zh": "PP-OCRv5_server_rec",
             "zh-cn": "PP-OCRv5_server_rec",
             "zh-tw": "PP-OCRv5_server_rec",
-            "ko": "korean_PP-OCRv5_mobile_rec",
+            # No "ko": this entry's mobile detector misses large tilted Korean, so a page set to
+            # PP-OCRv5 is routed to PP-OCRv6's Korean pairing instead (owner, 2026-10-17).
             "en": "en_PP-OCRv5_mobile_rec",
         },
     },
