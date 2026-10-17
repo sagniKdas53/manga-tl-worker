@@ -26,19 +26,35 @@ def _clear_env_pin(monkeypatch):
     monkeypatch.delenv("PADDLEOCR_LOCAL_MODEL", raising=False)
 
 
-def test_v6_does_not_claim_korean():
-    """The premise of the whole module: PP-OCRv6 has no Korean recognition model."""
+def test_v6_reads_korean_with_its_own_detector_and_the_v5_korean_recognizer():
+    """PP-OCRv6 has no Korean recognizer, so its entry borrows v5's; its detector is the point:
+    v5's mobile detector misses large tilted Korean (ko/sample188, owner 2026-10-17)."""
     v6 = next(m for m in parse_local_ocr_models(BUILTIN_LOCAL_OCR_MODELS) if m.id == V6)
-    assert not v6.supports("ko")
+    assert v6.supports("ko")
+    assert v6.det == "PP-OCRv6_medium_det"
+    assert v6.rec_for("ko") == "korean_PP-OCRv5_mobile_rec"
     v5 = next(m for m in parse_local_ocr_models(BUILTIN_LOCAL_OCR_MODELS) if m.id == V5)
-    assert v5.supports("ko")
+    assert not v5.supports("ko")
 
 
-def test_korean_routes_to_v5(catalog):
+def test_korean_routes_to_v6_detector_by_default(catalog):
     resolved = catalog.resolve(None, "ko")
     assert resolved is not None
-    assert resolved.model_id == V5
+    assert resolved.model_id == V6
+    assert resolved.det == "PP-OCRv6_medium_det"
     assert resolved.rec == "korean_PP-OCRv5_mobile_rec"
+
+
+def test_korean_on_an_explicit_v5_choice_is_routed_to_the_v6_pairing(catalog):
+    """A Korean series set to PP-OCRv5 (until 2026-10-17 the only Korean choice) gets the pairing
+    that reads it, not v5's mobile detector."""
+    resolved = catalog.resolve(V5, "ko")
+    assert resolved is not None
+    assert resolved.model_id == V6
+    assert resolved.det == "PP-OCRv6_medium_det"
+    assert resolved.rec == "korean_PP-OCRv5_mobile_rec"
+    assert resolved.auto_routed
+    assert resolved.requested_model_id == V5
 
 
 def test_japanese_stays_on_v6(catalog):
@@ -57,7 +73,13 @@ def test_explicit_choice_is_honoured_when_capable(catalog):
     assert not resolved.auto_routed
 
 
-def test_explicit_choice_is_overridden_when_incapable(catalog):
+def test_explicit_choice_is_overridden_when_incapable():
+    catalog = LocalOcrCatalog.from_entries(
+        [
+            {"id": V6, "name": "v6 without Korean", "det": "PP-OCRv6_medium_det", "rec": {"ja": "PP-OCRv6_medium_rec"}},
+            {"id": V5, "name": "v5", "det": "PP-OCRv5_mobile_det", "rec": {"ko": "korean_PP-OCRv5_mobile_rec"}},
+        ]
+    )
     resolved = catalog.resolve(V6, "ko")
     assert resolved is not None
     assert resolved.model_id == V5

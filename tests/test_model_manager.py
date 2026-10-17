@@ -64,7 +64,7 @@ def test_korean_loads_a_recognition_model_that_can_read_hangul():
 
     This is the regression that made Korean chapters come back as CJK/Latin noise: the worker pinned
     PP-OCRv6_medium_rec for every language, and PaddleOCR silently ignores `lang` once explicit model
-    names are passed.
+    names are passed. The detector is v6's: v5's mobile one misses large tilted Korean (2026-10-17).
     """
     mm = ModelManager()
     mock_paddle = MagicMock(return_value="paddle_instance")
@@ -74,15 +74,15 @@ def test_korean_loads_a_recognition_model_that_can_read_hangul():
         assert mm.get_paddle_ocr_reader("ko") == "paddle_instance"
         kwargs = mock_paddle.call_args.kwargs
         assert kwargs["text_recognition_model_name"] == "korean_PP-OCRv5_mobile_rec"
-        assert kwargs["text_detection_model_name"] == "PP-OCRv5_mobile_det"
+        assert kwargs["text_detection_model_name"] == "PP-OCRv6_medium_det"
         # `lang` must not be passed alongside explicit model names — PaddleOCR ignores it and warns.
         assert "lang" not in kwargs
     finally:
         del sys.modules["paddleocr"]
 
 
-def test_explicit_v6_choice_is_overridden_for_korean():
-    """An explicit PP-OCRv6 selection is honoured for Japanese but routed away for Korean."""
+def test_explicit_v6_choice_reads_korean_with_the_v5_korean_recognizer():
+    """An explicit PP-OCRv6 selection reads Korean with v6's detector and v5's Korean recognizer."""
     mm = ModelManager()
     mock_paddle = MagicMock(return_value="paddle_instance")
     sys.modules["paddleocr"] = MagicMock(PaddleOCR=mock_paddle)
@@ -93,6 +93,7 @@ def test_explicit_v6_choice_is_overridden_for_korean():
 
         mm.get_paddle_ocr_reader("ko", "PP-OCRv6")
         assert mock_paddle.call_args.kwargs["text_recognition_model_name"] == "korean_PP-OCRv5_mobile_rec"
+        assert mock_paddle.call_args.kwargs["text_detection_model_name"] == "PP-OCRv6_medium_det"
     finally:
         del sys.modules["paddleocr"]
 
