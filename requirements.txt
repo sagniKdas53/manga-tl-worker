@@ -22,7 +22,7 @@ psutil==7.2.2
 # packages ship the same `onnxruntime` module, so exactly one of them may be installed. The
 # OpenVINO build has no Linux arm64 wheel; arm64 (RapidOCR) keeps the stock package.
 onnxruntime-openvino==1.24.1; sys_platform == "linux" and platform_machine == "x86_64"
-onnxruntime==1.30.0; sys_platform != "linux" or platform_machine != "x86_64"
+onnxruntime==1.31.0; sys_platform != "linux" or platform_machine != "x86_64"
 rq==2.12.0
 fastapi==0.143.0
 uvicorn[standard]==0.54.0
