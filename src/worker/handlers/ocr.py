@@ -41,6 +41,7 @@ from worker.config import (
     OCR_SPLIT_VETOED_AT_BREAKS,
     OCR_STAGGERED_LINES,
     OCR_TEXT_ANGLE,
+    OCR_TEXT_ROOM,
     OCR_WAIST_ADJACENT_LINE_GAP,
     OCR_WAIST_GATE,
     OCR_WAIST_MAX_SOLIDITY,
@@ -76,6 +77,7 @@ from worker.services.pixel_stats import pixel_spread as _pixel_spread
 from worker.services.spread_gutter import find_spread_gutter, split_fragments_at_gutter
 from worker.services.stage_timer import StageTimer
 from worker.services.text_angle import apply_text_angles
+from worker.services.text_room import text_room_provenance
 from worker.services.translation import (
     LANG_MAP,
     try_cloud_ai_vision_batch,
@@ -1276,6 +1278,19 @@ def process_ocr(job_data):
                         provenance = provenance | {"containerResolution": container_resolution}
                     else:
                         provenance = {"containerResolution": container_resolution}
+                    if OCR_TEXT_ROOM and container_resolution == "resolved-local-split" and img is not None:
+                        if page_gray is None:
+                            page_gray = img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                        provenance = text_room_provenance(
+                            provenance,
+                            page_gray,
+                            (r_sub["x"], r_sub["y"], r_sub["width"], r_sub["height"]),
+                            [
+                                (other["x"], other["y"], other["width"], other["height"])
+                                for other in merged_bubble_regions
+                                if other is not r_sub
+                            ],
+                        )
                     candidate_regions.append(
                         {
                             "type": "bubble",
