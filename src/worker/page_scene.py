@@ -10,7 +10,7 @@ from typing import Any
 
 CONTRACT_VERSION = "page-scene/v1"
 # SHA-256 of `contracts/page-scene-v1.schema.json`; no parent-path runtime import.
-CONTRACT_SCHEMA_SHA256 = "45ec0b9ad1f637a216d7ae4d1bb58178f98c84105d184fcbb8b6d79b40e448e1"
+CONTRACT_SCHEMA_SHA256 = "8757b8185a13820e8c96be80e0a7c0b4e2fbf366f0317aef68dd8eeb9fdca971"
 
 
 class PageSceneValidationError(ValueError):
@@ -39,6 +39,26 @@ def _validate_editor_typography(style: Any) -> None:
         raise PageSceneValidationError("style.font_style must be normal or italic")
     if "shape" in style and style["shape"] not in ("rectangular", "elliptical"):
         raise PageSceneValidationError("style.shape must be rectangular or elliptical")
+    if "mask_polygon" in style:
+        _validate_mask_polygon(style["mask_polygon"])
+
+
+def _validate_mask_polygon(polygon: Any) -> None:
+    """Contract rule 9 (2026-11-07, G2): at least three [x, y] pairs of finite numbers."""
+    message = "style.mask_polygon must be at least three [x, y] pairs of finite numbers"
+    if not isinstance(polygon, list) or len(polygon) < 3:
+        raise PageSceneValidationError(message)
+    for point in polygon:
+        if not isinstance(point, list) or len(point) != 2:
+            raise PageSceneValidationError(message)
+        for coordinate in point:
+            if (
+                not isinstance(coordinate, (int, float))
+                or isinstance(coordinate, bool)
+                or not math.isfinite(coordinate)
+                or abs(coordinate) > 1_000_000_000_000
+            ):
+                raise PageSceneValidationError(message)
 
 
 def logical_scene_digest(document: dict[str, Any]) -> str:
