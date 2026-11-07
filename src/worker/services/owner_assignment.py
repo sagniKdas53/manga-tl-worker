@@ -13,6 +13,7 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from itertools import pairwise
+from statistics import median
 from typing import Any, Literal
 
 OwnerState = Literal["assigned", "unknown"]
@@ -479,6 +480,34 @@ def split_at_line_breaks(
     if len(parts) == 1:
         return None
     return [[index for position in part for index in ordered[position][1]] for part in parts]
+
+
+def split_at_column_steps(raw_quads: Sequence[Any], min_step_chars: float) -> list[list[int]] | None:
+    """Cut vertical text where the columns' tops jump: that is where the speaker changes (#321).
+
+    With no balloon between two speakers, their columns can sit side by side as closely as one
+    speaker's do. One speaker's column tops line up, and the next speaker's start at another height:
+    `test` p16's 387, 387, 388, then 526, 524, 525. Of 178 side-by-side pairs of columns of
+    free-standing text on the test stack, 137 differ by under a character.
+
+    Only for the path with no balloon. Inside one, offset columns are one text (ja/sample78).
+
+    Returns the runs, as lists of indices into ``raw_quads``, or ``None`` when no jump reaches
+    ``min_step_chars`` column widths, or the pieces aren't columns.
+    """
+    boxes = _boxes(raw_quads)
+    if boxes is None or len(boxes) < 2 or _line_orientation(boxes) is not False:
+        return None
+    lines = _join_line_pieces(boxes, False)
+    ordered = sorted(lines, key=lambda line: -_center(line[0])[0])
+    step = min_step_chars * median(box[2] - box[0] for box, _ in ordered)
+    parts = [list(ordered[0][1])]
+    for (previous, _), (current, members) in pairwise(ordered):
+        if abs(current[1] - previous[1]) >= step:
+            parts.append(list(members))
+        else:
+            parts[-1].extend(members)
+    return parts if len(parts) > 1 else None
 
 
 def _boxes(raw_quads: Sequence[Any]) -> list[tuple[float, float, float, float]] | None:

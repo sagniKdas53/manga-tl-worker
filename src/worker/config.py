@@ -613,6 +613,10 @@ OCR_NO_BALLOON_VETO = os.environ.get("OCR_NO_BALLOON_VETO", "true").strip().lowe
 # its misreads is 2.57x. Ruby (furigana, about half its base text) was not in the labels: if ruby
 # comes apart from its text on the no-balloon path, this is the setting. 0 turns the size cut off.
 OCR_NO_BALLOON_SIZE_RATIO = float(os.environ.get("OCR_NO_BALLOON_SIZE_RATIO", "2.2"))
+# #321: outside a balloon, cut vertical text where the columns' tops jump by this many column widths:
+# the speaker changes there (`split_at_column_steps`). 0 turns it off. A region it cut carries
+# `splitBy: column-step` on its pieces.
+OCR_NO_BALLOON_COLUMN_STEP = float(os.environ.get("OCR_NO_BALLOON_COLUMN_STEP", "2.5"))
 
 # Never group text that no balloon holds across the gutter of a two-page spread. ja/sample93's
 # shout on the left page and speech on the right came back as one region. A page counts as a

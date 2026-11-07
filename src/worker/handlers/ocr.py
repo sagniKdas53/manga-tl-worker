@@ -35,6 +35,7 @@ from worker.config import (
     OCR_JOIN_SPLIT_LINES,
     OCR_LINE_READING_ORDER,
     OCR_MERGE_THRESHOLD,
+    OCR_NO_BALLOON_COLUMN_STEP,
     OCR_NO_BALLOON_SIZE_RATIO,
     OCR_NO_BALLOON_VETO,
     OCR_ORIENTATION,
@@ -66,6 +67,7 @@ from worker.services.ocr_capture import capture_observed_ocr_grouping
 from worker.services.owner_assignment import (
     assign_captured_owners,
     has_rotated_lines,
+    split_at_column_steps,
     split_at_line_breaks,
     split_by_character_size,
     split_by_orientation,
@@ -304,6 +306,7 @@ def no_balloon_grouping_context(
     join_split_lines=OCR_JOIN_SPLIT_LINES,
     staggered_lines=OCR_STAGGERED_LINES,
     size_ratio=OCR_NO_BALLOON_SIZE_RATIO,
+    column_step=OCR_NO_BALLOON_COLUMN_STEP,
 ):
     """B5: the owner veto for text no balloon holds.
 
@@ -317,7 +320,8 @@ def no_balloon_grouping_context(
     so `_NO_BALLOON_LAYOUT_REASONS` do not cut. Text set at an angle (a title's tilted tiles) only
     gets the size check: the angle check assumes straight lines. A cut goes by size first (misreads of the art beside
     speech), then by direction (a stat table beside a paragraph), then square pieces off (B4: a
-    glyph's angle is not a line's), then at the line breaks; each part is decided again.
+    glyph's angle is not a line's), then where column tops jump (#321: two speakers side by side),
+    then at the line breaks; each part is decided again.
     """
 
     def quads(component, regions):
@@ -340,9 +344,22 @@ def no_balloon_grouping_context(
             return "different-character-sizes"
         if has_rotated_lines(quads(component, regions)):
             return None
+        if column_step > 0 and split_at_column_steps(quads(component, regions), column_step) is not None:
+            return "column-step"
         if decision["state"] != "assigned" and decision["reason"] not in _NO_BALLOON_LAYOUT_REASONS:
             return decision["reason"]
         return None
+
+    def column_step_parts(component, regions, component_quads):
+        if column_step <= 0 or has_rotated_lines(component_quads):
+            return None
+        parts = split_at_column_steps(component_quads, column_step)
+        if parts is not None:
+            for index in component:
+                provenance = regions[index].get("ownershipProvenance")
+                if isinstance(provenance, dict):
+                    regions[index]["ownershipProvenance"] = provenance | {"splitBy": "column-step"}
+        return parts
 
     def owner_split(component, regions):
         component_quads = quads(component, regions)
@@ -350,6 +367,7 @@ def no_balloon_grouping_context(
             split_by_character_size(component_quads, size_ratio) if size_ratio > 0 else None,
             split_by_orientation(component_quads),
             split_off_squares(component_quads),
+            column_step_parts(component, regions, component_quads),
             split_at_line_breaks(component_quads, join_split_lines=join_split_lines, staggered_lines=staggered_lines),
         ):
             if parts is not None:

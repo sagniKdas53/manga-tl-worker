@@ -16,6 +16,7 @@ from worker.handlers.ocr import grouping_config, no_balloon_grouping_context
 from worker.services.fragment_grouping import GroupingContext, group_fragments
 from worker.services.owner_assignment import (
     has_rotated_lines,
+    split_at_column_steps,
     split_by_character_size,
     split_by_orientation,
     split_off_squares,
@@ -204,3 +205,124 @@ SAMPLE61_SKILL_TEXT = {
 
 def test_free_layout_text_keeps_its_distance_grouping():
     assert _groups(SAMPLE61_SKILL_TEXT) == _groups(SAMPLE61_SKILL_TEXT, veto=False) == [[0, 1, 2, 3, 4, 5, 6, 7]]
+
+
+# #321: two speakers side by side with no balloon between them. Pieces (x, y, w, h) from the owner's
+# one-shot `test`, OCR captures of 2026-11-07. Within one speaker the column tops line up; where the
+# speaker changes, they jump.
+TEST_P16_TWO_SPEAKERS = [
+    (386, 387, 29, 78),  # ねえねえ
+    (367, 387, 27, 140),  # このデカちぽで
+    (346, 388, 27, 139),  # どうしてほしい？
+    (337, 526, 23, 116),  # 好きにしたら？
+    (316, 524, 27, 93),  # 花火は何も
+    (298, 525, 25, 115),  # 言ってないもん
+]
+TEST_P5_TWO_SPEAKERS = [
+    (634, 46, 35, 234),  # すみません星川さん
+    (605, 47, 29, 255),  # 今週のお偉いさんとの
+    (572, 47, 33, 107),  # 飲み会に
+    (540, 46, 35, 283),  # 参加して頂けませんか？
+    (495, 202, 33, 59),  # え～
+    (463, 200, 35, 135),  # 何で星川が
+    (428, 199, 40, 185),  # そんな飲み会に
+    (397, 199, 40, 183),  # 参加しなくちゃ
+    (369, 202, 36, 158),  # いけないの？
+]
+TEST_P5_ONE_SPEAKER = [
+    (799, 504, 36, 160),  # これのどこが
+    (762, 501, 44, 165),  # 飲み会だよ！
+    (734, 503, 40, 213),  # けど我慢しないと
+    (706, 504, 34, 136),  # 活動資金が
+]
+TEST_P5_ONE_SPEAKER_LONG = [
+    (1010, 467, 29, 252),  # この前のライブ見たよ
+    (974, 463, 38, 260),  # ダンス上手かったねw
+    (944, 464, 36, 162),  # そんな訳でさ
+    (912, 463, 37, 186),  # 今日はこれ着て
+    (885, 465, 31, 356),  # ドスケベダンス踊ってくれよw
+]
+
+
+def _column_quads(boxes):
+    return [[[x, y], [x + w, y], [x + w, y + h], [x, y + h]] for x, y, w, h in boxes]
+
+
+def _column_fragments(boxes):
+    return [
+        {
+            "x": x,
+            "y": y,
+            "width": w,
+            "height": h,
+            "text": "あ" * max(1, h // w),
+            "confidence": 0.99,
+            "fragmentId": f"fragment-{index}",
+            "sourceQuad": quad,
+            "ownershipProvenance": {"id": f"fragment-{index}", "sourceQuad": quad},
+        }
+        for index, ((x, y, w, h), quad) in enumerate(zip(boxes, _column_quads(boxes), strict=True))
+    ]
+
+
+def _column_groups(boxes, **context_settings):
+    fragments = _column_fragments(boxes)
+    context = no_balloon_grouping_context(GroupingContext(page_area=1500.0 * 1500.0), **context_settings)
+    groups = group_fragments(fragments, grouping_config("rtl"), context)
+    return sorted(sorted(group) for group in groups), fragments
+
+
+def test_a_step_in_the_column_tops_separates_two_speakers():
+    assert split_at_column_steps(_column_quads(TEST_P16_TWO_SPEAKERS), 2.5) == [[0, 1, 2], [3, 4, 5]]
+    assert split_at_column_steps(_column_quads(TEST_P5_TWO_SPEAKERS), 2.5) == [[0, 1, 2, 3], [4, 5, 6, 7, 8]]
+
+
+def test_columns_whose_tops_line_up_are_one_speaker():
+    assert split_at_column_steps(_column_quads(TEST_P5_ONE_SPEAKER), 2.5) is None
+    assert split_at_column_steps(_column_quads(TEST_P5_ONE_SPEAKER_LONG), 2.5) is None
+
+
+def test_a_column_ocr_read_as_two_pieces_is_not_a_step():
+    # The same column, cut in two along its length, beside a neighbour starting level with it.
+    boxes = [(500, 100, 40, 150), (500, 260, 40, 150), (450, 100, 40, 300)]
+    assert split_at_column_steps(_column_quads(boxes), 2.5) is None
+
+
+def test_horizontal_lines_are_never_cut_by_a_column_step():
+    # A caption's lines, each starting further along: not columns.
+    boxes = [(100, 100, 300, 40), (260, 150, 300, 40), (420, 200, 300, 40)]
+    assert split_at_column_steps(_column_quads(boxes), 2.5) is None
+
+
+def test_a_step_under_the_threshold_does_not_cut():
+    # 2 characters of 40 px: an indent, not a new speaker.
+    boxes = [(500, 100, 40, 300), (450, 180, 40, 300)]
+    assert split_at_column_steps(_column_quads(boxes), 2.5) is None
+
+
+def test_the_no_balloon_path_separates_the_two_speakers():
+    groups, _ = _column_groups(TEST_P16_TWO_SPEAKERS)
+    assert groups == [[0, 1, 2], [3, 4, 5]]
+    groups, _ = _column_groups(TEST_P5_TWO_SPEAKERS)
+    assert groups == [[0, 1, 2, 3], [4, 5, 6, 7, 8]]
+
+
+def test_the_no_balloon_path_keeps_one_speaker_whole():
+    groups, _ = _column_groups(TEST_P5_ONE_SPEAKER)
+    assert groups == [[0, 1, 2, 3]]
+
+
+def test_the_rule_can_be_switched_off():
+    groups, fragments = _column_groups(TEST_P16_TWO_SPEAKERS, column_step=0)
+    assert groups == [[0, 1, 2, 3, 4, 5]]
+    assert not any("splitBy" in fragment["ownershipProvenance"] for fragment in fragments)
+
+
+def test_a_group_it_cut_says_so_on_its_pieces():
+    _, fragments = _column_groups(TEST_P16_TWO_SPEAKERS)
+    assert all(fragment["ownershipProvenance"]["splitBy"] == "column-step" for fragment in fragments)
+
+
+def test_a_group_it_did_not_cut_has_no_marker():
+    _, fragments = _column_groups(TEST_P5_ONE_SPEAKER)
+    assert not any("splitBy" in fragment["ownershipProvenance"] for fragment in fragments)
