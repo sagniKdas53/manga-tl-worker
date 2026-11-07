@@ -405,6 +405,21 @@ def test_the_editors_size_shape_and_italic_reach_the_renderer(mock_requests, moc
 @patch("worker.page_scene_renderer.minio_client")
 @patch("worker.page_scene_renderer.download_image")
 @patch("worker.page_scene_renderer.requests")
+def test_the_balloon_outline_reaches_the_renderer(mock_requests, mock_download, mock_minio):
+    """G2 (#176): the export fits text into the balloon the editor fits it into."""
+    source, patch = b"source", b"patch-png-bytes"
+    polygon = [[10.25, 20.5], [210.75, 20.5], [210.75, 92.25], [10.25, 92.25]]
+    document = _scene_with_cleanup(source, patch)
+    document["objects"] = [_text_object({"mask_polygon": polygon})]
+    _run_with_renderer(mock_requests, mock_download, source, document, {"patch-1": "http://assets/patch"}, patch)
+
+    (text,) = mock_requests.post.call_args.kwargs["json"]["scene"]["textObjects"]
+    assert text["style"]["maskPolygon"] == polygon
+
+
+@patch("worker.page_scene_renderer.minio_client")
+@patch("worker.page_scene_renderer.download_image")
+@patch("worker.page_scene_renderer.requests")
 def test_pipeline_text_sends_no_typography_so_its_render_is_unchanged(mock_requests, mock_download, mock_minio):
     source, patch = b"source", b"patch-png-bytes"
     document = _scene_with_cleanup(source, patch)
@@ -412,4 +427,4 @@ def test_pipeline_text_sends_no_typography_so_its_render_is_unchanged(mock_reque
     _run_with_renderer(mock_requests, mock_download, source, document, {"patch-1": "http://assets/patch"}, patch)
 
     (text,) = mock_requests.post.call_args.kwargs["json"]["scene"]["textObjects"]
-    assert not {"fontSize", "fontStyle", "shape"} & set(text["style"])
+    assert not {"fontSize", "fontStyle", "shape", "maskPolygon"} & set(text["style"])

@@ -167,8 +167,13 @@ def render_page_scene(job_data: dict[str, Any]) -> dict[str, Any]:
             # it, so it rides on the render job (the backend sends it on every job).
             "safetyPercent": safety_percent,
         }
-        # Contract rule 8: the user's typography, passed on only when the scene carries it.
-        for scene_key, renderer_key in (("font_size", "fontSize"), ("font_style", "fontStyle"), ("shape", "shape")):
+        # Contract rules 8 and 9: the user's typography and the balloon outline, passed on only when the scene carries them.
+        for scene_key, renderer_key in (
+            ("font_size", "fontSize"),
+            ("font_style", "fontStyle"),
+            ("shape", "shape"),
+            ("mask_polygon", "maskPolygon"),
+        ):
             if style.get(scene_key) is not None:
                 renderer_style[renderer_key] = style[scene_key]
         text_objects.append(
