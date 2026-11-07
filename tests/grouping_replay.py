@@ -7,6 +7,7 @@ check reads the page, so a page where it matters isn't kept in the fixture.
 """
 
 from dataclasses import replace
+from typing import Any
 
 import cv2
 import numpy as np
@@ -31,7 +32,9 @@ def group_page(page):
     """The page's groups of piece ids. `page` is one entry of the fixture."""
     width, height = page["width"], page["height"]
     gray = np.full((height, width), 255, dtype=np.uint8)
-    pieces = [dict(piece, text="あ", confidence=1.0, detectedLanguage="ja") for piece in page["pieces"]]
+    pieces: list[dict[str, Any]] = [
+        {**piece, "text": "あ", "confidence": 1.0, "detectedLanguage": "ja"} for piece in page["pieces"]
+    ]
 
     masks = []
     for points in page["balloons"]:
