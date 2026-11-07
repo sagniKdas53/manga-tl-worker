@@ -619,6 +619,10 @@ OCR_NO_BALLOON_SIZE_RATIO = float(os.environ.get("OCR_NO_BALLOON_SIZE_RATIO", "2
 # spread when it is at least OCR_SPREAD_MIN_ASPECT times as wide as it is tall and a vertical edge
 # near the centre covers OCR_SPREAD_SEAM_COVERAGE of its height (sample93 0.96; the highest wide
 # single illustration in the corpus, sample92's checked wall, 0.81). "false" turns it off.
+# F5 (#244): measure the room beside a text unit that shares a detector box, and record it on the
+# region (`ownershipProvenance.textRoom`), for the backend's text box. "false" stops recording it, and
+# the backend then keeps today's box. See `services/text_room.py`.
+OCR_TEXT_ROOM = os.environ.get("OCR_TEXT_ROOM", "true").strip().lower() in ("1", "true", "yes")
 OCR_SPREAD_GUTTER = os.environ.get("OCR_SPREAD_GUTTER", "true").strip().lower() in ("1", "true", "yes")
 OCR_SPREAD_MIN_ASPECT = float(os.environ.get("OCR_SPREAD_MIN_ASPECT", "1.2"))
 OCR_SPREAD_SEAM_COVERAGE = float(os.environ.get("OCR_SPREAD_SEAM_COVERAGE", "0.85"))
