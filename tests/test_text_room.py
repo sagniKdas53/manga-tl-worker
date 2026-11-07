@@ -28,6 +28,13 @@ def draw_balloon(gray, left, top, right, bottom, ink=INK, stroke=4):
     gray[bottom : bottom + stroke, left : right + stroke] = ink
 
 
+def measured(gray, bbox, siblings=()):
+    """The room, for a test where it must have been measured."""
+    room = measure_text_room(gray, bbox, siblings)
+    assert room is not None
+    return room
+
+
 def test_the_room_runs_from_outline_to_outline():
     gray = page()
     draw_balloon(gray, 200, 100, 700, 800)
@@ -47,7 +54,7 @@ def test_it_stops_at_ink_that_runs_along_the_text():
     draw_text(gray, bbox)
     draw_text(gray, (600, 200, 60, 500))
 
-    room = measure_text_room(gray, bbox)
+    room = measured(gray, bbox)
 
     assert room["x"] + room["width"] <= 600
 
@@ -91,7 +98,7 @@ def test_a_short_stroke_beside_the_text_does_not_decide_it():
     # Crosses only a few of the rows, like a stray mark or a tail tip.
     gray[440:446, 300:304] = INK
 
-    assert measure_text_room(gray, bbox)["x"] == 207
+    assert measured(gray, bbox)["x"] == 207
 
 
 def test_two_texts_side_by_side_split_the_gap_between_them():
@@ -101,8 +108,8 @@ def test_two_texts_side_by_side_split_the_gap_between_them():
     draw_text(gray, left)
     draw_text(gray, right)
 
-    room_left = measure_text_room(gray, left, siblings=[right])
-    room_right = measure_text_room(gray, right, siblings=[left])
+    room_left = measured(gray, left, siblings=[right])
+    room_right = measured(gray, right, siblings=[left])
 
     # The gap runs from 360 to 560: each stops at its middle, 460.
     assert room_left["x"] + room_left["width"] <= 460
@@ -117,7 +124,7 @@ def test_a_sibling_above_or_below_does_not_limit_the_width():
     draw_text(gray, bbox)
     draw_text(gray, other)
 
-    assert measure_text_room(gray, bbox, siblings=[other])["width"] > 600
+    assert measured(gray, bbox, siblings=[other])["width"] > 600
 
 
 def test_it_never_returns_less_than_the_text_itself():
