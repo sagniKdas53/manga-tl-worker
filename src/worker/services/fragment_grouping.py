@@ -356,7 +356,7 @@ def _adjacent_lines(r1: dict, r2: dict, vertical: bool, max_gap: float) -> bool:
     """Two lines side by side, sharing most of their length, closer than ``max_gap`` pixels.
 
     For columns the length runs along y and the gap is measured across x; for horizontal lines
-    the other way round. A pair that only clips corners (sample9's って against 何ニヤニヤ, a
+    the other way round. A pair that only clips corners (sample9's っぱ against 叀ガヅガヅ, a
     tenth of their length shared) is not adjacent lines, so the gate still decides it.
     """
     if vertical:

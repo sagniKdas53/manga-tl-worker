@@ -3,7 +3,7 @@
 The UI stores `rtl` / `ltr` / `ttb`; older series and the corpus scripts store `rightToLeft` /
 `leftToRight`, and the backend sends the value lowercased. The worker compared against the short
 forms only, so on a `rightToLeft` series merge_ocr_regions read a joined balloon's columns left to
-right (sample78's 「でかした友人！アイツが…」 came out as 「ウチに俺も…図になってる友人！アイツがでかした」),
+right (sample78's 「ほけちひ妊劣！マシプゐ…」 came out as 「ホルろ劕ぐ…埃ろこっぱわ妊劣！マシプゐほけちひ」),
 and on a `leftToRight` series panel order and the binding check took it for a manga.
 """
 
