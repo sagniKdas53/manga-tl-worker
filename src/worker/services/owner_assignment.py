@@ -80,7 +80,7 @@ def assign_captured_owners(
     contradictory fragments; absent style remains an explicit unknown feature, not a split.
 
     `join_split_lines` (AUDIT-R21, off by default) joins the pieces OCR broke one line into
-    before the line-continuity checks, so a column read as ブラ | イダルなんて is one line rather
+    before the line-continuity checks, so a column read as ネヱ | シベノこせぱ is one line rather
     than two that each fail to overlap their neighbour.
 
     `staggered_lines` (B3, off by default) accepts lines that fail the neighbour-by-neighbour check
@@ -432,7 +432,7 @@ def split_at_line_breaks(
     """Cut a candidate group where its line continuity breaks, keeping the runs on either side.
 
     The owner veto used to answer any break by splitting the whole group into single pieces: on
-    chrome-box's TELEA p. 2 one handwritten aside set beside a two-column sentence (良くないけど)
+    chrome-box's TELEA p. 2 one handwritten aside set beside a two-column sentence (奲みことんべ)
     cost the sentence its own grouping. Lines are ordered and compared exactly as
     `_line_continuity` does, and a cut goes where it would reject: lateral overlap under
     `_MIN_LATERAL_OVERLAP`, or a gap over `_MAX_LINE_GAP_MULTIPLIER` mean line widths.
@@ -538,7 +538,7 @@ def split_by_character_size(raw_quads: Sequence[Any], max_ratio: float) -> list[
     One text keeps one character size: over the 61 multi-piece texts of the 2026-08-09 hand labels
     the widest spread inside one is 1.8x (95th percentile 1.48x). Text outside balloons chains
     with misreads of the art, which come out far bigger: on chrome-box's sample218 p. 9 three
-    94-102 px columns of speech chained with お, 谷, ``(gftgs grgitgt`` and BOFE at 262-407 px.
+    94-102 px columns of speech chained with す, 俩, ``(gftgs grgitgt`` and BOFE at 262-407 px.
     Returns the size bands, smallest first, or ``None`` when there is no jump.
     """
     boxes = _boxes(raw_quads)
@@ -608,7 +608,7 @@ def split_off_squares(raw_quads: Sequence[Any]) -> list[list[int]] | None:
     """Peel the square pieces (a single glyph, a mark, a misread) off a group of lines (B4).
 
     A square piece has no direction, and its quad's angle reads 0 against a column's 90: on
-    ja/sample83 a square "M" made two upright columns 「くそ…むっちゃ痛いけど」 「我慢しなきゃ…」
+    ja/sample83 a square "M" made two upright columns 「みり…くっはゃ唰とんべ」 「傈傅ちこうゃ…」
     look incoherent, and the group fell apart into single pieces. Returns the lines, then each
     square on its own, or ``None`` when there is nothing to peel or nothing would be left.
     """

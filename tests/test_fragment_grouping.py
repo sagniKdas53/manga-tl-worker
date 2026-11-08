@@ -254,8 +254,8 @@ def test_gate_still_applies_to_boxes_that_only_clip_corners():
 # anywhere in the balloon is 102 px from the outline -- so no pair inside it can clear one
 # character (100 px). The gap between the columns measured 74 px.
 P17_COLUMNS = [
-    {"x": 817, "y": 129, "width": 100, "height": 493},  # 私を倒しなさい
-    {"x": 926, "y": 129, "width": 89, "height": 658},  # 秧秧と付き合いたいなら
+    {"x": 817, "y": 129, "width": 100, "height": 493},  # 妉た嗧ちこぺと
+    {"x": 926, "y": 129, "width": 89, "height": 658},  # 壣壣め亍う同とひとこさ
 ]
 P17_CONTEXT = GroupingContext(clearance=lambda p, q: 74.5, solidity=0.855)
 
@@ -280,12 +280,12 @@ def test_the_adjacent_line_exemption_still_vetoes_a_real_gap():
 def test_the_adjacent_line_exemption_still_vetoes_lines_that_only_clip_corners():
     """sample9, YOLO balloon 3: the gate's one correct veto on the hand-labelled pages.
 
-    って ends a column of the balloon above; it touches 何ニヤニヤ with no gap, but the two share
+    っぱ ends a column of the balloon above; it touches 叀ガヅガヅ with no gap, but the two share
     a tenth of their length, so they are not lines of one block.
     """
     clipping = [
-        {"x": 859, "y": 1167, "width": 66, "height": 100},  # って
-        {"x": 831, "y": 1257, "width": 39, "height": 157},  # 何ニヤニヤ
+        {"x": 859, "y": 1167, "width": 66, "height": 100},  # っぱ
+        {"x": 831, "y": 1257, "width": 39, "height": 157},  # 叀ガヅガヅ
     ]
     cfg = GroupingConfig(threshold_ratio=0.35, orientation="vote", waist_gate=1.0, waist_adjacent_line_gap=0.2)
     ctx = GroupingContext(clearance=lambda p, q: 31.0, solidity=0.805)
@@ -409,7 +409,7 @@ def _owner_decision_veto(regions, masks, recognition):
     return veto
 
 
-# chrome-box TELEA p. 2, balloon 1: two columns of one sentence and the handwritten aside 良くないけど.
+# chrome-box TELEA p. 2, balloon 1: two columns of one sentence and the handwritten aside 奲みことんべ.
 TELEA_ASIDE = [
     {"x": 2562, "y": 1347, "width": 124, "height": 1183},
     {"x": 2454, "y": 1347, "width": 104, "height": 767},

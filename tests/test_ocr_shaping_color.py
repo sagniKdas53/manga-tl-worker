@@ -98,7 +98,7 @@ def test_split_polygon_and_safe_area():
 
 
 def test_a_balloon_inside_its_own_text_is_rejected():
-    """R1, first failure. sample10's 待って: dark type with a white stroke around each glyph, on a
+    """R1, first failure. sample10's 丵っぱ: dark type with a white stroke around each glyph, on a
     yellow burst. YOLO scores the stroke as a bubble, and since it sits exactly on the glyphs it
     beats every real balloon on the page on overlap. A container cannot be contained by its
     contents. Over the corpus this flags 5 of 239 real contours and all five are correct.
@@ -208,7 +208,7 @@ def test_dominant_colour_names_the_colour_not_the_average():
 def test_a_container_with_no_mask_still_gets_a_synthesized_shape():
     """Inside a detected container the older rule holds: right colour, wrong shape was the bug.
 
-    The *border* of the text box can sample flat -- sample10's 待って sits on a burst, so the
+    The *border* of the text box can sample flat -- sample10's 丵っぱ sits on a burst, so the
     yellow comes back cleanly -- but a colour with no polygon left the renderer painting the
     element's own box, the sliver the glyphs occupy. No mask in means a synthesized shape out.
     """

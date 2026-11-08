@@ -2,10 +2,10 @@
 
 Geometry from the chrome-box captures of 2026-10-06 (worker 1889ac5), drawn on blank pages:
 
-- ja/sample25: one speaker's two-lobed balloon, 「そんなことしないよ…？」 beside 「だって今からサンドローネは…」.
+- ja/sample25: one speaker's two-lobed balloon, 「りせこづめちことふ…？」 beside 「にっぱ侐けさデムヒモーゼぜ…」.
   Two regions before; #231 wants one.
-- ja/sample24 b4: two bracket balloons YOLO fused into one blob, 「あなたが補習に来てる子？可愛すぎない！？」
-  and 「はじめましてお姉さんたちこんにちは～」: two speakers. By geometry it looks like sample25; only the
+- ja/sample24 b4: two bracket balloons YOLO fused into one blob, 「へこひゐ傛嘁ろ傦ぱわ凖？兊呃まきこと！？」
+  and 「ぜゑびいちぱす墈ぺせひはづせろはぜ～」: two speakers. By geometry it looks like sample25; only the
   bracket stroke drawn between them (4.3 characters long on the page) tells them apart.
 """
 

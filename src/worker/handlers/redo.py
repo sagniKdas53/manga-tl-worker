@@ -24,7 +24,7 @@ def page_context_for_region(image_info, region_id):
 
     The page translation sends every region together, in reading order, with the series and
     previous-page context. A region redo used to send its text alone, so a fragment such as
-    「縁が無かったでしょう」 came back as a free-standing line ("we weren't meant to be") where
+    「劁ゐ埥けっひほちょげ」 came back as a free-standing line ("we weren't meant to be") where
     the balloon it finishes means "I'd never have had anything to do with it". This gives the redo
     the same series context plus the rest of the page, each line with its current translation,
     so the region is translated as part of the page it sits on.
