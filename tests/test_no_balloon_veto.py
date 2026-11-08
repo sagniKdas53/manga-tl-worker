@@ -242,6 +242,11 @@ TEST_P5_ONE_SPEAKER_LONG = [
     (912, 463, 37, 186),  # 今日はこれ着て
     (885, 465, 31, 356),  # ドスケベダンス踊ってくれよw
 ]
+# test p13, OCR capture of 2026-11-08: a long column, and a short one starting 234 px lower.
+TEST_P13_TWO_SPEAKERS = [
+    (1847, 41, 63, 576),
+    (1763, 275, 88, 205),
+]
 
 
 def _column_quads(boxes):
@@ -321,6 +326,20 @@ def test_the_rule_can_be_switched_off():
 def test_a_group_it_cut_says_so_on_its_pieces():
     _, fragments = _column_groups(TEST_P16_TWO_SPEAKERS)
     assert all(fragment["ownershipProvenance"]["splitBy"] == "column-step" for fragment in fragments)
+
+
+def test_two_pieces_it_cut_apart_say_so_too():
+    # A two-piece group is never offered to owner_split (only one way to cut it), so the veto has to
+    # mark it. Live, test p13's pair was cut with no marker anywhere (2026-11-08 sample run).
+    groups, fragments = _column_groups(TEST_P13_TWO_SPEAKERS)
+    assert groups == [[0], [1]]
+    assert all(fragment["ownershipProvenance"]["splitBy"] == "column-step" for fragment in fragments)
+
+
+def test_two_pieces_kept_together_have_no_marker():
+    # Two columns of one speaker, tops level.
+    _, fragments = _column_groups([(500, 100, 40, 300), (450, 100, 40, 300)])
+    assert not any("splitBy" in fragment["ownershipProvenance"] for fragment in fragments)
 
 
 def test_a_group_it_did_not_cut_has_no_marker():

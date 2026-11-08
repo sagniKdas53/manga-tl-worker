@@ -330,6 +330,12 @@ def no_balloon_grouping_context(
             for index in component
         ]
 
+    def mark_column_step(component, regions):
+        for index in component:
+            provenance = regions[index].get("ownershipProvenance")
+            if isinstance(provenance, dict):
+                regions[index]["ownershipProvenance"] = provenance | {"splitBy": "column-step"}
+
     def owner_veto(component, regions):
         candidate_groups = [component] + [[index] for index in range(len(regions)) if index not in component]
         decision = attach_live_owner_decisions(
@@ -345,6 +351,10 @@ def no_balloon_grouping_context(
         if has_rotated_lines(quads(component, regions)):
             return None
         if column_step > 0 and split_at_column_steps(quads(component, regions), column_step) is not None:
+            if len(component) == 2:
+                # Grouping cuts a vetoed pair straight to singletons without asking owner_split, so
+                # the pair is marked here or not at all (test p13, 2026-11-08).
+                mark_column_step(component, regions)
             return "column-step"
         if decision["state"] != "assigned" and decision["reason"] not in _NO_BALLOON_LAYOUT_REASONS:
             return decision["reason"]
@@ -355,10 +365,7 @@ def no_balloon_grouping_context(
             return None
         parts = split_at_column_steps(component_quads, column_step)
         if parts is not None:
-            for index in component:
-                provenance = regions[index].get("ownershipProvenance")
-                if isinstance(provenance, dict):
-                    regions[index]["ownershipProvenance"] = provenance | {"splitBy": "column-step"}
+            mark_column_step(component, regions)
         return parts
 
     def owner_split(component, regions):
