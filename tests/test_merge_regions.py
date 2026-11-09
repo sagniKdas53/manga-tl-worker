@@ -93,16 +93,16 @@ def _piece(text, x, y, width, height):
 
 # Tests ch. 4 p. 63: a three-line horizontal caption whose lines all start at about the same x.
 _CAPTION = [
-    _piece("づづいほ佨亢ちぱみわえぜ哫ゐ", 552, 564, 455, 39),
-    _piece("卬だひんべ，哿伵垍坥勽え哙唸", 546, 605, 440, 41),
-    _piece("ぜマユエゐぐさげふ,ケムケ.", 550, 652, 410, 33),
+    _piece("うえおか木金きくけこさし土す", 552, 564, 455, 39),
+    _piece("川ぬねのは，三人口目手む足一", 546, 605, 440, 41),
+    _piece("れラリルろわをあい,カキク.", 550, 652, 410, 33),
 ]
-# Tests ch. 4 p. 54: four columns, the last broken by OCR into 哙ネヱ above a narrower ほえ.
+# Tests ch. 4 p. 54: four columns, the last broken by OCR into 小イウ above a narrower きく.
 _BROKEN_COLUMNS = [
-    _piece("哙ネヱ", 111, 548, 39, 97),
-    _piece("唱墪他厱は", 137, 547, 47, 157),
-    _piece("ほえ", 112, 628, 37, 73),
-    _piece("呼乧え問喁刷ぜ", 169, 548, 45, 208),
+    _piece("小イウ", 111, 548, 39, 97),
+    _piece("土本人口ま", 137, 547, 47, 157),
+    _piece("きく", 112, 628, 37, 73),
+    _piece("目手ろ足一二わ", 169, 548, 45, 208),
 ]
 
 
@@ -114,38 +114,38 @@ def _one_group(regions, **config):
 
 def test_legacy_order_reads_a_horizontal_caption_by_x():
     """The shipped order sorts by -x first, so left-aligned lines come out by their start offset."""
-    assert _one_group(_CAPTION) == "づづいほ佨亢ちぱみわえぜ哫ゐぜマユエゐぐさげふ,ケムケ.卬だひんべ，哿伵垍坥勽え哙唸"
+    assert _one_group(_CAPTION) == "うえおか木金きくけこさし土すれラリルろわをあい,カキク.川ぬねのは，三人口目手む足一"
 
 
 def test_line_order_reads_horizontal_lines_top_to_bottom():
     assert _one_group(_CAPTION, line_reading_order=True) == (
-        "づづいほ佨亢ちぱみわえぜ哫ゐ卬だひんべ，哿伵垍坥勽え哙唸ぜマユエゐぐさげふ,ケムケ."
+        "うえおか木金きくけこさし土す川ぬねのは，三人口目手む足一れラリルろわをあい,カキク."
     )
 
 
 def test_line_order_reads_a_broken_column_top_to_bottom():
-    """ほえ is narrower than 哙ネヱ above it, so sorting by -x put it first."""
-    assert _one_group(_BROKEN_COLUMNS) == "呼乧え問喁刷ぜ唱墪他厱はほえ哙ネヱ"
-    assert _one_group(_BROKEN_COLUMNS, line_reading_order=True) == "呼乧え問喁刷ぜ唱墪他厱は哙ネヱほえ"
+    """きく is narrower than 小イウ above it, so sorting by -x put it first."""
+    assert _one_group(_BROKEN_COLUMNS) == "目手ろ足一二わ土本人口まきく小イウ"
+    assert _one_group(_BROKEN_COLUMNS, line_reading_order=True) == "目手ろ足一二わ土本人口ま小イウきく"
 
 
 def test_line_order_keeps_overlapping_wide_columns_apart():
     """Tests ch. 4 p. 64: OCR boxes wider than the column pitch overlap their neighbours by half.
 
-    Overlap alone put ソリえ全げ and 墀あろまだか on one line; their centres are 90 px apart.
+    Overlap alone put テトこ万さ and 山まみむめも on one line; their centres are 90 px apart.
     """
     columns = [
-        _piece("哿丌吇にふせ", 1209, 1398, 155, 456),
-        _piece("墀あろまだか", 1288, 1405, 159, 456),
-        _piece("ソリえ全げ", 1367, 1409, 181, 403),
+        _piece("三大小ふへほ", 1209, 1398, 155, 456),
+        _piece("山まみむめも", 1288, 1405, 159, 456),
+        _piece("テトこ万さ", 1367, 1409, 181, 403),
     ]
-    assert _one_group(columns, line_reading_order=True) == "ソリえ全げ墀あろまだか哿丌吇にふせ"
+    assert _one_group(columns, line_reading_order=True) == "テトこ万さ山まみむめも三大小ふへほ"
 
 
 def test_line_order_reads_a_tilted_sign_line_by_line():
     """Tests ch. 5 p. 19 (AUDIT-R23's sign, tilted 25°): two lines overlap in y but sit apart."""
-    sign = [_piece("イュマッポ", 487, 106, 250, 173), _piece("噄协凔圀", 446, 153, 296, 223)]
-    assert _one_group(sign, line_reading_order=True) == "イュマッポ噄协凔圀"
+    sign = [_piece("タュチッツ", 487, 106, 250, 173), _piece("足一二三", 446, 153, 296, 223)]
+    assert _one_group(sign, line_reading_order=True) == "タュチッツ足一二三"
 
 
 def test_line_order_follows_a_column_that_drifts_a_little_per_piece():

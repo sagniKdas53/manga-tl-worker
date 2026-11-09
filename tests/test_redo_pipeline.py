@@ -211,7 +211,7 @@ def test_region_redo_ocr_reports_what_it_spent(mock_post, mock_get, mock_perform
     # Stand in for the cloud call perform_redo_ocr makes: it records against the job's cost list.
     def redo_ocr(*_args, **_kwargs):
         record_llm_call("qwen/qwen3-vl-32b-instruct", 800, 20, provider="openrouter", authoritative_cost=0.00011)
-        return ("へせころ哿うけっひん…", 1.0)
+        return ("となにぬ三ひふっへほ…", 1.0)
 
     mock_perform_ocr.side_effect = redo_ocr
 
@@ -248,7 +248,7 @@ def test_region_redo_translation_still_reports_its_cost(mock_post, mock_get, moc
     mock_get_res.json.return_value = {
         "id": "image-uuid-1",
         "storagePath": "originals/page1.png",
-        "ocrRegions": [{"id": "region-uuid-1", "text": "へせころ", "detectedLanguage": "ja"}],
+        "ocrRegions": [{"id": "region-uuid-1", "text": "となにぬ", "detectedLanguage": "ja"}],
     }
     mock_get.return_value = mock_get_res
     mock_download.return_value = get_dummy_image_bytes()
@@ -281,11 +281,11 @@ def test_region_redo_translation_reads_its_page():
     image_info = {
         "seriesMetadata": {"title": "Tests", "originalLanguage": "ja"},
         "ocrRegions": [
-            {"id": "b", "text": "劁ゐ埥けっひほちょげ", "bubbleReadingOrder": 6},
-            {"id": "a", "text": "ネヱシベノこせぱ", "bubbleReadingOrder": 3, "translatedText": "Bridal stuff"},
-            {"id": "sfx", "text": "ザエャ", "bubbleReadingOrder": 2, "qaStatus": "reject_sfx"},
+            {"id": "b", "text": "右の中はっひたちょね", "bubbleReadingOrder": 6},
+            {"id": "a", "text": "イウヘホマくけこ", "bubbleReadingOrder": 3, "translatedText": "Bridal stuff"},
+            {"id": "sfx", "text": "ケコャ", "bubbleReadingOrder": 2, "qaStatus": "reject_sfx"},
             {"id": "blank", "text": "  ", "bubbleReadingOrder": 1},
-            {"id": "c", "text": "从凔めぜとむ", "bubbleReadingOrder": 1},
+            {"id": "c", "text": "十百さしすせ", "bubbleReadingOrder": 1},
         ],
     }
     context = page_context_for_region(image_info, "b")
@@ -293,9 +293,9 @@ def test_region_redo_translation_reads_its_page():
     assert "Series Title: Tests" in context
     page = context.split("Other text on this page", 1)[1]
     # Reading order, current translations alongside, the region itself and settled SFX left out.
-    assert page.index("从凔めぜとむ") < page.index("ネヱシベノこせぱ → Bridal stuff")
-    assert "劁ゐ埥けっひ" not in page
-    assert "ザエャ" not in page
+    assert page.index("十百さしすせ") < page.index("イウヘホマくけこ → Bridal stuff")
+    assert "右の中はっひ" not in page
+    assert "ケコャ" not in page
     assert page_context_for_region({"ocrRegions": [{"id": "b", "text": "x"}]}, "b") is None
 
 
@@ -306,12 +306,12 @@ def test_a_merged_block_shows_the_translator_its_pieces():
         "ocrRegions": [
             {
                 "id": "m",
-                "text": "ネヱシベノこせぱマシヒノた",
-                "ownershipProvenance": {"mergedTexts": ["ネヱ", "シベノこせぱ", "マシ", "ヒノた"]},
+                "text": "イウヘホマくけこエオスセい",
+                "ownershipProvenance": {"mergedTexts": ["イウ", "ヘホマくけこ", "エオ", "スセい"]},
             }
         ]
     }
     context = page_context_for_region(image_info, "m")
     assert context is not None
-    assert "| ネヱ | シベノこせぱ | マシ | ヒノた |" in context
+    assert "| イウ | ヘホマくけこ | エオ | スセい |" in context
     assert "order that makes sense" in context

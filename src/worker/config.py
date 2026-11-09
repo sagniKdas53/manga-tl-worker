@@ -424,7 +424,7 @@ CLEANUP_HALO_GROW = os.environ.get("CLEANUP_HALO_GROW", "true").lower() in ("1",
 # Fragments are assigned to whichever YOLO mask they overlap most, and "most" was the only test --
 # any overlap at all won, and the winner's geometry was then accepted as the region's balloon. YOLO
 # is a single-class segmenter and fires on the white *stroke* drawn around unenclosed lettering,
-# which is a text-shaped blob sitting exactly on the text. sample10's 丵っぱ is the case: the
+# which is a text-shaped blob sitting exactly on the text. sample10's 千っか is the case: the
 # accepted "balloon" was 0.60x the area of its own text, so a white glyph-shaped slab was painted
 # onto a yellow burst and "WAIT!" was set in the sliver left over.
 #
@@ -441,7 +441,7 @@ CLEANUP_HALO_GROW = os.environ.get("CLEANUP_HALO_GROW", "true").lower() in ("1",
 # - **a stroke mistaken for a balloon.** YOLO fires on the white outline drawn around unenclosed
 #   lettering, which is a text-shaped blob sitting exactly on the text, so the "balloon" ends up
 #   entirely *inside* its own text box. A container cannot be contained by its contents. Over the
-#   corpus this flags 5 of 239 real contours at 0.95 and every one is correct: sample10's 丵っぱ and
+#   corpus this flags 5 of 239 real contours at 0.95 and every one is correct: sample10's 千っか and
 #   its dark-panel twin, page 19's `WAARU (CLANG)` and `IMAJI (MENTAL IMAGE)`, and page 20's
 #   vertical column on bare white panel. The next value down is 0.936 and is genuine dialogue.
 # - **a balloon assigned to text it barely touches.** Assignment is by greatest overlap with no
@@ -532,7 +532,7 @@ OCR_ORIENTATION = os.environ.get("OCR_ORIENTATION", "vote").strip().lower()
 OCR_COMPONENT_MAX_AREA_FRACTION = float(os.environ.get("OCR_COMPONENT_MAX_AREA_FRACTION", "0.25"))
 
 # AUDIT-R21: join the pieces OCR broke one line into before the owner veto's continuity test.
-# When a column is read as ネヱ | シベノこせぱ, the top piece's neighbour is the next column, the
+# When a column is read as イウ | ヘホマくけこ, the top piece's neighbour is the next column, the
 # lateral-overlap check fails, and the whole balloon is split into one region per piece (4Oct
 # ch. 1 p. 3: seven regions for one sentence). On by default since 2026-10-05; "false" restores
 # the old veto. Over the 2026-08-09 hand labels it changes nothing; every balloon it changed on
@@ -547,7 +547,7 @@ OCR_TEXT_ANGLE = os.environ.get("OCR_TEXT_ANGLE", "true").strip().lower() in ("1
 
 # AUDIT-R21: when the owner veto rejects a balloon's group, cut it where its lines break and keep
 # the runs on either side (each must pass the veto again) instead of splitting it into single
-# pieces. chrome-box TELEA p. 2: an aside set lower beside a two-column sentence (奲みことんべ)
+# pieces. chrome-box TELEA p. 2: an aside set lower beside a two-column sentence (川やうえゆよ)
 # split the sentence too. "false" restores single pieces.
 OCR_SPLIT_VETOED_AT_BREAKS = os.environ.get("OCR_SPLIT_VETOED_AT_BREAKS", "true").strip().lower() in (
     "1",
@@ -558,7 +558,7 @@ OCR_SPLIT_VETOED_AT_BREAKS = os.environ.get("OCR_SPLIT_VETOED_AT_BREAKS", "true"
 # Order a joined region's text line by line instead of by -x then y: columns right to left,
 # horizontal lines top to bottom. The old sort scrambled horizontal groups (Tests ch. 4 p. 63's
 # three-line caption read 1, 3, 2; 4Oct p. 3's watermark) and a broken column whose lower piece is
-# narrower (哙ネヱ | ほえ read "ほえ哙ネヱ"). "false" restores the old order.
+# narrower (小イウ | きく read "きく小イウ"). "false" restores the old order.
 OCR_LINE_READING_ORDER = os.environ.get("OCR_LINE_READING_ORDER", "true").strip().lower() in ("1", "true", "yes")
 
 # AUDIT-R21: two lines side by side (sharing half their length) closer than this many characters
@@ -571,7 +571,7 @@ OCR_WAIST_ADJACENT_LINE_GAP = float(os.environ.get("OCR_WAIST_ADJACENT_LINE_GAP"
 
 # B3: the owner veto accepts a balloon's lines when they form one connected chain, even if a pair of
 # neighbours across the reading direction does not overlap. A balloon set as two paragraphs, one
-# higher than the other (ja/sample78 「はょっめ侏凖ぃ」 over 「とい坡俲ぺせ兵っひほちょ？」), was vetoed
+# higher than the other (ja/sample78 「とょっな下左ぃ」 over 「ぬね十百うえ百っおたちょ？」), was vetoed
 # into three regions. Measured 2026-10-06: of the 22 corpus test pages only that balloon changes;
 # the guard pages (fused balloons 174, 218, 3, 30, 24) and the 2026-08-09 hand labels (4,097
 # pairs, 0 false merges) do not. "false" restores the neighbour-by-neighbour check.

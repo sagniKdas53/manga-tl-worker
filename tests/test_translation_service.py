@@ -72,12 +72,12 @@ def test_sound_effects_are_left_as_the_artist_drew_them():
     means painting a slab on the artwork to do it."""
     from worker.services.translation import should_typeset_region
 
-    assert not should_typeset_region({"text": "ダルィ", "regionType": "sfx", "confidence": 0.9})
-    assert should_typeset_region({"text": "ぐげ刀ろ升ちぱ！", "regionType": "speech", "confidence": 0.9})
+    assert not should_typeset_region({"text": "サシィ", "regionType": "sfx", "confidence": 0.9})
+    assert should_typeset_region({"text": "うえ田お日かき！", "regionType": "speech", "confidence": 0.9})
 
 
 def test_unenclosed_low_confidence_text_is_not_typeset():
-    """sample10's `cu3gichi` -- a misread of the artwork's ダルィ -- became the sentence "Deadline
+    """sample10's `cu3gichi` -- a misread of the artwork's サシィ -- became the sentence "Deadline
     countdown activated!", which appears nowhere in the manga, and we painted a lavender box on a
     desk to hold it. No balloon plus a recogniser that could not read it is the signature."""
     from worker.services.translation import should_typeset_region
@@ -92,8 +92,8 @@ def test_unenclosed_non_source_script_marks_are_not_typeset():
     from worker.services.translation import should_typeset_region
 
     assert not should_typeset_region({"text": "0", "bubbleId": "direct_text_1", "confidence": 0.95})
-    assert not should_typeset_region({"text": "哿GG", "bubbleId": "direct_text_2", "confidence": 0.65})
-    assert should_typeset_region({"text": "ぐげ刀ろ升ちぱ！", "bubbleId": "direct_text_3", "confidence": 0.95})
+    assert not should_typeset_region({"text": "三GG", "bubbleId": "direct_text_2", "confidence": 0.65})
+    assert should_typeset_region({"text": "うえ田お日かき！", "bubbleId": "direct_text_3", "confidence": 0.95})
     # Ordinary line endings are source script too.
     for line in ["ねえ～", "はぁ…♡", "ふふ♪", "まって〜", "あの―", "ええ...", "やだ~"]:
         assert should_typeset_region({"text": line, "bubbleId": "direct_text_4", "confidence": 0.95}), line
@@ -109,10 +109,10 @@ def test_both_halves_are_required_before_dropping_a_region():
     from worker.services.translation import should_typeset_region
 
     assert should_typeset_region(
-        {"text": "ぐげ刀ろ升ちぱ！", "bubbleId": "direct_text_1", "confidence": 0.95},
+        {"text": "うえ田お日かき！", "bubbleId": "direct_text_1", "confidence": 0.95},
     ), "unenclosed but read cleanly: this is dialogue"
     assert should_typeset_region(
-        {"text": "むむ。ほまけさ", "bubbleId": "bubble_2", "confidence": 0.20},
+        {"text": "さし。のはひふ", "bubbleId": "bubble_2", "confidence": 0.20},
     ), "poorly read but inside a balloon: still a line somebody said"
 
 

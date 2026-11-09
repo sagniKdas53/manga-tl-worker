@@ -57,10 +57,11 @@ which sees this repo only as a pointer and reports `changed_count: 0` for any ch
 
 This repo is public, and the test pages are copyrighted (some adult). Never copy a page's words into
 code, tests, comments or commit messages, not even as a note next to coordinates. Tests need positions,
-lengths and scripts, not words: use made-up text (`こんにちは`, `あ` × n) or a stand-in of the same length
-and script. Japanese on lines that cite a page (`sampleNN`, `test p5`, `ch. 4 p. 54`, …) is such a
-stand-in since 2026-11-08: the characters were replaced one-for-one, so splits and joins still agree, and
-only the geometry is real.
+lengths and scripts, not words: use made-up text (`こんにちは`, `あ` × n) or plain filler of the same
+length and script. Japanese on lines that cite a page (`sampleNN`, `test p5`, `ch. 4 p. 54`, …) is such
+filler since 2026-11-10: sequential kana and simple kanji (`あいうえお…`, `一二三…`), so splits and joins
+still agree, and only the geometry is real. Never swap characters one-for-one with a fixed table: the
+repeats survive and the text can be decoded.
 
 ## Gates
 

@@ -5,9 +5,9 @@ neighbouring pair to overlap along the line. A balloon set as two short paragrap
 than the other, has neighbours that do not overlap even though every line overlaps the line beside
 it. Corpus pages, chrome-box captures of 2026-10-06 (worker dacd7e8):
 
-- ja/sample78: 「はょっめ侏凖ぃ」 over 「とい坡俲ぺせ兵っひほちょ？」 -- one balloon, three regions.
+- ja/sample78: 「とょっな下左ぃ」 over 「ぬね十百うえ百っおたちょ？」 -- one balloon, three regions.
 - ja/sample24: one YOLO container holding two bracket balloons: three columns above, then the reply
-  「劣伧とゑゃこと？」 below. The upper three columns are one text; the reply is another.
+  「小山なにゃうえ？」 below. The upper three columns are one text; the reply is another.
 
 With ``staggered_lines`` the lines are continuous when they form one connected chain: two lines are
 linked when they overlap along the line and sit less than half a line apart across it.
@@ -50,21 +50,21 @@ def _decide(boxes, *, staggered_lines):
 
 
 SAMPLE78 = [
-    (1114, 79, 48, 115),  # 侏凖ぃ
-    (1152, 73, 50, 292),  # はょっめとい坡俲 (OCR read two columns' worth as one)
-    (1095, 229, 39, 134),  # ほちょ？
-    (1125, 225, 44, 168),  # ぺせ兵っひ
+    (1114, 79, 48, 115),  # 下左ぃ
+    (1152, 73, 50, 292),  # さょっしすせ左右 (OCR read two columns' worth as one)
+    (1095, 229, 39, 134),  # たちょ？
+    (1125, 225, 44, 168),  # うえ百っお
 ]
 SAMPLE24_UPPER = [
-    (26, 2188, 58, 397),  # 嘁こせぱ匢嗻こえ？
-    (78, 2185, 65, 473),  # 吳堫こ吆乥ゑゃこと？傛
-    (134, 2188, 61, 456),  # ぼむづえ凖、吋え偫勫ほ
+    (26, 2188, 58, 397),  # 二めもや三四ゆよ？
+    (78, 2185, 65, 473),  # 千万と上下なゃうえ？二
+    (134, 2188, 61, 456),  # かきくけ千、水へ木金ほ
 ]
 SAMPLE24_REPLY = [
-    (0, 2667, 40, 135),  # こと？
-    (32, 2661, 61, 222),  # 劣伧とゑゃ
+    (0, 2667, 40, 135),  # うえ？
+    (32, 2661, 61, 222),  # 小山なにゃ
 ]
-# chrome-box TELEA p. 2, balloon 1 (tests/test_owner_assignment.py): the aside 奲みことんべ is set
+# chrome-box TELEA p. 2, balloon 1 (tests/test_owner_assignment.py): the aside 川やうえゆよ is set
 # lower beside the two columns and must stay its own text.
 TELEA_ASIDE = [(2562, 1347, 124, 1183), (2454, 1347, 104, 767), (2334, 1986, 148, 576)]
 
@@ -150,19 +150,19 @@ def test_the_owner_veto_and_split_receive_the_setting(monkeypatch, staggered_lin
     assert received == {"veto": staggered_lines, "split": staggered_lines}
 
 
-# 4Oct ch. 1 p. 3, the owner's hand merge (worker #53): 从凔めぜとむ, high in the same balloon, stays
-# apart from the seven-piece sentence ネヱシベノこせぱ…ほちょげ. Its overlap along the line with the
+# 4Oct ch. 1 p. 3, the owner's hand merge (worker #53): 十百さしすせ, high in the same balloon, stays
+# apart from the seven-piece sentence イウヘホマくけこ…たちょね. Its overlap along the line with the
 # top of the sentence's first columns is under a fifth, so the chain does not link it.
 FOURTH_OCT_P3_SENTENCE = [
-    (1628, 501, 118, 498),  # ほちょげ：
-    (1708, 487, 152, 633),  # 劁ゐ埥けっひ
-    (1811, 491, 142, 726),  # ちぱとこんだか
-    (1936, 508, 104, 207),  # マシ
-    (2026, 501, 114, 235),  # ネヱ
-    (1919, 677, 135, 332),  # ヒノた
-    (2002, 670, 162, 626),  # シベノこせぱ
+    (1628, 501, 118, 498),  # たちょね：
+    (1708, 487, 152, 633),  # 右の中はっひ
+    (1811, 491, 142, 726),  # くけこさしすせ
+    (1936, 508, 104, 207),  # エオ
+    (2026, 501, 114, 235),  # イウ
+    (1919, 677, 135, 332),  # スセい
+    (2002, 670, 162, 626),  # ヘホマくけこ
 ]
-FOURTH_OCT_P3_ASIDE = (2161, 110, 231, 436)  # 从凔めぜとむ (its region box on the dev stack)
+FOURTH_OCT_P3_ASIDE = (2161, 110, 231, 436)  # 十百さしすせ (its region box on the dev stack)
 
 
 def test_the_owners_hand_merge_on_4oct_p3_still_holds():
