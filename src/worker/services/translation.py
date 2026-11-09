@@ -223,7 +223,7 @@ def should_typeset_region(region):
 
     Two cases:
 
-    - **Sound effects.** The references leave お ぇぇ むむ and ダルィ untouched. We set English over
+    - **Sound effects.** The references leave お ぇぇ さし and サシィ untouched. We set English over
       them, which means painting a slab on the artwork to do it.
     - **Unenclosed text the recogniser could not read.** Both halves matter. Lettering outside a
       balloon read confidently is real dialogue -- sample10's yellow blanket -- and a poor score
@@ -245,7 +245,7 @@ def should_typeset_region(region):
     if not enclosed:
         # A direct region has no verified speech container, so only source-script dialogue can
         # justify painting a new plate over artwork. OCR digits, Latin fragments, and mixed-script
-        # guesses such as sample47's `哿GG` are visual marks, not English dialogue to typeset.
+        # guesses such as sample47's `三GG` are visual marks, not English dialogue to typeset.
         source_script = re.fullmatch(
             # With the marks that end ordinary lines (ねえ～, はぁ…♡), and the `.` and `~` OCR
             # often reads for … and ～.

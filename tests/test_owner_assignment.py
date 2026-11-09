@@ -163,16 +163,16 @@ def test_rejects_a_candidate_group_that_loses_or_duplicates_a_fragment():
 
 
 # AUDIT-R21, 4Oct ch. 1 p. 3 (the user's screenshot): seven OCR pieces of one balloon, as detected.
-# OCR broke two columns in two -- ネヱ | シベノこせぱ and マシ | ヒノた -- so sorted by x, each top
+# OCR broke two columns in two -- イウ | ヘホマくけこ and エオ | スセい -- so sorted by x, each top
 # piece's neighbour is the *next* column and the lateral-overlap check vetoes the whole balloon.
 _SPLIT_COLUMNS = [
-    ("ほちょげ：", 1628, 501, 118, 498),
-    ("劁ゐ埥けっひ", 1708, 487, 152, 633),
-    ("ちぱとこんだか", 1811, 491, 142, 726),
-    ("マシ", 1936, 508, 104, 207),
-    ("ネヱ", 2026, 501, 114, 235),
-    ("ヒノた", 1919, 677, 135, 332),
-    ("シベノこせぱ", 2002, 670, 162, 626),
+    ("たちょね：", 1628, 501, 118, 498),
+    ("右の中はっひ", 1708, 487, 152, 633),
+    ("くけこさしすせ", 1811, 491, 142, 726),
+    ("エオ", 1936, 508, 104, 207),
+    ("イウ", 2026, 501, 114, 235),
+    ("スセい", 1919, 677, 135, 332),
+    ("ヘホマくけこ", 2002, 670, 162, 626),
 ]
 _SPLIT_COLUMNS_BALLOON = {
     "id": "bubble-2",
@@ -225,19 +225,19 @@ def test_side_by_side_columns_are_not_joined_into_one_line():
     assert decision.diagnostics["line_continuity"]["line_count"] == 3
 
 
-# chrome-box TELEA chapter, p. 2 (the 奲みことんべ gate), as the live worker read it 2026-10-05.
+# chrome-box TELEA chapter, p. 2 (the 川やうえゆよ gate), as the live worker read it 2026-10-05.
 # Balloon 1: two columns of one sentence, and a handwritten aside set lower beside them.
 _ASIDE_BALLOON = [
-    (2562, 1347, 124, 1183),  # リメ侣倊えす哙乐ジセッヨぜ
-    (2454, 1347, 104, 767),  # いにととめちぱ：
-    (2334, 1986, 148, 576),  # 奲みことんべ
+    (2562, 1347, 124, 1183),  # ラリ日月ああ火水ルレッロい
+    (2454, 1347, 104, 767),  # るれろわをあい：
+    (2334, 1986, 148, 576),  # 川やうえゆよ
 ]
 # Balloon 4: two two-column blocks, the second set lower and to the left of the first.
 _STEPPED_BALLOON = [
-    (763, 1826, 104, 812),  # ナッザー哼えブガーゐ
-    (659, 1830, 96, 700),  # 份うこせにんべぺ
-    (523, 2386, 104, 1311),  # へだ半っけけっひさ唰りげにけさ
-    (415, 2382, 96, 1183),  # ソユムほ哙債あちぱやひぎツ
+    (763, 1826, 104, 812),  # ウッエー中まオカーみ
+    (659, 1830, 96, 700),  # 小ぬねのはひふへ
+    (523, 2386, 104, 1311),  # せそ本ったちっつて人となにぬね
+    (415, 2382, 96, 1183),  # フヘホや山川ゆよらりるれマ
 ]
 
 
@@ -277,13 +277,13 @@ def test_mixed_orientation_gives_no_split_points():
 def test_columns_of_two_stacked_balloons_are_not_joined_as_one_broken_column():
     """Tests ch. 6 p. 5: three echo balloons fused by YOLO, stacked top to bottom.
 
-    The middle balloon's 凶がさしわ ends 2 px into the bottom balloon's 垻囒ほ and they share most
+    The middle balloon's 大ちつてと ends 2 px into the bottom balloon's 日月て and they share most
     of their width, but a broken column's pieces sit on one centre line (4Oct p. 3: 0 and 1.5 px
     apart); these are 14 px apart, a fifth of the column.
     """
     stacked = [
-        _quad(92, 172, width=68, height=274),  # 凶がさしわ (middle balloon)
-        _quad(96, 444, width=88, height=214),  # 垻囒ほ (bottom balloon)
+        _quad(92, 172, width=68, height=274),  # 大ちつてと (middle balloon)
+        _quad(96, 444, width=88, height=214),  # 日月て (bottom balloon)
     ]
 
     assert _join_line_pieces([_box(quad) for quad in stacked], horizontal=False) == [
