@@ -1,7 +1,7 @@
 # AUDIT-D2: pinned by digest, not just by tag — python:3.13-slim is republished on every
 # patch release, so an untagged rebuild silently changed the interpreter and the base
 # userland underneath a 1.9 GB image. Bump this deliberately.
-FROM python:3.13-slim@sha256:99569264a52f7665899b7bc0fb48e72a2712b850b129f63c4733af1e939accfb
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 
 # Install system libraries needed by opencv / easyocr
 RUN apt-get update && apt-get install -y --no-install-recommends \
