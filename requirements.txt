@@ -2,7 +2,7 @@
 # rebuild silently picked up whatever was current on PyPI that day, major versions included.
 # The versions here are the ones the running worker was already on when they were taken, so
 # adopting them is behaviourally a no-op.
-redis==8.1.0
+redis==8.2.0
 minio==7.2.20
 # PaddlePaddle has no Linux ARM64 wheel. RapidOCR converts the same PP-OCR model
 # family to ONNX and uses the already-pinned cross-platform ONNX Runtime package.
